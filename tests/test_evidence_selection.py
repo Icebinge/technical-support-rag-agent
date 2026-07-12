@@ -1,6 +1,8 @@
 from ts_rag_agent.application.evidence_selection import (
+    AnswerAwareBM25SentenceEvidenceSelector,
     BM25SentenceEvidenceSelector,
     OverlapSentenceEvidenceSelector,
+    create_sentence_evidence_selector,
 )
 from ts_rag_agent.domain.dataset import PrimeQADocument, PrimeQAQuestion
 from ts_rag_agent.domain.retrieval import RetrievalResult
@@ -104,3 +106,47 @@ def test_bm25_sentence_selector_caps_candidates_per_document():
 
     doc_ids = [candidate.retrieval_result.document.id for candidate in candidates[:2]]
     assert doc_ids == ["doc-a", "doc-b"]
+
+
+def test_answer_aware_selector_promotes_resolution_over_symptom():
+    question = PrimeQAQuestion(
+        id="q1",
+        title="Unable to open profile on Redhat Linux",
+        text="Getting GPF and javacore dump.",
+        answer="Install the missing adwaita libraries.",
+        answerable=True,
+        answer_doc_id="gold",
+        doc_ids=["gold"],
+    )
+    document = PrimeQADocument(
+        id="gold",
+        title="Profile fails to open",
+        text=(
+            "PROBLEM(ABSTRACT) Unable to open profile on Redhat Linux with GPF and "
+            "javacore dump. RESOLVING THE PROBLEM Install the missing adwaita "
+            "libraries."
+        ),
+    )
+    retrieval_results = [RetrievalResult(document=document, score=10.0, rank=1)]
+
+    bm25_candidates = BM25SentenceEvidenceSelector(
+        min_sentence_chars=8,
+        max_candidates_per_document=2,
+    ).rank_sentence_candidates(question, retrieval_results)
+    answer_aware_candidates = AnswerAwareBM25SentenceEvidenceSelector(
+        min_sentence_chars=8,
+        max_candidates_per_document=2,
+    ).rank_sentence_candidates(question, retrieval_results)
+
+    assert "PROBLEM(ABSTRACT)" in bm25_candidates[0].sentence
+    assert "RESOLVING THE PROBLEM" in answer_aware_candidates[0].sentence
+
+
+def test_selector_factory_creates_answer_aware_selector():
+    selector = create_sentence_evidence_selector(
+        selector_name="answer-aware",
+        min_sentence_chars=8,
+        max_candidates_per_document=2,
+    )
+
+    assert selector.name == "answer_aware_bm25_sentence"

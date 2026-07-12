@@ -247,6 +247,71 @@ class BM25SentenceEvidenceSelector:
         return self._sentence_cache[document_id]
 
 
+class AnswerAwareBM25SentenceEvidenceSelector(BM25SentenceEvidenceSelector):
+    """BM25 selector with lightweight answer-section and noise structure signals."""
+
+    name = "answer_aware_bm25_sentence"
+
+    def _collect_sentence_rows(
+        self,
+        query_terms: set[str],
+        retrieval_results: Sequence[RetrievalResult],
+    ) -> list[_SentenceRow]:
+        rows = []
+        seen_sentences = set()
+
+        for retrieval_result in retrieval_results:
+            for sentence in self._get_document_sentences(
+                retrieval_result.document.id,
+                retrieval_result.document.text,
+            ):
+                normalized_sentence = normalize_sentence(sentence)
+                if len(normalized_sentence) < self._min_sentence_chars:
+                    continue
+                if normalized_sentence in seen_sentences:
+                    continue
+
+                terms = _content_terms(tokenize_text(normalized_sentence))
+                overlap_terms = tuple(sorted(query_terms & terms))
+                if not overlap_terms and not _has_answer_section_signal(normalized_sentence):
+                    continue
+
+                seen_sentences.add(normalized_sentence)
+                rows.append(
+                    _SentenceRow(
+                        sentence=normalized_sentence,
+                        retrieval_result=retrieval_result,
+                        terms=terms,
+                        overlap_terms=overlap_terms,
+                    )
+                )
+
+        return rows
+
+    def _score_sentence_row(
+        self,
+        row: _SentenceRow,
+        query_terms: set[str],
+        idf_by_term: dict[str, float],
+        avg_sentence_length: float,
+    ) -> SentenceEvidenceCandidate:
+        candidate = super()._score_sentence_row(
+            row=row,
+            query_terms=query_terms,
+            idf_by_term=idf_by_term,
+            avg_sentence_length=avg_sentence_length,
+        )
+        adjusted_score = candidate.score + _answer_section_bonus(row.sentence)
+        adjusted_score *= _answer_section_multiplier(row.sentence)
+        adjusted_score *= _problem_statement_penalty(row.sentence)
+        return SentenceEvidenceCandidate(
+            sentence=candidate.sentence,
+            retrieval_result=candidate.retrieval_result,
+            score=adjusted_score,
+            overlap_terms=candidate.overlap_terms,
+        )
+
+
 def create_sentence_evidence_selector(
     selector_name: str,
     min_sentence_chars: int = 24,
@@ -262,9 +327,19 @@ def create_sentence_evidence_selector(
             min_sentence_chars=min_sentence_chars,
             max_candidates_per_document=max_candidates_per_document,
         )
+    if normalized_name in {
+        "answer_aware",
+        "answer_aware_bm25",
+        "answer_aware_bm25_sentence",
+    }:
+        return AnswerAwareBM25SentenceEvidenceSelector(
+            min_sentence_chars=min_sentence_chars,
+            max_candidates_per_document=max_candidates_per_document,
+        )
 
     raise ValueError(
-        "selector_name must be one of: overlap, overlap_sentence, bm25, bm25_sentence"
+        "selector_name must be one of: overlap, overlap_sentence, bm25, "
+        "bm25_sentence, answer_aware, answer_aware_bm25_sentence"
     )
 
 
@@ -417,3 +492,52 @@ def _symbol_ratio(sentence: str) -> float:
         return 0.0
     symbol_count = sum(1 for char in sentence if not char.isalnum() and not char.isspace())
     return symbol_count / len(sentence)
+
+
+def _answer_section_multiplier(sentence: str) -> float:
+    normalized = sentence.lower()
+    multiplier = 1.0
+    if re.search(r"\b(resolving the problem|resolution|solution|answer)\b", normalized):
+        multiplier *= 2.5
+    if re.search(r"\b(workaround|fix|corrective action|local fix)\b", normalized):
+        multiplier *= 1.6
+    if re.search(r"\b(cause|caused by|root cause)\b", normalized):
+        multiplier *= 1.3
+    if re.search(r"\b(install|upgrade|configure|set|enable|disable|use|apply)\b", normalized):
+        multiplier *= 1.1
+    return multiplier
+
+
+def _answer_section_bonus(sentence: str) -> float:
+    normalized = sentence.lower()
+    if re.search(r"\b(resolving the problem|resolution|solution|answer)\b", normalized):
+        return 25.0
+    if re.search(r"\b(workaround|fix|corrective action|local fix)\b", normalized):
+        return 12.0
+    if re.search(r"\b(cause|caused by|root cause)\b", normalized):
+        return 10.0
+    return 0.0
+
+
+def _has_answer_section_signal(sentence: str) -> bool:
+    return _answer_section_bonus(sentence) > 0
+
+
+def _problem_statement_penalty(sentence: str) -> float:
+    normalized = sentence.lower()
+    penalty = 1.0
+    if "problem(abstract)" in normalized or re.search(
+        r"\b(problem summary|symptom|question|environment|error description)\b",
+        normalized,
+    ):
+        penalty *= 0.12
+    if re.search(r"\b(diagnosing the problem|collecting data|steps to reproduce)\b", normalized):
+        penalty *= 0.5
+    if re.search(
+        r"\b(trace|stack|dump|exception|javacore|heapdump|0section|1xhexc)\b",
+        normalized,
+    ):
+        penalty *= 0.25
+    if " null " in f" {normalized} ":
+        penalty *= 0.6
+    return penalty
