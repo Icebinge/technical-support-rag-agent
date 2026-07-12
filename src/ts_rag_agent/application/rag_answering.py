@@ -1,33 +1,27 @@
 from __future__ import annotations
 
-import math
-import re
 from collections.abc import Sequence
-from dataclasses import dataclass
 
+from ts_rag_agent.application.evidence_selection import (
+    OverlapSentenceEvidenceSelector,
+    SentenceEvidenceCandidate,
+    SentenceEvidenceSelector,
+    tokenize_text,
+)
 from ts_rag_agent.domain.answer import AnswerCitation, AnswerEvaluationMetrics, GeneratedAnswer
 from ts_rag_agent.domain.dataset import PrimeQAQuestion
 from ts_rag_agent.domain.retrieval import RetrievalResult
 
 
-@dataclass(frozen=True)
-class SentenceEvidenceCandidate:
-    """抽取式回答器识别出的候选证据句。"""
-
-    sentence: str
-    retrieval_result: RetrievalResult
-    score: float
-    overlap_terms: tuple[str, ...]
-
-
 class ExtractiveAnswerGenerator:
-    """从检索文档中抽取句子并生成带引用答案。"""
+    """Builds citation-bearing extractive answers from retrieved documents."""
 
     def __init__(
         self,
         max_sentences: int = 3,
         min_sentence_score: float = 2.0,
         min_sentence_chars: int = 24,
+        evidence_selector: SentenceEvidenceSelector | None = None,
     ) -> None:
         if max_sentences <= 0:
             raise ValueError("max_sentences must be positive")
@@ -39,26 +33,34 @@ class ExtractiveAnswerGenerator:
         self._max_sentences = max_sentences
         self._min_sentence_score = min_sentence_score
         self._min_sentence_chars = min_sentence_chars
-        self._sentence_cache: dict[str, list[str]] = {}
+        self._evidence_selector = evidence_selector or OverlapSentenceEvidenceSelector(
+            min_sentence_chars=min_sentence_chars
+        )
 
     @property
     def max_sentences(self) -> int:
-        """每个答案最多抽取的证据句数量。"""
+        """Maximum number of evidence sentences used in one answer."""
 
         return self._max_sentences
 
     @property
     def min_sentence_score(self) -> float:
-        """生成答案所需的最低证据句分数。"""
+        """Minimum candidate score required before an answer is generated."""
 
         return self._min_sentence_score
+
+    @property
+    def evidence_selector_name(self) -> str:
+        """Name of the sentence evidence selector used by this generator."""
+
+        return self._evidence_selector.name
 
     def generate(
         self,
         question: PrimeQAQuestion,
         retrieval_results: Sequence[RetrievalResult],
     ) -> GeneratedAnswer:
-        """基于检索结果生成一个抽取式答案。"""
+        """Generate one extractive answer from retrieved documents."""
 
         sentence_candidates = self.rank_sentence_candidates(question, retrieval_results)
         selected = [
@@ -100,61 +102,16 @@ class ExtractiveAnswerGenerator:
         question: PrimeQAQuestion,
         retrieval_results: Sequence[RetrievalResult],
     ) -> list[SentenceEvidenceCandidate]:
-        """返回按分数排序的候选证据句，用于生成答案和错误分析。"""
+        """Return ranked evidence candidates for analysis and answer generation."""
 
-        query_terms = set(_tokenize(question.full_question))
-        candidates = []
-        seen_sentences = set()
-
-        for retrieval_result in retrieval_results:
-            for sentence in self._get_document_sentences(
-                retrieval_result.document.id,
-                retrieval_result.document.text,
-            ):
-                normalized_sentence = " ".join(sentence.split())
-                if len(normalized_sentence) < self._min_sentence_chars:
-                    continue
-                if normalized_sentence in seen_sentences:
-                    continue
-
-                seen_sentences.add(normalized_sentence)
-                sentence_terms = set(_tokenize(normalized_sentence))
-                overlap_terms = tuple(sorted(query_terms & sentence_terms))
-                if not overlap_terms:
-                    continue
-
-                score = len(overlap_terms) / math.log2(retrieval_result.rank + 1)
-                candidates.append(
-                    SentenceEvidenceCandidate(
-                        sentence=normalized_sentence,
-                        retrieval_result=retrieval_result,
-                        score=score,
-                        overlap_terms=overlap_terms,
-                    )
-                )
-
-        return sorted(
-            candidates,
-            key=lambda candidate: (
-                -candidate.score,
-                candidate.retrieval_result.rank,
-                candidate.retrieval_result.document.id,
-            ),
-        )
-
-    def _get_document_sentences(self, document_id: str, text: str) -> list[str]:
-        """缓存文档切句结果，避免阈值扫描时重复处理同一篇文档。"""
-
-        if document_id not in self._sentence_cache:
-            self._sentence_cache[document_id] = _split_sentences(text)
-        return self._sentence_cache[document_id]
+        return self._evidence_selector.rank_sentence_candidates(question, retrieval_results)
 
 
 def evaluate_answers(
     questions: Sequence[PrimeQAQuestion],
     answers: Sequence[GeneratedAnswer],
 ) -> AnswerEvaluationMetrics:
-    """评估抽取式 RAG 答案的引用和拒答表现。"""
+    """Evaluate citation and refusal behavior for generated RAG answers."""
 
     answer_by_question_id = {answer.question_id: answer for answer in answers}
     answerable_questions = [question for question in questions if question.answerable]
@@ -205,17 +162,9 @@ def evaluate_answers(
     )
 
 
-def _split_sentences(text: str) -> list[str]:
-    return [
-        sentence.strip()
-        for sentence in re.split(r"(?<=[.!?])\s+|\n{2,}", text)
-        if sentence.strip()
-    ]
-
-
 def _token_f1(prediction: str, gold: str) -> float:
-    prediction_tokens = _tokenize(prediction)
-    gold_tokens = _tokenize(gold)
+    prediction_tokens = tokenize_text(prediction)
+    gold_tokens = tokenize_text(gold)
     if not prediction_tokens or not gold_tokens:
         return 0.0
 
@@ -238,7 +187,3 @@ def _count_tokens(tokens: list[str]) -> dict[str, int]:
     for token in tokens:
         counts[token] = counts.get(token, 0) + 1
     return counts
-
-
-def _tokenize(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9_+#]+(?:[.+#-][a-z0-9_+#]+)*", text.lower())

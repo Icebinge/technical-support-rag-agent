@@ -1729,3 +1729,159 @@ best_non_gold_candidate_score: 17.0
   2. 用 IDF 风格分数替代纯 overlap。
   3. 支持每个文档最多选择 N 句。
   4. 和当前 overlap selector 对比 `gold_cited`、`average_token_f1`、`unanswerable_refusal_rate`。
+
+## 2026-07-12 - Stage 9: BM25 Sentence Evidence Selector
+
+### Goal
+
+- 验证改进版 `BM25SentenceEvidenceSelector` 是否真的解决 Stage 8 发现的 evidence selection bottleneck。
+- 和旧的 `OverlapSentenceEvidenceSelector` 做同条件对比，而不是只看代码直觉。
+- 判断是否可以进入 Agent workflow，还是仍然需要继续修 RAG 证据质量闭环。
+
+### What I Studied
+
+- evidence selector 的改进不能只看 `gold_cited`，还必须同时看答案质量和拒答行为。
+- 句子级 BM25 / IDF 打分可以减少纯 overlap 对长日志、路径、dump、trace 文本的偏好。
+- 但是更容易引用 gold 文档，不等于抽取出的句子一定更像标准答案。
+- 不同 selector 的 evidence score 分布不同，同一个 `min_evidence_score=7.0` 不一定有相同含义。
+
+### What I Built Or Changed
+
+- 新增 evidence selection 抽象：
+  `src/ts_rag_agent/application/evidence_selection.py`
+- 将原来的 overlap 句子选择逻辑抽成：
+  `OverlapSentenceEvidenceSelector`
+- 新增：
+  `BM25SentenceEvidenceSelector`
+- 让 verified RAG 评估脚本支持 `--evidence-selector` 参数：
+  `scripts/evaluate_verified_rag.py`
+- 让 evidence selection 分析脚本支持 `--evidence-selector` 参数：
+  `scripts/analyze_evidence_selection.py`
+- 新增 evidence selector 单元测试：
+  `tests/test_evidence_selection.py`
+
+### Commands And Evidence
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+
+python scripts\evaluate_verified_rag.py `
+  --evidence-selector overlap `
+  --min-evidence-score 7.0 `
+  --output artifacts\verified_rag_dev_overlap_m7_report.json
+
+python scripts\analyze_evidence_selection.py `
+  --evidence-selector overlap `
+  --output artifacts\evidence_selection_analysis_dev_overlap.json
+
+python scripts\evaluate_verified_rag.py `
+  --evidence-selector bm25-sentence `
+  --min-evidence-score 7.0 `
+  --output artifacts\verified_rag_dev_bm25_sentence_m7_report.json
+
+python scripts\analyze_evidence_selection.py `
+  --evidence-selector bm25-sentence `
+  --output artifacts\evidence_selection_analysis_dev_bm25_sentence.json
+```
+
+验证命令结果：
+
+```text
+ruff: passed
+pytest: 28 passed
+```
+
+### Verified RAG Result
+
+固定条件：
+
+```text
+dataset: PrimeQA/TechQA dev
+retriever: BM25
+retrieval_top_k: 5
+min_sentence_score: 2.0
+min_evidence_score: 7.0
+max_citation_rank: 3
+```
+
+| Selector | verified gold_doc_citation_rate | verified average_token_f1 | answerable_refusal_rate | unanswerable_refusal_rate | newly_refused |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| overlap | 0.5276 | 0.2268 | 0.2062 | 0.1533 | 55 |
+| bm25-sentence | 0.6101 | 0.1887 | 0.0063 | 0.0067 | 1 |
+
+原始未验证回答阶段：
+
+| Selector | original gold_doc_citation_rate | original average_token_f1 |
+| --- | ---: | ---: |
+| overlap | 0.4875 | 0.2155 |
+| bm25-sentence | 0.6125 | 0.1896 |
+
+### Evidence Selection Result
+
+| Selector | top_k | gold_in_context | gold_cited | gold_in_context_not_cited | gold_candidate_loses_to_wrong_sentences | below_min_sentence_score |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| overlap | 5 | 107 | 78 | 29 | 26 | 3 |
+| overlap | 10 | 119 | 78 | 41 | 35 | 6 |
+| overlap | 20 | 127 | 78 | 49 | 38 | 11 |
+| bm25-sentence | 5 | 107 | 98 | 9 | 9 | 0 |
+| bm25-sentence | 10 | 119 | 90 | 29 | 29 | 0 |
+| bm25-sentence | 20 | 127 | 87 | 40 | 40 | 0 |
+
+### Problems Encountered
+
+- `BM25SentenceEvidenceSelector` 明显提高了 gold 引用，但 `average_token_f1` 下降。
+- `min_evidence_score=7.0` 对 bm25-sentence 几乎不再形成有效拒答门槛：
+  `newly_refused` 从 overlap 的 55 降到 bm25-sentence 的 1。
+- bm25-sentence 在 top5 下效果最好；top10/top20 的 `gold_cited` 反而下降，说明更多候选文档会重新引入干扰。
+- gold 文档被引用更多，并不代表抽取出的 gold 句子一定覆盖标准答案。
+
+### Root Cause
+
+- 新 selector 的分数尺度和旧 overlap selector 不同，继续使用同一个 `min_evidence_score=7.0` 不公平，也不可靠。
+- BM25 / IDF 更擅长把 gold 文档中的相关句子推到前面，但它仍然不知道“这个句子是否完整回答了问题”。
+- 每个文档最多保留 1 个候选句减少了错误文档霸占答案的情况，但也可能损失同一 gold 文档中多个互补证据句。
+- 当前评估的 gold citation 和 token F1 指向了两个不同问题：引用来源更准了，但答案文本仍然不够像标准答案。
+
+### Solution
+
+- 不把 Stage 9 结论写成“整体改进成功”，而是记录为“证据引用明显改善，但答案质量和拒答校准仍有问题”。
+- 保留 bm25-sentence 作为新的 evidence selector 候选，因为它把 top5 的 `gold_cited` 从 78 提升到 98。
+- 不进入 LangGraph / Agent 阶段，先继续做 evidence selector 的校准和质量分析。
+- 下一步需要对 bm25-sentence 单独做阈值扫描，而不是沿用 overlap 的 `min_evidence_score=7.0`。
+
+### Why This Choice
+
+- 如果只看 `gold_doc_citation_rate`，会误判 bm25-sentence 已经全面胜出。
+- 如果只看 `average_token_f1`，又会忽略它确实解决了 Stage 8 的一部分证据选择问题。
+- 企业级 RAG 项目需要能解释 trade-off：引用正确性、答案质量、误拒率、漏拒率不一定同时改善。
+- 这个阶段的价值是定位瓶颈，而不是急着把系统包装成 Agent。
+
+### Verification
+
+- `python -m ruff check .` 通过。
+- `python -m pytest -q` 通过，当前为 28 个测试。
+- `verified_rag_dev_overlap_m7_report.json` 已生成。
+- `verified_rag_dev_bm25_sentence_m7_report.json` 已生成。
+- `evidence_selection_analysis_dev_overlap.json` 已生成。
+- `evidence_selection_analysis_dev_bm25_sentence.json` 已生成。
+- 以上实验产物都在 `artifacts/` 下，并被 `.gitignore` 忽略，不提交到 GitHub。
+
+### What I Still Do Not Understand
+
+- bm25-sentence 为什么提高 gold citation 后，token F1 反而下降。
+- bm25-sentence 的合理 `min_evidence_score` 应该是多少。
+- top10/top20 下为什么新增 gold 文档后 `gold_cited` 下降，需要检查新增候选文档的干扰类型。
+- 是否应该允许同一 gold 文档贡献多个候选句，还是继续保持每文档最多 1 句。
+
+### Next Step
+
+- 对 bm25-sentence 单独做 threshold sweep / calibration。
+- 扫描不同的 `min_evidence_score` 和 `max_candidates_per_document`。
+- 对比：
+  1. `gold_doc_citation_rate`
+  2. `average_token_f1`
+  3. `answerable_refusal_rate`
+  4. `unanswerable_refusal_rate`
+  5. `gold_cited`
+- 如果 F1 仍然低，下一步不是继续调阈值，而是分析 bm25-sentence 选中的 gold 句子是否缺少答案完整性。

@@ -9,6 +9,10 @@ from typing import Annotated
 import typer
 
 from ts_rag_agent.application.answer_verification import AnswerVerifier
+from ts_rag_agent.application.evidence_selection import (
+    SentenceEvidenceSelector,
+    create_sentence_evidence_selector,
+)
 from ts_rag_agent.application.rag_answering import ExtractiveAnswerGenerator
 from ts_rag_agent.application.verified_rag_evaluation import (
     VerifiedRAGEvaluationResult,
@@ -22,57 +26,69 @@ from ts_rag_agent.infrastructure.primeqa_loader import (
     load_primeqa_questions,
 )
 
-app = typer.Typer(help="在 PrimeQA TechQA 数据集上评估带答案验证层的 RAG baseline。")
+app = typer.Typer(help="Evaluate BM25 + extractive RAG + answer verification.")
 
 
 @app.command()
 def main(
     split: Annotated[
         str,
-        typer.Option("--split", help="要评估的问题集合，可选值：dev、train。"),
+        typer.Option("--split", help="Question split to evaluate: dev or train."),
     ] = "dev",
     retrieval_top_k: Annotated[
         int,
-        typer.Option("--retrieval-top-k", help="BM25 提供给回答器的上下文文档数量。"),
+        typer.Option("--retrieval-top-k", help="Number of retrieved documents."),
     ] = 5,
     max_sentences: Annotated[
         int,
-        typer.Option("--max-sentences", help="每个答案最多抽取多少个证据句。"),
+        typer.Option("--max-sentences", help="Maximum evidence sentences per answer."),
     ] = 3,
     min_sentence_score: Annotated[
         float,
-        typer.Option("--min-sentence-score", help="低于该分数则生成器拒答。"),
+        typer.Option("--min-sentence-score", help="Minimum candidate score to answer."),
     ] = 2.0,
+    evidence_selector: Annotated[
+        str,
+        typer.Option(
+            "--evidence-selector",
+            help="Sentence selector: overlap or bm25-sentence.",
+        ),
+    ] = "overlap",
+    max_candidates_per_document: Annotated[
+        int,
+        typer.Option(
+            "--max-candidates-per-document",
+            help="Maximum candidates retained from the same document.",
+        ),
+    ] = 1,
     min_evidence_score: Annotated[
         float,
-        typer.Option("--min-evidence-score", help="验证器接受答案所需的最低证据句得分。"),
+        typer.Option("--min-evidence-score", help="Verifier minimum evidence score."),
     ] = 8.0,
     max_citation_rank: Annotated[
         int,
-        typer.Option("--max-citation-rank", help="验证器允许引用的最差检索排名。"),
+        typer.Option("--max-citation-rank", help="Worst citation retrieval rank accepted."),
     ] = 3,
     min_citations: Annotated[
         int,
-        typer.Option("--min-citations", help="验证器要求的最少引用数量。"),
+        typer.Option("--min-citations", help="Minimum citation count required."),
     ] = 1,
     sample_limit: Annotated[
         int,
-        typer.Option("--sample-limit", help="报告中最多保存多少条样例。"),
+        typer.Option("--sample-limit", help="Maximum samples saved in the report."),
     ] = 20,
     output: Annotated[
         Path | None,
-        typer.Option(
-            "--output",
-            help="可选 JSON 报告路径。默认写入 artifacts/verified_rag_<split>_report.json。",
-        ),
+        typer.Option("--output", help="Optional JSON report path."),
     ] = None,
 ) -> None:
-    """运行 BM25 + 抽取式回答 + 引用验证的端到端评估。"""
+    """Run the verified RAG evaluation on one PrimeQA split."""
 
     _validate_options(
         retrieval_top_k=retrieval_top_k,
         max_sentences=max_sentences,
         min_sentence_score=min_sentence_score,
+        max_candidates_per_document=max_candidates_per_document,
         min_evidence_score=min_evidence_score,
         max_citation_rank=max_citation_rank,
         min_citations=min_citations,
@@ -98,11 +114,16 @@ def main(
     retriever.fit(documents)
     indexed_at = time.perf_counter()
 
+    sentence_selector = _create_selector(
+        evidence_selector=evidence_selector,
+        max_candidates_per_document=max_candidates_per_document,
+    )
     evaluator = VerifiedRAGEvaluator(
         retriever=retriever,
         answer_generator=ExtractiveAnswerGenerator(
             max_sentences=max_sentences,
             min_sentence_score=min_sentence_score,
+            evidence_selector=sentence_selector,
         ),
         answer_verifier=AnswerVerifier(
             min_citations=min_citations,
@@ -123,6 +144,8 @@ def main(
         retrieval_top_k=retrieval_top_k,
         max_sentences=max_sentences,
         min_sentence_score=min_sentence_score,
+        evidence_selector_name=sentence_selector.name,
+        max_candidates_per_document=max_candidates_per_document,
         min_evidence_score=min_evidence_score,
         max_citation_rank=max_citation_rank,
         min_citations=min_citations,
@@ -147,6 +170,7 @@ def _validate_options(
     retrieval_top_k: int,
     max_sentences: int,
     min_sentence_score: float,
+    max_candidates_per_document: int,
     min_evidence_score: float,
     max_citation_rank: int,
     min_citations: int,
@@ -158,6 +182,8 @@ def _validate_options(
         raise typer.BadParameter("--max-sentences must be positive.")
     if min_sentence_score < 0:
         raise typer.BadParameter("--min-sentence-score must be non-negative.")
+    if max_candidates_per_document <= 0:
+        raise typer.BadParameter("--max-candidates-per-document must be positive.")
     if min_evidence_score < 0:
         raise typer.BadParameter("--min-evidence-score must be non-negative.")
     if max_citation_rank <= 0:
@@ -177,6 +203,8 @@ def _build_report(
     retrieval_top_k: int,
     max_sentences: int,
     min_sentence_score: float,
+    evidence_selector_name: str,
+    max_candidates_per_document: int,
     min_evidence_score: float,
     max_citation_rank: int,
     min_citations: int,
@@ -198,8 +226,10 @@ def _build_report(
             "retriever": "BM25",
             "retrieval_top_k": retrieval_top_k,
             "answer_generator": "extractive_sentence_baseline",
+            "evidence_selector": evidence_selector_name,
             "max_sentences": max_sentences,
             "min_sentence_score": min_sentence_score,
+            "max_candidates_per_document": max_candidates_per_document,
             "answer_verifier": "citation_and_evidence_gate",
             "min_evidence_score": min_evidence_score,
             "max_citation_rank": max_citation_rank,
@@ -312,6 +342,19 @@ def _summarize_report(report: dict) -> dict:
 
 def _safe_rate(numerator: int, denominator: int) -> float:
     return round(numerator / denominator, 4) if denominator else 0.0
+
+
+def _create_selector(
+    evidence_selector: str,
+    max_candidates_per_document: int,
+) -> SentenceEvidenceSelector:
+    try:
+        return create_sentence_evidence_selector(
+            selector_name=evidence_selector,
+            max_candidates_per_document=max_candidates_per_document,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def _resolve_questions_path(training_dir: Path, split: str) -> Path:

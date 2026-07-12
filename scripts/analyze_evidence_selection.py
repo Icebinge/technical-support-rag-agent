@@ -8,6 +8,10 @@ from typing import Annotated
 
 import typer
 
+from ts_rag_agent.application.evidence_selection import (
+    SentenceEvidenceSelector,
+    create_sentence_evidence_selector,
+)
 from ts_rag_agent.application.evidence_selection_analysis import (
     EVIDENCE_SELECTION_BUCKET_DEFINITIONS,
     EvidenceSelectionAnalysisResult,
@@ -22,47 +26,57 @@ from ts_rag_agent.infrastructure.primeqa_loader import (
     load_primeqa_questions,
 )
 
-app = typer.Typer(help="分析 gold 文档进入检索上下文后为什么没有被答案引用。")
+app = typer.Typer(
+    help="Analyze why gold documents in retrieved context are not cited."
+)
 
 
 @app.command()
 def main(
     split: Annotated[
         str,
-        typer.Option("--split", help="要分析的问题集合，可选值：dev、train。"),
+        typer.Option("--split", help="Question split to analyze: dev or train."),
     ] = "dev",
     retrieval_top_k_values: Annotated[
         str,
-        typer.Option("--retrieval-top-k-values", help="逗号分隔的 retrieval top-k 列表。"),
+        typer.Option("--retrieval-top-k-values", help="Comma-separated top-k values."),
     ] = "5,10,20",
     base_top_k: Annotated[
         int,
-        typer.Option("--base-top-k", help="用于判断 gold 是否是新增进入上下文的基础 top-k。"),
+        typer.Option("--base-top-k", help="Base top-k for newly available gold docs."),
     ] = 5,
     max_sentences: Annotated[
         int,
-        typer.Option("--max-sentences", help="每个答案最多抽取多少个证据句。"),
+        typer.Option("--max-sentences", help="Maximum evidence sentences per answer."),
     ] = 3,
     min_sentence_score: Annotated[
         float,
-        typer.Option("--min-sentence-score", help="低于该分数则生成器拒答。"),
+        typer.Option("--min-sentence-score", help="Minimum candidate score to answer."),
     ] = 2.0,
+    evidence_selector: Annotated[
+        str,
+        typer.Option(
+            "--evidence-selector",
+            help="Sentence selector: overlap or bm25-sentence.",
+        ),
+    ] = "overlap",
+    max_candidates_per_document: Annotated[
+        int,
+        typer.Option(
+            "--max-candidates-per-document",
+            help="Maximum candidates retained from the same document.",
+        ),
+    ] = 1,
     sample_limit_per_top_k: Annotated[
         int,
-        typer.Option("--sample-limit-per-top-k", help="每个 top-k 最多保存多少条失败样例。"),
+        typer.Option("--sample-limit-per-top-k", help="Maximum failure cases per top-k."),
     ] = 20,
     output: Annotated[
         Path | None,
-        typer.Option(
-            "--output",
-            help=(
-                "可选 JSON 报告路径。默认写入 "
-                "artifacts/evidence_selection_analysis_<split>.json。"
-            ),
-        ),
+        typer.Option("--output", help="Optional JSON report path."),
     ] = None,
 ) -> None:
-    """运行证据选择分析，并保存完整 JSON 报告。"""
+    """Run evidence selection analysis and save a JSON report."""
 
     parsed_top_k_values = _parse_int_values(
         retrieval_top_k_values,
@@ -73,6 +87,7 @@ def main(
         base_top_k=base_top_k,
         max_sentences=max_sentences,
         min_sentence_score=min_sentence_score,
+        max_candidates_per_document=max_candidates_per_document,
         sample_limit_per_top_k=sample_limit_per_top_k,
     )
 
@@ -80,7 +95,10 @@ def main(
     training_dir = settings.primeqa_raw_dir / "TechQA" / "training_and_dev"
     documents_path = training_dir / "training_dev_technotes.sections.json"
     questions_path = _resolve_questions_path(training_dir, split)
-    output_path = output or settings.artifact_dir / f"evidence_selection_analysis_{split}.json"
+    selector_slug = _selector_slug(evidence_selector)
+    output_path = output or (
+        settings.artifact_dir / f"evidence_selection_analysis_{split}_{selector_slug}.json"
+    )
 
     _ensure_file_exists(documents_path)
     _ensure_file_exists(questions_path)
@@ -95,11 +113,16 @@ def main(
     retriever.fit(documents)
     indexed_at = time.perf_counter()
 
+    sentence_selector = _create_selector(
+        evidence_selector=evidence_selector,
+        max_candidates_per_document=max_candidates_per_document,
+    )
     analyzer = EvidenceSelectionAnalyzer(
         retriever=retriever,
         answer_generator=ExtractiveAnswerGenerator(
             max_sentences=max_sentences,
             min_sentence_score=min_sentence_score,
+            evidence_selector=sentence_selector,
         ),
         base_top_k=base_top_k,
     )
@@ -120,6 +143,8 @@ def main(
         base_top_k=base_top_k,
         max_sentences=max_sentences,
         min_sentence_score=min_sentence_score,
+        evidence_selector_name=sentence_selector.name,
+        max_candidates_per_document=max_candidates_per_document,
         sample_limit_per_top_k=sample_limit_per_top_k,
         analysis=analysis,
         timing_seconds={
@@ -147,6 +172,8 @@ def _build_report(
     base_top_k: int,
     max_sentences: int,
     min_sentence_score: float,
+    evidence_selector_name: str,
+    max_candidates_per_document: int,
     sample_limit_per_top_k: int,
     analysis: EvidenceSelectionAnalysisResult,
     timing_seconds: dict[str, float],
@@ -162,8 +189,10 @@ def _build_report(
             "retrieval_top_k_values": retrieval_top_k_values,
             "base_top_k": base_top_k,
             "answer_generator": "extractive_sentence_baseline",
+            "evidence_selector": evidence_selector_name,
             "max_sentences": max_sentences,
             "min_sentence_score": min_sentence_score,
+            "max_candidates_per_document": max_candidates_per_document,
             "sample_limit_per_top_k": sample_limit_per_top_k,
         },
         "data": {
@@ -206,6 +235,7 @@ def _validate_options(
     base_top_k: int,
     max_sentences: int,
     min_sentence_score: float,
+    max_candidates_per_document: int,
     sample_limit_per_top_k: int,
 ) -> None:
     if any(value <= 0 for value in retrieval_top_k_values):
@@ -216,8 +246,27 @@ def _validate_options(
         raise typer.BadParameter("--max-sentences must be positive.")
     if min_sentence_score < 0:
         raise typer.BadParameter("--min-sentence-score must be non-negative.")
+    if max_candidates_per_document <= 0:
+        raise typer.BadParameter("--max-candidates-per-document must be positive.")
     if sample_limit_per_top_k < 0:
         raise typer.BadParameter("--sample-limit-per-top-k must be non-negative.")
+
+
+def _create_selector(
+    evidence_selector: str,
+    max_candidates_per_document: int,
+) -> SentenceEvidenceSelector:
+    try:
+        return create_sentence_evidence_selector(
+            selector_name=evidence_selector,
+            max_candidates_per_document=max_candidates_per_document,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+def _selector_slug(evidence_selector: str) -> str:
+    return evidence_selector.strip().lower().replace("-", "_")
 
 
 def _resolve_questions_path(training_dir: Path, split: str) -> Path:
