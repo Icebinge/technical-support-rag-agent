@@ -1885,3 +1885,159 @@ max_citation_rank: 3
   4. `unanswerable_refusal_rate`
   5. `gold_cited`
 - 如果 F1 仍然低，下一步不是继续调阈值，而是分析 bm25-sentence 选中的 gold 句子是否缺少答案完整性。
+
+## 2026-07-12 - Stage 10: BM25 Sentence Calibration
+
+### Goal
+
+- 对 `BM25SentenceEvidenceSelector` 单独做阈值校准，而不是继续沿用 overlap selector 的分数阈值。
+- 扫描不同的 `min_evidence_score` 和 `max_candidates_per_document`。
+- 判断 bm25-sentence 能否在保持 gold citation 提升的同时，把 F1 和拒答行为拉回合理范围。
+
+### What I Studied
+
+- 同一个 `min_evidence_score` 不能跨 selector 直接比较，因为不同 selector 的 score scale 不同。
+- `max_candidates_per_document` 控制的是同一篇文档最多贡献多少个候选证据句：
+  1. 值小可以避免错误文档霸占多个答案句。
+  2. 值大可以让 gold 文档贡献更多互补证据。
+  3. 但值大也会引入更多冗余和噪声。
+- 高阈值会提高拒答率和剩余答案的 gold citation rate，但这通常是通过拒掉大量样本换来的。
+
+### What I Built Or Changed
+
+- 给 threshold sweep 脚本增加 evidence selector 参数：
+  `--evidence-selector`
+- 给 threshold sweep 脚本增加每文档候选句上限参数：
+  `--max-candidates-per-document`
+- 在 sweep 报告中记录：
+  1. `evidence_selector`
+  2. `max_candidates_per_document`
+- 默认输出文件名会带上 selector slug，避免覆盖不同 selector 的报告。
+
+### Commands And Evidence
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+
+python scripts\sweep_verified_rag_thresholds.py `
+  --evidence-selector bm25-sentence `
+  --retrieval-top-k-values 5 `
+  --min-evidence-scores 5,10,15,20,25,30,40,50,60,80,100 `
+  --max-citation-ranks 3 `
+  --max-candidates-per-document 1 `
+  --output artifacts\verified_rag_threshold_sweep_dev_bm25_sentence_mcpd1.json
+
+python scripts\sweep_verified_rag_thresholds.py `
+  --evidence-selector bm25-sentence `
+  --retrieval-top-k-values 5 `
+  --min-evidence-scores 5,10,15,20,25,30,40,50,60,80,100 `
+  --max-citation-ranks 3 `
+  --max-candidates-per-document 2 `
+  --output artifacts\verified_rag_threshold_sweep_dev_bm25_sentence_mcpd2.json
+
+python scripts\sweep_verified_rag_thresholds.py `
+  --evidence-selector bm25-sentence `
+  --retrieval-top-k-values 5 `
+  --min-evidence-scores 5,10,15,20,25,30,40,50,60,80,100 `
+  --max-citation-ranks 3 `
+  --max-candidates-per-document 3 `
+  --output artifacts\verified_rag_threshold_sweep_dev_bm25_sentence_mcpd3.json
+```
+
+验证命令结果：
+
+```text
+ruff: passed
+pytest: 28 passed
+```
+
+### Main Results
+
+固定条件：
+
+```text
+dataset: PrimeQA/TechQA dev
+retriever: BM25
+retrieval_top_k: 5
+evidence_selector: bm25_sentence
+max_sentences: 3
+max_citation_rank: 3
+```
+
+代表性结果：
+
+| max_candidates_per_document | min_evidence_score | gold_doc_citation_rate | average_token_f1 | answerable_refusal_rate | unanswerable_refusal_rate | newly_refused |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 5 | 0.6125 | 0.1896 | 0.0000 | 0.0067 | 0 |
+| 1 | 15 | 0.6169 | 0.1897 | 0.0375 | 0.0400 | 11 |
+| 1 | 25 | 0.6412 | 0.1905 | 0.1812 | 0.1800 | 55 |
+| 2 | 5 | 0.5723 | 0.2029 | 0.0063 | 0.0200 | 3 |
+| 2 | 15 | 0.5817 | 0.2042 | 0.0437 | 0.0533 | 14 |
+| 2 | 25 | 0.6000 | 0.2046 | 0.1875 | 0.1867 | 57 |
+| 3 | 5 | 0.5660 | 0.2077 | 0.0063 | 0.0200 | 3 |
+| 3 | 15 | 0.5752 | 0.2089 | 0.0437 | 0.0533 | 14 |
+| 3 | 25 | 0.6000 | 0.2113 | 0.1875 | 0.1867 | 57 |
+
+和 Stage 9 overlap baseline 对照：
+
+| Selector | max_candidates_per_document | min_evidence_score | gold_doc_citation_rate | average_token_f1 | answerable_refusal_rate | unanswerable_refusal_rate |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| overlap | - | 7 | 0.5276 | 0.2268 | 0.2062 | 0.1533 |
+| bm25-sentence | 1 | 15 | 0.6169 | 0.1897 | 0.0375 | 0.0400 |
+| bm25-sentence | 3 | 15 | 0.5752 | 0.2089 | 0.0437 | 0.0533 |
+| bm25-sentence | 3 | 25 | 0.6000 | 0.2113 | 0.1875 | 0.1867 |
+
+### Problems Encountered
+
+- `max_candidates_per_document=1` 保留了最高的 citation 优势，但 F1 始终偏低。
+- `max_candidates_per_document=2/3` 能提升 F1，但会降低 gold citation。
+- 高阈值看起来让 gold citation rate 更高，但主要原因是大量拒答，尤其会误拒很多 answerable 问题。
+- 即使最佳 F1 配置 `max_candidates_per_document=3, min_evidence_score=25`，F1 也只有 0.2113，仍低于 overlap baseline 的 0.2268。
+
+### Root Cause
+
+- bm25-sentence 更擅长选到 gold 文档，但不一定选到最像标准答案的完整句子。
+- 每文档 1 句限制太强，可能只拿到 gold 文档中的局部证据。
+- 每文档 2/3 句能补充内容，但也会增加答案冗余，使 token precision 变差。
+- 当前 verifier 只看 evidence score、citation rank 和 citation count，不理解答案是否真正覆盖了问题需求。
+
+### Solution
+
+- 不把 bm25-sentence calibration 记录为整体成功。
+- 记录为：bm25-sentence 是更好的 citation-oriented selector，但还不是更好的 answer-quality selector。
+- 如果目标是引用正确性，可以选 `max_candidates_per_document=1, min_evidence_score=15`。
+- 如果目标是综合 F1 和引用，可以暂时把 `max_candidates_per_document=3, min_evidence_score=15` 作为下一阶段分析候选。
+- 不继续盲目扫阈值，因为 F1 没有追上 overlap baseline。
+
+### Why This Choice
+
+- 项目需要真实解释 trade-off，而不是挑一个最好看的指标。
+- 当前结果说明问题已经从“找不到 gold 文档”转移到“gold 文档中的答案句不够好”。
+- 继续堆 Agent workflow 不能解决 evidence sentence 本身质量不足的问题。
+- 下一步应该分析 bm25-sentence 选中的 gold 句子和标准答案之间的差距。
+
+### Verification
+
+- `python -m ruff check .` 通过。
+- `python -m pytest -q` 通过，当前为 28 个测试。
+- `artifacts/verified_rag_threshold_sweep_dev_bm25_sentence_mcpd1.json` 已生成。
+- `artifacts/verified_rag_threshold_sweep_dev_bm25_sentence_mcpd2.json` 已生成。
+- `artifacts/verified_rag_threshold_sweep_dev_bm25_sentence_mcpd3.json` 已生成。
+- 以上实验产物在 `artifacts/` 下，并被 `.gitignore` 忽略。
+
+### What I Still Do Not Understand
+
+- bm25-sentence 选中的 gold 句子为什么和标准答案 token F1 仍然偏低。
+- gold 文档里是否存在更完整的答案句，只是当前 selector 没选到。
+- 是否应该从 sentence-level 改成 section-level，因为 TechQA 答案可能跨句。
+- 是否应该引入 answer-aware reranking，而不是继续只用 query-to-sentence scoring。
+
+### Next Step
+
+- 做 Stage 11：BM25 sentence answer gap analysis。
+- 对比 bm25-sentence 选中的 gold 句子和标准答案：
+  1. token overlap 低的样本有哪些。
+  2. gold 文档中是否存在更接近标准答案的句子。
+  3. 当前 selector 选错是因为句子太短、太泛、还是答案跨句。
+  4. 决定下一步做 section-level selector，还是 answer-aware reranker。

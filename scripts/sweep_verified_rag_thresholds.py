@@ -8,6 +8,10 @@ from typing import Annotated
 
 import typer
 
+from ts_rag_agent.application.evidence_selection import (
+    SentenceEvidenceSelector,
+    create_sentence_evidence_selector,
+)
 from ts_rag_agent.application.rag_answering import ExtractiveAnswerGenerator
 from ts_rag_agent.application.verified_rag_threshold_sweep import (
     ThresholdSweepResult,
@@ -50,6 +54,20 @@ def main(
         float,
         typer.Option("--min-sentence-score", help="低于该分数则生成器拒答。"),
     ] = 2.0,
+    evidence_selector: Annotated[
+        str,
+        typer.Option(
+            "--evidence-selector",
+            help="Sentence selector: overlap or bm25-sentence.",
+        ),
+    ] = "overlap",
+    max_candidates_per_document: Annotated[
+        int,
+        typer.Option(
+            "--max-candidates-per-document",
+            help="Maximum candidates retained from the same document.",
+        ),
+    ] = 1,
     min_citations: Annotated[
         int,
         typer.Option("--min-citations", help="验证器要求的最少引用数量。"),
@@ -89,6 +107,7 @@ def main(
         max_citation_ranks=parsed_max_citation_ranks,
         max_sentences=max_sentences,
         min_sentence_score=min_sentence_score,
+        max_candidates_per_document=max_candidates_per_document,
         min_citations=min_citations,
         sample_limit_per_bucket=sample_limit_per_bucket,
     )
@@ -97,7 +116,10 @@ def main(
     training_dir = settings.primeqa_raw_dir / "TechQA" / "training_and_dev"
     documents_path = training_dir / "training_dev_technotes.sections.json"
     questions_path = _resolve_questions_path(training_dir, split)
-    output_path = output or settings.artifact_dir / f"verified_rag_threshold_sweep_{split}.json"
+    selector_slug = _selector_slug(evidence_selector)
+    output_path = output or (
+        settings.artifact_dir / f"verified_rag_threshold_sweep_{split}_{selector_slug}.json"
+    )
 
     _ensure_file_exists(documents_path)
     _ensure_file_exists(questions_path)
@@ -112,11 +134,16 @@ def main(
     retriever.fit(documents)
     indexed_at = time.perf_counter()
 
+    sentence_selector = _create_selector(
+        evidence_selector=evidence_selector,
+        max_candidates_per_document=max_candidates_per_document,
+    )
     sweeper = VerifiedRAGThresholdSweeper(
         retriever=retriever,
         answer_generator=ExtractiveAnswerGenerator(
             max_sentences=max_sentences,
             min_sentence_score=min_sentence_score,
+            evidence_selector=sentence_selector,
         ),
         min_citations=min_citations,
     )
@@ -140,6 +167,8 @@ def main(
         max_citation_ranks=parsed_max_citation_ranks,
         max_sentences=max_sentences,
         min_sentence_score=min_sentence_score,
+        evidence_selector_name=sentence_selector.name,
+        max_candidates_per_document=max_candidates_per_document,
         min_citations=min_citations,
         sample_limit_per_bucket=sample_limit_per_bucket,
         sweep_result=sweep_result,
@@ -169,6 +198,8 @@ def _build_report(
     max_citation_ranks: list[int],
     max_sentences: int,
     min_sentence_score: float,
+    evidence_selector_name: str,
+    max_candidates_per_document: int,
     min_citations: int,
     sample_limit_per_bucket: int,
     sweep_result: ThresholdSweepResult,
@@ -194,8 +225,10 @@ def _build_report(
         "rag": {
             "retriever": "BM25",
             "answer_generator": "extractive_sentence_baseline",
+            "evidence_selector": evidence_selector_name,
             "max_sentences": max_sentences,
             "min_sentence_score": min_sentence_score,
+            "max_candidates_per_document": max_candidates_per_document,
             "answer_verifier": "citation_and_evidence_gate",
             "min_citations": min_citations,
             "sample_limit_per_bucket": sample_limit_per_bucket,
@@ -318,6 +351,7 @@ def _validate_options(
     max_citation_ranks: list[int],
     max_sentences: int,
     min_sentence_score: float,
+    max_candidates_per_document: int,
     min_citations: int,
     sample_limit_per_bucket: int,
 ) -> None:
@@ -331,10 +365,29 @@ def _validate_options(
         raise typer.BadParameter("--max-sentences must be positive.")
     if min_sentence_score < 0:
         raise typer.BadParameter("--min-sentence-score must be non-negative.")
+    if max_candidates_per_document <= 0:
+        raise typer.BadParameter("--max-candidates-per-document must be positive.")
     if min_citations <= 0:
         raise typer.BadParameter("--min-citations must be positive.")
     if sample_limit_per_bucket < 0:
         raise typer.BadParameter("--sample-limit-per-bucket must be non-negative.")
+
+
+def _create_selector(
+    evidence_selector: str,
+    max_candidates_per_document: int,
+) -> SentenceEvidenceSelector:
+    try:
+        return create_sentence_evidence_selector(
+            selector_name=evidence_selector,
+            max_candidates_per_document=max_candidates_per_document,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+def _selector_slug(evidence_selector: str) -> str:
+    return evidence_selector.strip().lower().replace("-", "_")
 
 
 def _resolve_questions_path(training_dir: Path, split: str) -> Path:
