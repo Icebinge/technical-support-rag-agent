@@ -2,14 +2,14 @@ from pydantic import BaseModel, Field
 
 
 class EvidenceContext(BaseModel):
-    """A retrieved or labeled support document context."""
+    """检索得到或数据集中标注的证据文档片段。"""
 
     filename: str
     text: str
 
 
 class TechQASample(BaseModel):
-    """One technical support question-answer example."""
+    """一条技术支持问答样本。"""
 
     id: str
     question: str
@@ -23,7 +23,7 @@ class TechQASample(BaseModel):
 
 
 class DatasetStats(BaseModel):
-    """High-level dataset statistics used in verification reports."""
+    """用于验证报告的数据集统计信息。"""
 
     total_rows: int
     answerable_rows: int
@@ -34,3 +34,53 @@ class DatasetStats(BaseModel):
     min_contexts: int
     max_contexts: int
     avg_contexts: float
+
+
+class PrimeQAQuestion(BaseModel):
+    """一条 PrimeQA TechQA 问答样本。"""
+
+    id: str
+    title: str
+    text: str
+    answer: str
+    answerable: bool
+    answer_doc_id: str | None
+    doc_ids: list[str] = Field(default_factory=list)
+    start_offset: int | None = None
+    end_offset: int | None = None
+
+    @property
+    def full_question(self) -> str:
+        parts = [self.title.strip(), self.text.strip()]
+        return "\n\n".join(part for part in parts if part)
+
+
+class PrimeQADocument(BaseModel):
+    """一篇用于检索的 PrimeQA TechQA 技术支持文档。"""
+
+    id: str
+    title: str
+    text: str
+
+
+class PrimeQADocumentSection(BaseModel):
+    """一篇 PrimeQA 技术文档中的一个 section。"""
+
+    document_id: str
+    section_id: str
+    text: str
+    start_offset: int | None = None
+    end_offset: int | None = None
+
+
+class PrimeQAStats(BaseModel):
+    """检索实验前需要确认的 PrimeQA 数据统计信息。"""
+
+    total_questions: int
+    answerable_questions: int
+    unanswerable_questions: int
+    total_documents: int
+    unique_candidate_doc_ids: int
+    missing_candidate_doc_ids: int
+    missing_answer_doc_ids: int
+    avg_candidate_doc_ids: float

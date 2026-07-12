@@ -213,3 +213,1519 @@ Git commit:
 - Build the first BM25 retrieval baseline.
 - Evaluate hit@1, hit@5, and hit@10 before adding dense retrieval or Agent
   orchestration.
+
+## 2026-07-12 - Stage 2: BM25 Baseline And Error Analysis
+
+### Goal
+
+- 先完成一个不用大模型的检索 baseline。
+- 理解 `hit@1`、`hit@5`、`hit@10`、`MRR` 这些指标的含义。
+- 把 BM25 评估和错误分析封装成可以重复运行的脚本。
+
+### What I Studied
+
+- BM25 baseline 不是神经网络模型，也不是大语言模型，而是传统关键词检索算法。
+- BM25 的核心依据是词频、逆文档频率和文档长度归一化。
+- `hit@k` 衡量正确答案文档是否进入前 k 个检索结果。
+- `MRR` 衡量正确答案文档整体排位是否靠前。
+- 指标只能说明系统“错了多少”，错误分析才能解释“为什么错”。
+
+### What I Built Or Changed
+
+- 新增 PrimeQA 原始数据读取能力。
+- 新增 BM25 检索器。
+- 新增 BM25 评估脚本：
+  `scripts/evaluate_bm25.py`
+- 新增 BM25 错误分析脚本：
+  `scripts/analyze_bm25_errors.py`
+- 错误分析脚本会保存 answer_doc_id 没有进入 top-k 的失败案例。
+
+### Commands And Evidence
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+python scripts\evaluate_bm25.py
+python scripts\analyze_bm25_errors.py
+```
+
+BM25 dev baseline 结果：
+
+```text
+documents: 28482
+questions: 310
+evaluated_questions: 160
+
+hit@1:  0.45
+hit@5:  0.6687
+hit@10: 0.7438
+MRR:    0.5459
+```
+
+错误分析脚本输出：
+
+```text
+output: artifacts/bm25_dev_error_cases.json
+top_k: 10
+limit: 20
+saved_error_cases: 20
+```
+
+第一个失败案例摘要：
+
+```text
+question_id: DEV_Q000
+gold_answer_doc_id: swg24042191
+top1_doc_id: swg21681385
+top1_score: 91.2916
+top10_count: 10
+```
+
+### Problems Encountered
+
+- 一开始只看到 `hit@k` 和 `MRR`，还不能判断 BM25 为什么失败。
+- BM25 不是“模型”，容易和 embedding model、reranker、LLM 混在一起理解。
+- PowerShell 直接显示中文源码时出现乱码样式，需要区分“终端显示问题”和“文件真实编码问题”。
+- Typer 参数如果直接在默认参数里调用 `typer.Option()`，会被 ruff 的 `B008` 规则拦下。
+
+### Root Cause
+
+- 聚合指标只能给出整体表现，不能展示具体失败样本。
+- BM25 属于传统稀疏检索，主要依赖关键词匹配，因此会在同义表达、长问题、关键词偏移、标题不匹配时失败。
+- Windows 终端编码显示和文件 UTF-8 编码不是一回事。
+- 规范的 Typer 写法需要用 `typing.Annotated` 包装命令行参数。
+
+### Solution
+
+- 保留 BM25 baseline 作为后续 Dense Retrieval、Hybrid Retrieval、Reranker 的对照线。
+- 新增 `scripts/analyze_bm25_errors.py`，把 top10 未命中的问题保存成可人工阅读的 JSON。
+- 失败案例中记录 question、gold answer doc、gold answer、top-k doc id、title 和 score。
+- 用 Python 按 UTF-8 读取源码，确认中文注释和 docstring 实际编码正确。
+- 用 `Annotated[..., typer.Option(...)]` 改写脚本参数，保证 `ruff` 通过。
+
+### Why This Choice
+
+- 直接上 Dense Retrieval 或 Agent 容易变成堆工具，不知道每一步是否真正解决了问题。
+- 先做错误分析，可以知道 BM25 的短板主要来自关键词不匹配、语义不一致，还是数据标注和候选集合问题。
+- 错误案例文件能成为后续模型改进的依据，而不是只看一个分数涨跌。
+
+### Verification
+
+- `python -m ruff check .` 通过。
+- `python -m pytest -q` 通过，当前为 7 个测试。
+- `python scripts\evaluate_bm25.py` 已真实运行并生成 BM25 指标。
+- `python scripts\analyze_bm25_errors.py` 已真实运行并生成 20 条失败案例。
+- `artifacts/bm25_dev_metrics.json` 和 `artifacts/bm25_dev_error_cases.json` 都被 `.gitignore` 排除，不会误提交。
+
+### What I Still Do Not Understand
+
+- 这 20 条失败案例中，主要失败类型分别占多少。
+- BM25 的 top10 里有多少是“语义接近但不是 gold doc”的情况。
+- Dense Retrieval 是否能真正提升这些 top10 未命中样本，而不是只提升已经容易命中的样本。
+
+### Next Step
+
+- 人工阅读 `artifacts/bm25_dev_error_cases.json` 中的失败案例。
+- 给失败案例打标签，例如关键词不匹配、问题太短、正确文档标题不相关、相似文档干扰、文档过长。
+- 基于错误类型再决定 Dense Retrieval baseline 的模型和评估方式。
+
+## 2026-07-12 - Stage 3: Dense Retrieval Baseline And Hybrid Comparison
+
+### Goal
+
+- 把 BM25 错误分析的结论记录下来，并带上具体失败例子。
+- 实现 Dense Retrieval baseline，验证 embedding 是否能补上 BM25 的语义短板。
+- 比较 BM25、Dense、BM25 + Dense Hybrid 三种检索方式的 `hit@k` 和 `MRR`。
+
+### What I Studied
+
+- BM25 的错误不只是“找不到文档”，更多是“关键词很像，但不是 gold answer doc”。
+- Dense Retrieval 使用 embedding 向量相似度，不依赖完全相同的关键词。
+- 小型通用 embedding 模型不一定比 BM25 强，尤其是在技术支持文档这种关键词、版本号、错误码很重要的场景。
+- Hybrid Retrieval 可以用 RRF 把 BM25 和 Dense 的排名融合起来，不需要直接比较两种分数的绝对值。
+
+### What I Built Or Changed
+
+- 抽出通用检索评估层：
+  `src/ts_rag_agent/application/retrieval_evaluation.py`
+- 抽出通用检索结果模型：
+  `src/ts_rag_agent/domain/retrieval.py`
+- 新增 Dense Retriever：
+  `src/ts_rag_agent/infrastructure/dense_retriever.py`
+- 新增 Dense 文档向量缓存：
+  `src/ts_rag_agent/infrastructure/dense_embedding_cache.py`
+- 新增 Hybrid Retriever：
+  `src/ts_rag_agent/infrastructure/hybrid_retriever.py`
+- 新增 Dense 评估脚本：
+  `scripts/evaluate_dense.py`
+- 新增 Hybrid 评估脚本：
+  `scripts/evaluate_hybrid.py`
+
+### Commands And Evidence
+
+```powershell
+python -m pip install -e ".[rag]"
+python -m ruff check .
+python -m pytest -q
+python scripts\evaluate_dense.py
+python scripts\evaluate_hybrid.py
+python scripts\evaluate_bm25.py
+```
+
+使用的 Dense 模型：
+
+```text
+sentence-transformers/all-MiniLM-L6-v2
+embedding dimension: 384
+document_text_max_chars: 1600
+documents: 28482
+questions: 310
+evaluated_questions: 160
+```
+
+指标对比：
+
+| Method | hit@1 | hit@5 | hit@10 | MRR |
+| --- | ---: | ---: | ---: | ---: |
+| BM25 | 0.45 | 0.6687 | 0.7438 | 0.5459 |
+| Dense all-MiniLM-L6-v2 | 0.375 | 0.575 | 0.675 | 0.469 |
+| BM25 + Dense RRF | 0.4125 | 0.6937 | 0.75 | 0.5358 |
+
+Dense 首次运行耗时：
+
+```text
+load_model: 16.336s
+document_embeddings: 441.622s
+evaluate: 2.918s
+total: 461.87s
+cache_status: created
+```
+
+Dense 使用缓存复跑：
+
+```text
+document_embeddings: 0.189s
+total: 21.529s
+cache_status: loaded
+```
+
+Hybrid 使用缓存运行：
+
+```text
+method: reciprocal_rank_fusion
+candidate_top_k: 100
+rrf_k: 60
+dense_cache_status: loaded
+hit@10: 0.75
+```
+
+### BM25 Error Examples
+
+#### 1. 关键词完全相似，但答案语义更深
+
+```text
+question_id: DEV_Q055
+question: Table ""."" could not be found
+gold: swg21412846
+gold title: Wrong codepoints for non-ASCII characters inserted in UTF-8 database
+top1: swg21647171
+top1 title: Table "<Schema>"."<Table Name>" could not be found in the database.
+```
+
+BM25 抓住了 `table could not be found`，所以 top1 看起来非常相关。但 gold 文档真正讲的是 UTF-8 / non-ASCII codepoint 导致的问题。
+
+#### 2. top1 文档看起来也合理，但不是 gold doc
+
+```text
+question_id: DEV_Q077
+question: I need to transfer my SPSS 24 licence to a new computer
+gold: swg21592093
+gold title: SPSS Student Version and Graduate Pack Resources
+top1: swg21985888
+top1 title: How do I transfer my IBM SPSS product/software license from one machine to another?
+```
+
+这个例子说明严格 `answer_doc_id` 评估可能低估用户体验，因为 top1 文档标题本身也非常像可用答案。
+
+#### 3. gold 文档标题很间接，BM25 不容易命中
+
+```text
+question_id: DEV_Q034
+question: Profiler for WebSphere 8
+gold: swg21413628
+gold title: Java Health Center Client - a low overhead monitoring tool
+top1: swg21566549
+top1 title: Potential native memory use in reflection delegating classloaders
+```
+
+用户说 `Profiler`，gold 文档说 `Health Center / monitoring tool`。这是 Dense Retrieval 理论上应该帮助的同义或近义表达场景。
+
+#### 4. 版本号、产品名、fix pack 强干扰
+
+```text
+question_id: DEV_Q039
+question: upgrade virtual DataPower Appliance from 5.0 firmware to 6.0+
+gold: swg21638268
+gold title: Supported Upgrade and Downgrade paths for DataPower Virtual Edition
+top1: swg21674513
+top1 title: Firmware upgrade via AMP ... virtual appliance ... out of memory
+```
+
+BM25 抓住了 `upgrade / firmware / virtual appliance`，但没有理解用户真正问的是支持的升级路径。
+
+#### 5. 重复或近重复文档导致严格 doc id 评估偏低
+
+```text
+question_id: DEV_Q066
+gold: swg22000947
+top1: swg22011696
+shared title topic: Action required for IBM Integration Bus Hypervisor Edition ...
+```
+
+gold 和 top1 标题几乎一样，但 doc id 不同，因此被算作 top10 未命中。这类样本需要后续人工检查内容是否等价。
+
+### Problems Encountered
+
+- Dense 依赖没有安装，`sentence-transformers`、`torch`、`scikit-learn` 都需要通过 `.[rag]` 安装。
+- 第一次导入和加载 `sentence-transformers` 较慢，不能误判为脚本卡死。
+- 第一次编码 28482 篇文档耗时较长，CPU 上大约 7 分钟。
+- Dense baseline 的指标低于 BM25，和“语义模型一定更强”的直觉相反。
+- 如果每次都重新编码文档，实验迭代成本很高。
+
+### Root Cause
+
+- `all-MiniLM-L6-v2` 是小型通用 embedding 模型，不是专门为 IBM 技术支持文档训练的检索模型。
+- 技术支持检索高度依赖产品名、版本号、错误码、fix pack 名称，BM25 在这类表面关键词上有天然优势。
+- 当前 Dense baseline 只取每篇文档前 1600 个字符，可能截断了 gold answer 所在内容。
+- Dense 向量相似度能补充语义，但也可能把关键词精确匹配能力变弱。
+
+### Solution
+
+- 保留 BM25 作为强 baseline，不因为 Dense 是“模型”就默认它更好。
+- 增加文档向量缓存，把首次编码结果保存到 `data/indexes/dense/`。
+- 用同一个 `evaluate_retrieval` 评估 BM25、Dense 和 Hybrid，保证指标可比。
+- 用 RRF 做 BM25 + Dense 融合，避免直接混合 BM25 分数和 cosine 分数。
+
+### Why This Choice
+
+- Dense Retrieval 的价值需要通过实验验证，而不是通过概念判断。
+- RRF 是简单稳健的融合方法，适合第一版 hybrid baseline。
+- 缓存文档向量能让后续调参和模型对比从几分钟降到几十秒。
+
+### Verification
+
+- `python -m ruff check .` 通过。
+- `python -m pytest -q` 通过，当前为 12 个测试。
+- `python scripts\evaluate_dense.py` 已真实运行并生成 Dense 指标。
+- `python scripts\evaluate_hybrid.py` 已真实运行并生成 Hybrid 指标。
+- Dense 文档向量缓存已生成：
+  `data/indexes/dense/sentence-transformers__all-MiniLM-L6-v2_1600.npz`
+- 指标报告已生成：
+  `artifacts/dense_dev_metrics.json`
+  `artifacts/hybrid_dev_metrics.json`
+
+### What I Still Do Not Understand
+
+- Dense 低于 BM25 的主要原因是模型太弱、文档截断、还是技术文档本身更适合关键词检索。
+- 使用更强的检索模型，例如 BGE / E5，是否能超过 BM25。
+- 如果把文档按 section chunk 切分，而不是整篇文档前 1600 字符，Dense 是否会明显改善。
+- Hybrid 的最佳 `candidate_top_k`、`rrf_k` 和权重还没有系统搜索。
+
+### Next Step
+
+- 先不要进入 Agent。
+- 下一步做 Dense 改进实验：
+  1. 换一个检索向 embedding 模型。
+  2. 把文档按 section/chunk 切分后再做 Dense。
+  3. 对比 BM25、Dense、Hybrid 在同一批 BM25 失败案例上的召回变化。
+  4. 如果 Dense 或 Hybrid 能稳定提升，再进入 reranker。
+
+## 2026-07-12 - Stage 3 Follow-up: Dense And Hybrid Result Analysis
+
+### Goal
+
+- 进一步分析 Dense 和 Hybrid 的新结果，而不是只看总分。
+- 回答三个问题：
+  1. Dense 到底救回了多少 BM25 没命中的问题？
+  2. Dense 又丢掉了多少 BM25 已经命中的问题？
+  3. Hybrid 为什么 `hit@10` 只小幅提升，但 `hit@1` 和 `MRR` 下降？
+
+### What I Studied
+
+- 检索系统不能只看单个总指标，要看样本级的得失。
+- Dense Retrieval 和 BM25 的错误模式不同：Dense 能补一些语义相关问题，但会损失一部分关键词精确匹配问题。
+- Hybrid 不是必然优于 BM25。融合方法如果没有调参，可能只提升深层召回，却损害首位排序。
+
+### Commands And Evidence
+
+这次没有新增正式脚本，而是用一次性分析代码读取 BM25、Dense、Hybrid 三个检索器，对 160 个可回答 dev 问题逐题计算 gold 文档是否进入 top10。
+
+核心统计：
+
+```text
+evaluated: 160
+
+top10 hits:
+BM25:   119
+Dense:  108
+Hybrid: 120
+
+Dense 救回 BM25 miss: 14
+Dense 丢掉 BM25 hit: 25
+
+Hybrid 救回 BM25 miss: 9
+Hybrid 丢掉 BM25 hit: 8
+
+BM25 和 Dense 都命中: 94
+三种方法都没命中: 27
+```
+
+按 top1 / top5 / top10 计数：
+
+```text
+BM25:
+top1: 72
+top5: 107
+top10: 119
+
+Dense:
+top1: 60
+top5: 92
+top10: 108
+
+Hybrid:
+top1: 66
+top5: 111
+top10: 120
+```
+
+### Key Analysis
+
+#### 1. Dense 确实救回了一些 BM25 的语义失败样本
+
+例子：
+
+```text
+DEV_Q039
+question: How do I upgrade my virtual DataPower Appliance from 5.0 firmware to 6.0+ firmware?
+gold: swg21638268
+gold title: Supported Upgrade and Downgrade paths for DataPower Virtual Edition
+
+BM25 rank: miss@10
+Dense rank: 3
+Hybrid rank: 2
+```
+
+BM25 被 `firmware / upgrade / virtual appliance` 这些关键词吸引到其他文档；Dense 更接近“升级路径”这个语义目标。
+
+另一个例子：
+
+```text
+DEV_Q052
+question: Why do I still get "certificate expired" error after adding new certificate?
+gold: swg21500046
+gold title: Replacement of an expiring certificate on the IBM WebSphere DataPower SOA Appliance
+
+BM25 rank: miss@10
+Dense rank: 4
+Hybrid rank: 6
+```
+
+这里 Dense 把 `certificate expired` 和 `expiring certificate replacement` 联系起来，说明 embedding 对同义或近义表达有帮助。
+
+再一个例子：
+
+```text
+DEV_Q195
+question: TLS protocol with ITCAM for Datapower
+gold: swg21959224
+gold title: TLS support and DataPower appliance
+
+BM25 rank: miss@10
+Dense rank: 1
+Hybrid rank: 4
+```
+
+这是 Dense 最有说服力的成功样本：gold 文档被 Dense 排到第 1。
+
+#### 2. Dense 丢掉了更多 BM25 已经命中的关键词型样本
+
+例子：
+
+```text
+DEV_Q028
+question: Help with Security Bulletin: Multiple vulnerabilities have been identified in WebSphere Application Server shipped with ...
+gold: swg21975747
+
+BM25 rank: 1
+Dense rank: miss@10
+Hybrid rank: miss@10
+```
+
+这类安全公告、CVE、产品名、版本名非常依赖精确关键词。BM25 在这种场景里天然强，而小型通用 Dense 模型反而会把相似公告混在一起。
+
+另一个例子：
+
+```text
+DEV_Q080
+question: Why is the OUTPUT_TYPE specified in the properties file for the custom scripting feature ignored?
+gold: swg21960062
+
+BM25 rank: 1
+Dense rank: miss@10
+Hybrid rank: 2
+```
+
+BM25 能抓住 `OUTPUT_TYPE`、`properties file`、`custom scripting feature` 这类精确 token；Dense 会弱化这些 token 的精确性。
+
+再一个例子：
+
+```text
+DEV_Q043
+question: Where I can get ITNM 4.2.0.1 GA version download details with Part number?
+gold: swg24042656
+
+BM25 rank: 1
+Dense rank: miss@10
+Hybrid rank: 3
+```
+
+版本号和 part number 是典型关键词检索强项。Dense 没有把这些精确标识当作足够强的信号。
+
+#### 3. Hybrid 的 top10 有小幅提升，但首位排序被 Dense 拉低
+
+Hybrid 的结果：
+
+```text
+BM25 top10 hits: 119
+Hybrid top10 hits: 120
+净增: +1
+
+BM25 top1 hits: 72
+Hybrid top1 hits: 66
+净减: -6
+
+BM25 MRR: 0.5459
+Hybrid MRR: 0.5358
+下降: -0.0101
+```
+
+原因是 Hybrid 用 RRF 融合排名后，Dense 会把一些 BM25 已经排第 1 的 gold 文档往后推，甚至推出 top10。它也会救回一些 BM25 miss，但救回数量和损失数量接近：
+
+```text
+Hybrid 救回 BM25 miss: 9
+Hybrid 丢掉 BM25 hit: 8
+```
+
+所以 top10 只净增 1 个命中。
+
+### Conclusion
+
+这次结果不能简单理解成“Dense 没用”。更准确的结论是：
+
+```text
+BM25 更擅长：
+- 产品名
+- 版本号
+- fix pack
+- CVE / Security Bulletin
+- 错误码
+- 配置项名称
+- 精确 token
+
+Dense 更擅长：
+- 同义表达
+- 问题意图相似
+- 标题不完全匹配但语义接近
+- 用户问法和文档标题不一致
+
+当前 Hybrid：
+- top10 召回略升
+- top1 和 MRR 下降
+- 说明融合参数和 Dense 模型还不够好
+```
+
+因此，当前最重要的判断是：
+
+```text
+BM25 仍然是这个数据集上的强 baseline。
+all-MiniLM-L6-v2 不能直接替代 BM25。
+Dense 有补充价值，但需要更强模型、chunk 策略或 reranker 才可能稳定提升。
+```
+
+### Why This Matters
+
+- 这让项目从“我用了 embedding”变成“我知道 embedding 在什么样本上有帮助，什么样本上会伤害结果”。
+- 这也说明后续做 Agent 之前，必须先把 retrieval 层做扎实。
+- 如果 retrieval 本身没有稳定提升，Agent workflow 只会包装错误，而不是解决错误。
+
+### Next Step
+
+- 不直接进入 Agent。
+- 下一步优先做两个实验：
+  1. 换更适合检索的 embedding 模型，例如 BGE / E5 系列。
+  2. 把 technote 从整篇前 1600 字符改为 section/chunk 检索。
+- 同时要保留 BM25 精确关键词能力，后续 Hybrid 应该调权重或进入 reranker，而不是简单平均两路结果。
+
+## 2026-07-12 - Stage 3 Follow-up: E5 And Section BM25 Experiments
+
+### Goal
+
+- 验证换一个检索向 embedding 模型是否能超过 BM25。
+- 验证 section 粒度检索是否能优于整篇文档 BM25。
+- 继续判断是否已经适合进入 Agent。
+
+### What I Built Or Changed
+
+- 给 Dense Retriever 增加 `query_prefix` 和 `document_prefix` 支持。
+- 给 dense 文档向量缓存增加 `document_prefix` 校验，避免不同输入格式共用错误缓存。
+- 新增 section 级 BM25 检索器：
+  `src/ts_rag_agent/infrastructure/section_bm25_retriever.py`
+- 新增 section BM25 评估脚本：
+  `scripts/evaluate_section_bm25.py`
+
+### Commands And Evidence
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+python scripts\evaluate_dense.py --model-name intfloat/e5-small-v2 --query-prefix "query: " --document-prefix "passage: " --document-text-max-chars 512 --output artifacts\dense_e5_small_v2_512_dev_metrics.json
+python scripts\evaluate_hybrid.py --model-name intfloat/e5-small-v2 --query-prefix "query: " --document-prefix "passage: " --document-text-max-chars 512 --output artifacts\hybrid_e5_small_v2_512_dev_metrics.json
+python scripts\evaluate_section_bm25.py
+```
+
+E5 small 烟雾测试：
+
+```text
+model: intfloat/e5-small-v2
+embedding_shape: (2, 384)
+```
+
+完整对比结果：
+
+| Method | hit@1 | hit@5 | hit@10 | MRR |
+| --- | ---: | ---: | ---: | ---: |
+| BM25 doc | 0.45 | 0.6687 | 0.7438 | 0.5459 |
+| Dense all-MiniLM-L6-v2 1600 | 0.375 | 0.575 | 0.675 | 0.469 |
+| Hybrid all-MiniLM-L6-v2 1600 | 0.4125 | 0.6937 | 0.75 | 0.5358 |
+| Dense E5 small 512 | 0.4 | 0.6062 | 0.6562 | 0.4842 |
+| Hybrid E5 small 512 | 0.4562 | 0.6625 | 0.7063 | 0.5498 |
+| Section BM25 | 0.4375 | 0.6375 | 0.6875 | 0.5243 |
+
+Section 统计：
+
+```text
+documents: 28482
+sections: 216648
+avg_sections_per_doc: 7.606
+```
+
+### Problems Encountered
+
+- `intfloat/e5-small-v2` 在 1600 字符截断设置下完整评估超过 30 分钟没有返回，被终止。
+- 改用 512 字符截断后可以完成，但 Dense E5 small 仍然没有超过 BM25。
+- Section BM25 的评估耗时明显高于文档级 BM25，而且指标更低。
+
+### Root Cause
+
+- E5 small 虽然是检索向 embedding 模型，但仍然是小模型；在技术支持文档这种强关键词场景下，不一定比 BM25 更强。
+- 使用 512 字符截断会进一步损失长文档信息，因此这个结果不能证明 E5 全量 1600 字符一定无效，只能说明当前本机成本下的 E5 512 配置没有优势。
+- Section BM25 把 28482 篇文档扩展成 216648 个 section，候选空间变大后，短 section 容易因为局部关键词匹配被推高。
+- 当前 Section BM25 使用“父文档取最高 section 分数”的聚合方式，这可能让某些只有局部关键词匹配的 section 过度影响父文档排名。
+
+### Solution
+
+- 不继续盲目堆更大的 dense 模型。
+- 先把 E5 small 512 和 Section BM25 作为负结果记录下来。
+- 保留 BM25 doc 作为当前最强、最稳定的 baseline。
+- 如果后续继续做 chunk，需要重新设计 chunk 聚合方式，而不是简单 max section score。
+
+### Why This Choice
+
+- 负结果同样有价值：它说明项目不是为了套模型而套模型，而是在用实验判断路线。
+- 当前证据不支持“直接进入 Agent”，因为 retrieval 层还没有稳定提升。
+- 如果 Agent 建在弱 retrieval 上，后续生成、重写、验证都会被错误上下文拖累。
+
+### Verification
+
+- `python -m ruff check .` 通过。
+- `python -m pytest -q` 通过，当前为 15 个测试。
+- E5 small 512 Dense 指标已生成：
+  `artifacts/dense_e5_small_v2_512_dev_metrics.json`
+- E5 small 512 Hybrid 指标已生成：
+  `artifacts/hybrid_e5_small_v2_512_dev_metrics.json`
+- Section BM25 指标已生成：
+  `artifacts/section_bm25_dev_metrics.json`
+- 以上报告和 dense 缓存都被 `.gitignore` 排除。
+
+### What I Still Do Not Understand
+
+- E5 small 在 1600 字符设置下如果完整跑完，是否会比 512 字符明显更好。
+- Section BM25 如果改用 top-n section 聚合、平均聚合或学习式融合，是否能超过文档级 BM25。
+- 更强的 BGE / E5 base 模型是否能在本机可接受时间内完成。
+
+### Next Step
+
+- 暂时停止继续换 embedding 模型。
+- 下一步更合理的是做 reranker baseline：
+  1. 用 BM25 召回 top50 或 top100。
+  2. 用 cross-encoder/reranker 重排候选文档。
+  3. 只在候选集上计算重排指标，避免全库 dense 编码成本。
+- 如果 reranker 能提升 hit@1 和 MRR，再考虑进入 RAG answer generation。
+
+## 2026-07-12 - Stage 4: BM25 Candidate Reranker Baseline
+
+### Goal
+
+- 从全库 Dense/Hybrid 实验转向候选重排。
+- 验证 reranker 是否能提升 BM25 的 `hit@1` 和 `MRR`。
+- 避免继续做成本很高但收益不明确的全库 dense 编码。
+
+### What I Studied
+
+- Reranker 不负责全库召回，而是在 BM25 已经召回的候选文档里重新排序。
+- CrossEncoder 会同时读取 query 和 document，因此理论上比单独 embedding 更适合判断细粒度相关性。
+- Reranker 的上限受候选召回限制：如果 gold 文档不在 BM25 top50/top100 中，reranker 无法把它排回来。
+
+### What I Built Or Changed
+
+- 新增 reranker 模块：
+  `src/ts_rag_agent/infrastructure/reranker.py`
+- 新增 reranker 评估脚本：
+  `scripts/evaluate_reranker.py`
+- 新增 reranker 单元测试：
+  `tests/test_reranker.py`
+
+### Commands And Evidence
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+python scripts\evaluate_reranker.py --candidate-top-k 50 --batch-size 32 --output artifacts\reranker_bm25_top50_dev_metrics.json
+```
+
+模型烟雾测试：
+
+```text
+model: cross-encoder/ms-marco-MiniLM-L-6-v2
+positive pair score: 4.3955
+negative pair score: -11.3817
+```
+
+BM25 文档级 baseline：
+
+```text
+hit@1:  0.45
+hit@5:  0.6687
+hit@10: 0.7438
+MRR:    0.5459
+```
+
+BM25 top50 + CrossEncoder reranker：
+
+```text
+candidate_top_k: 50
+model: cross-encoder/ms-marco-MiniLM-L-6-v2
+hit@1:  0.4188
+hit@5:  0.6562
+hit@10: 0.7063
+MRR:    0.5151
+total_time: 340.887s
+```
+
+BM25 候选召回上限：
+
+```text
+BM25 recall@10:  119 / 160 = 0.7438
+BM25 recall@20:  127 / 160 = 0.7937
+BM25 recall@50:  135 / 160 = 0.8438
+BM25 recall@100: 143 / 160 = 0.8938
+```
+
+### Problems Encountered
+
+- Reranker 没有超过 BM25，反而降低了 `hit@1`、`hit@5`、`hit@10` 和 `MRR`。
+- BM25 top50 里已有 135 个 gold 文档，但 reranker top10 只保住约 113 个。
+- CrossEncoder 评估耗时明显更高，160 个可回答问题、top50 候选约 8000 对文本，CPU 上大约 5 分多钟。
+
+### Root Cause
+
+- `cross-encoder/ms-marco-MiniLM-L-6-v2` 是通用 MS MARCO 检索重排模型，不是 IBM 技术支持领域模型。
+- 技术支持文档中产品名、版本号、错误码、fix pack、Security Bulletin 等精确 token 非常关键，通用 reranker 可能会弱化这些信号。
+- 当前输入给 reranker 的文档仍是整篇文档前 1600 字符，gold answer 可能不在截断内容里。
+- BM25 已经把很多 gold 文档排得很靠前，reranker 如果不适配领域，反而会把正确文档往后推。
+
+### Solution
+
+- 不把 reranker 失败包装成成功。
+- 把它作为负结果记录下来：通用 MS MARCO reranker 不适合直接替代 BM25 排序。
+- 后续如果继续做 reranker，应优先考虑：
+  1. 用 section/chunk 作为 reranker 输入，而不是整篇文档前 1600 字符。
+  2. 使用更适合技术文档或问答检索的 reranker。
+  3. 保留 BM25 排名特征，而不是完全相信 reranker 分数。
+
+### Why This Choice
+
+- 这一步比直接进入 Agent 更有价值，因为它证明了一个关键事实：不是所有“更深的模型”都会提升检索。
+- 现在已经有 BM25、Dense、Hybrid、Section BM25、Reranker 多条 baseline，项目的实验链条更完整。
+- 这些负结果能在面试中说明：项目不是简单套框架，而是在用实验选择技术路线。
+
+### Verification
+
+- `python -m ruff check .` 通过。
+- `python -m pytest -q` 通过，当前为 17 个测试。
+- reranker 真实评估报告已生成：
+  `artifacts/reranker_bm25_top50_dev_metrics.json`
+
+### What I Still Do Not Understand
+
+- 如果把 BM25 top50 的候选文档切成 gold 相关 section，再给 reranker，会不会提升。
+- 如果使用更强 reranker，例如 BGE reranker，是否会超过 BM25。
+- 是否应该设计 BM25 score + reranker score 的加权融合，而不是完全用 reranker 重排。
+
+### Next Step
+
+- 当前不建议继续盲目换模型。
+- 下一步建议进入 RAG answer generation 的最小闭环，但保持检索器使用当前最强的 BM25 doc baseline。
+- RAG 阶段先不做复杂 Agent，只做：
+  1. BM25 top5 检索。
+  2. 把 top5 文档作为上下文。
+  3. 生成带引用的答案。
+  4. 对 answerable / unanswerable 做基本评估。
+
+## 2026-07-12 - Stage 5: Minimal Extractive RAG Answer Baseline
+
+### Goal
+
+- 进入 RAG answer generation 的最小闭环。
+- 暂时不使用付费 API，也不调用本地大语言模型。
+- 先用 BM25 top5 作为上下文，做一个抽取式、可解释、可评估的带引用答案 baseline。
+
+### What I Studied
+
+- RAG 不等于 Agent。RAG 的最小闭环是：检索上下文、生成答案、给出引用、评估答案和引用。
+- 生成答案之前必须先确认检索上下文是否可靠。
+- 如果没有 answerability 判断，系统很容易对不可回答问题也硬生成答案。
+- 抽取式 baseline 虽然不是 LLM，但能帮助验证 citation、refusal 和上下文质量。
+
+### What I Built Or Changed
+
+- 新增答案领域模型：
+  `src/ts_rag_agent/domain/answer.py`
+- 新增抽取式 RAG 回答器：
+  `src/ts_rag_agent/application/rag_answering.py`
+- 新增 RAG 评估脚本：
+  `scripts/evaluate_extractive_rag.py`
+- 新增测试：
+  `tests/test_rag_answering.py`
+
+### Commands And Evidence
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+python scripts\evaluate_extractive_rag.py
+```
+
+实验配置：
+
+```text
+retriever: BM25
+retrieval_top_k: 5
+answer_generator: extractive_sentence_baseline
+max_sentences: 3
+min_sentence_score: 2.0
+```
+
+真实 dev 结果：
+
+```text
+documents: 28482
+questions: 310
+answerable_questions: 160
+unanswerable_questions: 150
+
+answerable_gold_doc_in_context: 107
+answerable_gold_doc_in_context_rate: 0.6687
+
+generated_answerable_questions: 160
+refused_answerable_questions: 0
+refused_unanswerable_questions: 1
+
+gold_doc_citation_rate: 0.4875
+answerable_refusal_rate: 0.0
+unanswerable_refusal_rate: 0.0067
+average_token_f1: 0.2155
+```
+
+报告文件：
+
+```text
+artifacts/extractive_rag_dev_report.json
+```
+
+### Example Observations
+
+#### 1. 检索错了，答案也会跟着错
+
+```text
+question_id: DEV_Q000
+question: Web GUI 8.1 FP7 requires DASH 3.1.2.1 or later
+gold_doc: swg24042191
+retrieved_top1: swg21681385
+generated_citations: swg21681385
+```
+
+生成答案引用了 top1 错误文档，所以即使答案看起来有引用，也不是 gold evidence。
+
+#### 2. gold 文档在 top5 中，但抽取句子仍然可能引用错文档
+
+```text
+question_id: DEV_Q002
+gold_doc: swg21978390
+retrieved_docs: swg21598554, swg21673044, swg1IO10742, swg21978390, swg1IC60317
+generated_citations: swg21598554, swg21673044, swg1IC60317
+```
+
+这说明“gold 文档进入上下文”不等于“答案会引用 gold 文档”。还需要 evidence selection 或 reranking。
+
+#### 3. 不可回答问题几乎没有被拒答
+
+```text
+question_id: DEV_Q001
+answerable: False
+question: Too many open files messages in the DASH systemOut
+refused: False
+```
+
+抽取式回答器从检索文档里抽出了看似相关的句子，但数据标注认为这个问题不可回答。这说明 answerability 判断不能只靠关键词重合。
+
+### Problems Encountered
+
+- 抽取式 baseline 能生成引用，但引用不一定是正确证据。
+- 对不可回答问题，当前规则几乎都会生成答案，拒答率只有 `0.0067`。
+- `answerable_gold_doc_in_context_rate` 是 `0.6687`，但 `gold_doc_citation_rate` 只有 `0.4875`，说明 evidence selection 还有明显损失。
+- 平均 token F1 只有 `0.2155`，抽取句和标准答案之间仍有较大差距。
+
+### Root Cause
+
+- BM25 top5 没有覆盖所有 answerable 问题的 gold 文档，这是检索上限问题。
+- 即使 gold 文档进入 top5，简单句子打分也可能选择错误文档中的高关键词重合句。
+- unanswerable 问题仍然会检索到表面相关文档，抽取式生成器缺少证据充分性判断。
+- 当前 baseline 没有 LLM 的归纳和压缩能力，也没有专门的 answerability classifier。
+
+### Solution
+
+- 如实记录这个 baseline 是“抽取式 RAG”，不是 LLM RAG。
+- 把 citation 命中率、拒答率和 token F1 都记录下来，不只记录是否生成答案。
+- 暂时保留 BM25 作为上下文检索器，因为它仍然是当前最强 retrieval baseline。
+
+### Why This Choice
+
+- 这一步让项目从 retrieval 进入 answer generation，但仍然保持可控和可评估。
+- 在没有 LLM 前先跑抽取式 baseline，可以明确后续 LLM 需要解决什么：
+  1. 更好地选择证据。
+  2. 更好地组织答案。
+  3. 正确拒答不可回答问题。
+  4. 保证引用来自真实上下文。
+
+### Verification
+
+- `python -m ruff check .` 通过。
+- `python -m pytest -q` 通过，当前为 20 个测试。
+- `python scripts\evaluate_extractive_rag.py` 已真实运行。
+- 报告文件 `artifacts/extractive_rag_dev_report.json` 已生成。
+
+### What I Still Do Not Understand
+
+- 不可回答问题应该如何判断，是用阈值、分类器，还是让 LLM 判断证据充分性。
+- LLM 生成答案后，如何自动判断它是否真正 grounded。
+- 引用 gold doc 和用户实际满意度之间是否完全一致。
+
+### Next Step
+
+- 下一步不要直接做复杂 Agent。
+- 应该先做 RAG 的 answerability / citation verification：
+  1. 判断 top5 文档是否足够回答。
+  2. 如果证据不足，拒答。
+  3. 检查生成答案中的引用是否来自检索上下文。
+  4. 评估 refusal accuracy 和 citation correctness。
+
+## 2026-07-12 - Stage 6: Answer Verification And Quality Analysis
+
+### Goal
+
+- 在抽取式 RAG baseline 之后，补上一层 answerability / citation verification。
+- 不追求把答案包装得更像 Agent，而是先让系统具备“证据不够就拒答”的能力。
+- 分析验证层到底拦住了什么：是合理拒答、检索失败、证据选择失败，还是阈值误杀。
+
+### What I Studied
+
+- RAG 的质量不能只看有没有生成答案，还要看答案是否 grounded。
+- 引用来自检索上下文本身只是最低要求，不代表引用的是正确 gold doc。
+- answerability 判断会带来取舍：拒答率提高可以减少乱答，但也可能误杀可回答问题。
+- 阈值型验证器容易解释、容易复现，但它不能真正理解答案语义，只能作为第一版质量门控。
+
+### What I Built Or Changed
+
+- 新增答案验证器：
+  `src/ts_rag_agent/application/answer_verification.py`
+- 新增验证版 RAG 评估服务：
+  `src/ts_rag_agent/application/verified_rag_evaluation.py`
+- 新增验证版 RAG 评估脚本：
+  `scripts/evaluate_verified_rag.py`
+- 新增质量分析模块：
+  `src/ts_rag_agent/application/verified_rag_quality_analysis.py`
+- 新增质量分析脚本：
+  `scripts/analyze_verified_rag_quality.py`
+- 新增测试：
+  `tests/test_answer_verification.py`
+  `tests/test_verified_rag_quality_analysis.py`
+
+### Commands And Evidence
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+python scripts\evaluate_verified_rag.py
+python scripts\analyze_verified_rag_quality.py
+```
+
+验证层配置：
+
+```text
+retriever: BM25
+retrieval_top_k: 5
+answer_generator: extractive_sentence_baseline
+max_sentences: 3
+min_sentence_score: 2.0
+answer_verifier: citation_and_evidence_gate
+min_evidence_score: 8.0
+max_citation_rank: 3
+min_citations: 1
+```
+
+真实 dev 结果：
+
+```text
+documents: 28482
+questions: 310
+answerable_questions: 160
+unanswerable_questions: 150
+answerable_gold_doc_in_context: 107
+
+original gold_doc_citation_rate: 0.4875
+verified gold_doc_citation_rate: 0.5263
+
+original answerable_refusal_rate: 0.0
+verified answerable_refusal_rate: 0.2875
+
+original unanswerable_refusal_rate: 0.0067
+verified unanswerable_refusal_rate: 0.2533
+
+original average_token_f1: 0.2155
+verified average_token_f1: 0.2237
+```
+
+质量分析结果：
+
+```text
+newly_refused: 83
+newly_refused_answerable: 46
+newly_refused_unanswerable: 37
+
+reasonable_refusal_unanswerable: 37
+safe_refusal_retrieval_miss: 16
+possible_threshold_over_refusal_gold_cited: 18
+evidence_selection_miss_gold_available: 12
+unknown_new_refusal: 0
+
+near_threshold_count: 53
+max_evidence_score_min: 3.0
+max_evidence_score_median: 6.0
+max_evidence_score_mean: 5.8247
+max_evidence_score_max: 7.0
+
+unanswerable_still_answered: 112
+answerable_still_answered: 114
+answerable_answered_without_gold_citation: 54
+answerable_answered_without_gold_citation_rate: 0.4737
+unanswerable_still_answered_rate: 0.7467
+```
+
+报告文件：
+
+```text
+artifacts/verified_rag_dev_report.json
+artifacts/verified_rag_quality_analysis_dev.json
+```
+
+### Example Observations
+
+#### 1. 合理拒答：数据集标注为不可回答
+
+```text
+question_id: DEV_Q015
+question: DFHTS0001 0C4 AKEA at offset 3A1E in DFHTSPT
+answerable: False
+cited_doc_ids: swg1PM05454, swg1PM05454, swg21597996
+max_evidence_score: 6.0
+verification_reasons: weak_evidence_score
+```
+
+原始抽取式回答器会从表面相关文档里抽句子，但数据集标注认为这个问题不可回答。验证层拒答是正确方向。
+
+#### 2. 安全拒答：gold 文档没有进入 top5
+
+```text
+question_id: DEV_Q000
+question: Web GUI 8.1 FP7 requires DASH 3.1.2.1 or later
+gold_doc: swg24042191
+retrieved_docs: swg21681385, swg21962250, swg21987786, swg21960632, swg21984598
+cited_doc_ids: swg21681385, swg21681385, swg21681385
+max_evidence_score: 6.0
+```
+
+这里真正答案文档没有进入检索上下文。即使生成器能抽出看似相关的句子，也不应该强答。
+
+#### 3. 可能误杀：gold 文档已经被引用，但证据分没过阈值
+
+```text
+question_id: DEV_Q029
+question: Recurrent RES StaleConnectionException
+gold_doc: swg21496354
+retrieved_top1: swg21496354
+cited_doc_ids: swg21496354, swg21496354, swg21496354
+max_evidence_score: 7.0
+threshold: 8.0
+```
+
+这个样本说明当前 `min_evidence_score=8.0` 可能太硬。gold 文档已经被检索并引用，但验证层仍然因为分数不足拒答。
+
+#### 4. 证据选择失败：gold 在 top5，但生成器引用了相邻错误文档
+
+```text
+question_id: DEV_Q008
+question: How can I export a private key from DataPower Gateway Appliance?
+gold_doc: swg21412061
+retrieved_docs: swg21412060, swg1IT01034, swg21412061, swg21446015, swg1IT07604
+cited_doc_ids: swg21412060, swg21412060, swg21412060
+max_evidence_score: 5.0
+```
+
+gold 文档其实已经进了 top5，但抽取器选择了相邻主题的错误文档。这个问题不该靠简单调阈值解决，而应该改 evidence selection 或 reranking。
+
+### Problems Encountered
+
+- 验证层提升了 unanswerable 拒答率，但仍然有 `112 / 150` 个不可回答问题被继续回答。
+- 验证层让 gold doc citation rate 从 `0.4875` 提升到 `0.5263`，提升有限。
+- `46 / 160` 个可回答问题被拒答，其中 `18` 个已经引用了 gold 文档，存在阈值误杀风险。
+- 新增拒答样本中 `53 / 83` 个最大证据分在阈值附近，说明简单固定阈值比较粗糙。
+
+### Root Cause
+
+- 当前验证器只看 evidence score、citation rank 和引用是否来自上下文，没有真正判断“这段证据是否回答了这个问题”。
+- 抽取式 evidence score 基于 query-term overlap，无法理解同义表达、答案蕴含和技术因果关系。
+- BM25 top5 仍然有检索上限问题：部分 answerable 问题的 gold 文档不在上下文中。
+- 即使 gold 文档进入上下文，简单句子打分也可能更偏好关键词更多的错误相邻文档。
+
+### Solution
+
+- 保留当前验证层作为第一版可解释质量门控。
+- 将新增拒答拆成四类，而不是只看一个总拒答率。
+- 把“可能阈值误杀”和“证据选择失败”分开，因为它们对应不同优化方向：
+  1. 阈值误杀：需要调参、校准分数或用更细的判断器。
+  2. 证据选择失败：需要 reranking、section-level selection 或 answer-aware evidence selection。
+- 继续记录剩余风险，尤其是 `unanswerable_still_answered`，避免只汇报提升项。
+
+### Why This Choice
+
+- 企业项目里 RAG 的核心不是“接一个框架”，而是能解释错误来自检索、证据选择、生成还是验证。
+- 质量分析脚本能复跑，后面换 Dense、Hybrid、Reranker 或 LLM answerer 时，可以用同一套分析方法比较。
+- 现在的结果说明项目还没到复杂 Agent 阶段，应该先把 RAG 的证据质量闭环做扎实。
+
+### Verification
+
+- `python -m ruff check .` 通过。
+- `python -m pytest -q` 通过，当前为 24 个测试。
+- `python scripts\evaluate_verified_rag.py` 已真实运行。
+- `python scripts\analyze_verified_rag_quality.py` 已真实运行。
+- `artifacts/verified_rag_quality_analysis_dev.json` 已生成，并被 `.gitignore` 忽略。
+
+### What I Still Do Not Understand
+
+- `min_evidence_score=8.0` 是否应该下调，还是应该改成按问题类型、检索分布动态校准。
+- 对不可回答问题，是否需要单独训练或构造 answerability classifier。
+- gold doc citation 是否足够代表真实可用性；有些非 gold 文档可能也包含有用答案。
+- 后续如果接 LLM，应该让 LLM 负责生成答案，还是先让 LLM 做 evidence sufficiency judge。
+
+### Next Step
+
+- 下一步先不要进复杂 Agent。
+- 更合理的方向是做 threshold sweep / calibration：
+  1. 扫描不同 `min_evidence_score`。
+  2. 比较 answerable_refusal_rate、unanswerable_refusal_rate、gold_doc_citation_rate、average_token_f1。
+  3. 找一个更合理的拒答阈值。
+  4. 再决定是否引入 answerability classifier 或 LLM judge。
+
+## 2026-07-12 - Stage 7: Threshold Sweep And Calibration
+
+### Goal
+
+- 不再凭感觉设置 `min_evidence_score=8.0`。
+- 扫描 `retrieval_top_k`、`min_evidence_score`、`max_citation_rank`，观察拒答率、引用命中和答案 F1 的取舍。
+- 判断当前问题主要是阈值问题、检索召回问题，还是证据选择问题。
+
+### What I Studied
+
+- RAG 的阈值不是单一参数，至少包括：
+  1. `retrieval_top_k`：检索阶段取多少篇文档。
+  2. `min_sentence_score`：抽取式回答器是否认为一个句子像证据。
+  3. `min_evidence_score`：验证器是否认为答案证据足够强。
+  4. `max_citation_rank`：允许引用排名多靠后的文档。
+- 阈值搜索不能只看一个指标，因为提高拒答率通常会同时提高安全性和误拒风险。
+- `Pareto candidate` 只能说明该配置没有被其他配置在多指标上明显压过，不代表它就是业务最优。
+
+### What I Built Or Changed
+
+- 给抽取式回答器增加文档切句缓存，避免阈值扫描时重复切同一篇文档：
+  `src/ts_rag_agent/application/rag_answering.py`
+- 新增阈值扫描应用层：
+  `src/ts_rag_agent/application/verified_rag_threshold_sweep.py`
+- 新增阈值扫描脚本：
+  `scripts/sweep_verified_rag_thresholds.py`
+- 新增阈值扫描测试：
+  `tests/test_verified_rag_threshold_sweep.py`
+
+### Commands And Evidence
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+python scripts\sweep_verified_rag_thresholds.py
+```
+
+扫描网格：
+
+```text
+retrieval_top_k: 5, 10, 20
+min_evidence_score: 4, 5, 6, 7, 8
+max_citation_rank: 3, 5
+total_configs: 30
+```
+
+运行耗时：
+
+```text
+load_data: 1.087s
+bm25_index: 4.391s
+sweep: 266.613s
+total: 272.092s
+```
+
+报告文件：
+
+```text
+artifacts/verified_rag_threshold_sweep_dev.json
+```
+
+### Key Results
+
+固定 `retrieval_top_k=5`、`max_citation_rank=3` 时：
+
+| min_evidence_score | answerable_refusal_rate | unanswerable_refusal_rate | gold_doc_citation_rate | average_token_f1 | newly_refused |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 4.0 | 0.0063 | 0.0133 | 0.4906 | 0.2163 | 2 |
+| 5.0 | 0.0500 | 0.0333 | 0.4934 | 0.2174 | 12 |
+| 6.0 | 0.1250 | 0.0733 | 0.5143 | 0.2184 | 30 |
+| 7.0 | 0.2062 | 0.1533 | 0.5276 | 0.2268 | 55 |
+| 8.0 | 0.2875 | 0.2533 | 0.5263 | 0.2237 | 83 |
+
+`retrieval_top_k` 对 gold 文档进入上下文有帮助：
+
+```text
+top5  answerable_gold_doc_in_context: 107 / 160
+top10 answerable_gold_doc_in_context: 119 / 160
+top20 answerable_gold_doc_in_context: 127 / 160
+```
+
+但是 `retrieval_top_k=10/20` 没有显著提升最终答案指标：
+
+```text
+top5  min_evidence_score=7.0 average_token_f1: 0.2268
+top10 min_evidence_score=7.0 average_token_f1: 0.2268
+top20 min_evidence_score=7.0 average_token_f1: 0.2268
+```
+
+`max_citation_rank=3` 和 `max_citation_rank=5` 在这次实验里结果完全相同或几乎相同，说明当前抽取器实际主要引用靠前文档，放宽引用排名没有带来收益。
+
+### Example Interpretation
+
+#### 1. `min_evidence_score=8.0` 太激进
+
+```text
+answerable_refusal_rate: 0.2875
+unanswerable_refusal_rate: 0.2533
+newly_refused: 83
+possible_threshold_over_refusal_gold_cited: 18
+```
+
+它确实多拦了一些不可回答问题，但也误拒了较多可回答问题，且 18 条是 gold 文档已经被引用却被阈值挡掉。
+
+#### 2. `min_evidence_score=4.0` 太宽松
+
+```text
+answerable_refusal_rate: 0.0063
+unanswerable_refusal_rate: 0.0133
+newly_refused: 2
+```
+
+它几乎不误拒可回答问题，但也几乎拦不住不可回答问题，和原始 RAG 差异很小。
+
+#### 3. `min_evidence_score=7.0` 是当前较合理的折中点
+
+```text
+answerable_refusal_rate: 0.2062
+unanswerable_refusal_rate: 0.1533
+gold_doc_citation_rate: 0.5276
+average_token_f1: 0.2268
+newly_refused: 55
+```
+
+它不是绝对最优，只是当前指标下比较平衡：F1 和 gold citation rate 最高，同时比 8.0 少误拒很多可回答问题。
+
+### Problems Encountered
+
+- 阈值扫描如果每组参数都重新检索和生成，会非常慢。
+- top10/top20 让更多 gold 文档进入上下文，但最终答案没有明显变好。
+- `max_citation_rank` 放宽到 5 没有效果，说明当前失败不是“引用排名限制太严格”导致的。
+- 不同目标下没有唯一最优阈值：
+  1. 少误拒可回答问题：5.0 或 6.0 更保守。
+  2. 提高不可回答拒答率：8.0 更强硬。
+  3. 综合当前 F1 和 citation：7.0 更像折中点。
+
+### Root Cause
+
+- 当前抽取器的 evidence selection 仍然偏向关键词重合最高的句子，所以即使 gold 文档进入 top10/top20，也未必会被选中。
+- `min_evidence_score` 只能过滤低重合证据，不能判断证据是否真正回答问题。
+- `max_citation_rank` 没有效果，是因为生成器大多已经在 top3 文档内选句子。
+- top_k 扩大后，检索召回上限提升了，但 answer selection 没有同步提升。
+
+### Solution
+
+- 增加阈值扫描脚本，并在报告中保留完整 30 组参数结果。
+- 使用同一 `retrieval_top_k` 下的检索和原始答案缓存，避免每组阈值重复跑完整 RAG。
+- 使用 Pareto candidate 标记多指标下没有被明显支配的配置，但不把它伪装成业务最优。
+- 暂时把 `min_evidence_score=7.0` 作为下一阶段的候选阈值，而不是继续使用 8.0。
+
+### Why This Choice
+
+- 阈值校准让项目从“拍脑袋设规则”变成“用实验选择质量门控参数”。
+- 这一步证明问题不只是阈值：top_k 增加带来了更多 gold 上下文，但答案仍然没有更好，说明 evidence selection 是下一瓶颈。
+- 继续堆 Agent workflow 之前，先解决证据选择问题更有价值。
+
+### Verification
+
+- `python -m ruff check .` 通过。
+- `python -m pytest -q` 通过，当前为 25 个测试。
+- `python scripts\sweep_verified_rag_thresholds.py` 已真实运行。
+- `artifacts/verified_rag_threshold_sweep_dev.json` 已生成，并被 `.gitignore` 忽略。
+
+### What I Still Do Not Understand
+
+- 为什么 top10/top20 中新增的 gold 文档没有被抽取器利用，需要进一步看句子级候选分布。
+- 是否应该把 evidence selection 从 document-level 改成 section/chunk-level。
+- 是否需要为 answerability 单独训练一个 classifier，还是先用更好的 evidence selector。
+- `min_evidence_score=7.0` 是否能在 NVIDIA TechQA-RAG-Eval 上保持类似趋势。
+
+### Next Step
+
+- 下一步不应该继续盲目扫阈值。
+- 应该做 evidence selection analysis：
+  1. 对比 top5/top10/top20 中 gold 文档新增但未被引用的样本。
+  2. 检查 gold 文档里的句子为什么分数不如错误文档。
+  3. 决定是做 section-level BM25 answer selection，还是做 query-aware sentence reranking。
+  4. 再用 `min_evidence_score=7.0` 作为候选阈值复测。
+
+## 2026-07-12 - Stage 8: Evidence Selection Analysis
+
+### Goal
+
+- 分析 `retrieval_top_k` 从 5 扩到 10 / 20 后，为什么新增进入上下文的 gold 文档没有被答案引用。
+- 找出当前抽取式回答器的 evidence selection 失败机制。
+- 判断下一步应该继续调阈值，还是改证据选择器。
+
+### What I Studied
+
+- 检索召回和证据选择是两层不同问题：
+  1. 检索召回解决 gold 文档是否进入上下文。
+  2. 证据选择解决 gold 文档进入上下文后是否被真正使用。
+- `top_k` 变大只能提供更多候选文档，不能自动保证生成器选中正确证据。
+- 简单 query-term overlap 会放大日志、错误码、模板化字段和长句子的影响。
+
+### What I Built Or Changed
+
+- 将抽取式回答器内部的候选句排序能力公开为可复用方法：
+  `ExtractiveAnswerGenerator.rank_sentence_candidates`
+- 新增候选证据句结构：
+  `SentenceEvidenceCandidate`
+- 新增 evidence selection 分析模块：
+  `src/ts_rag_agent/application/evidence_selection_analysis.py`
+- 新增 evidence selection 分析脚本：
+  `scripts/analyze_evidence_selection.py`
+- 新增测试：
+  `tests/test_evidence_selection_analysis.py`
+
+### Commands And Evidence
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+python scripts\analyze_evidence_selection.py
+```
+
+真实 dev 结果：
+
+```text
+top5:
+gold_in_context: 107
+gold_cited: 78
+gold_in_context_not_cited: 29
+gold_not_in_context: 53
+gold_candidate_below_min_sentence_score: 3
+gold_candidate_loses_to_wrong_sentences: 26
+
+top10:
+gold_in_context: 119
+gold_cited: 78
+gold_in_context_not_cited: 41
+gold_newly_available_after_base_k: 12
+gold_newly_available_but_not_cited: 12
+gold_not_in_context: 41
+gold_candidate_below_min_sentence_score: 6
+gold_candidate_loses_to_wrong_sentences: 35
+
+top20:
+gold_in_context: 127
+gold_cited: 78
+gold_in_context_not_cited: 49
+gold_newly_available_after_base_k: 20
+gold_newly_available_but_not_cited: 20
+gold_not_in_context: 33
+gold_candidate_below_min_sentence_score: 11
+gold_candidate_loses_to_wrong_sentences: 38
+```
+
+报告文件：
+
+```text
+artifacts/evidence_selection_analysis_dev.json
+```
+
+### Example Observations
+
+#### 1. top-k 扩大带来 gold 文档，但没有带来 gold 引用
+
+```text
+top5  gold_in_context: 107, gold_cited: 78
+top10 gold_in_context: 119, gold_cited: 78
+top20 gold_in_context: 127, gold_cited: 78
+```
+
+这说明新增进入上下文的 gold 文档完全没有被当前抽取器利用。继续单纯扩大 `top_k` 不是有效方向。
+
+#### 2. 日志类长句会压倒真正 gold 证据
+
+```text
+question_id: DEV_Q002
+gold_doc: swg21978390
+gold_retrieval_rank: 4
+bucket: gold_candidate_loses_to_wrong_sentences
+best_gold_candidate_rank: 6
+best_gold_candidate_score: 7.7522
+best_non_gold_candidate_score: 81.0
+selected_doc_ids: swg21598554, swg21673044, swg1IC60317
+```
+
+错误文档中的日志长句包含大量 query token，例如错误码、模块名、路径、dump 字段，因此 overlap 分数极高。gold 文档虽然是真正答案来源，但候选句排名被挤到第 6。
+
+#### 3. 相邻主题 FAQ 会抢走答案位置
+
+```text
+question_id: DEV_Q008
+question: How can I export a private key from DataPower Gateway Appliance?
+gold_doc: swg21412061
+gold_retrieval_rank: 3
+selected_doc_ids: swg21412060, swg21412060, swg21412060
+best_gold_candidate_score: 3.0
+best_non_gold_candidate_score: 5.0
+```
+
+gold 文档回答的是 HSM-enabled DataPower appliance 可以用 `crypto-export` 导出私钥；但相邻 FAQ 文档因为表面关键词更像问题，被抽取器优先引用。
+
+#### 4. 新增进入 top10 的 gold 文档仍然被旧 top1 文档压制
+
+```text
+question_id: DEV_Q016
+gold_doc: swg21502095
+gold_retrieval_rank: 7
+gold_newly_available_after_base_k: True
+selected_doc_ids: swg21615508, swg21615508, swg21615508
+best_gold_candidate_rank: 58
+best_gold_candidate_score: 4.0
+best_non_gold_candidate_score: 17.0
+```
+
+这个案例证明 top10 让 gold 文档进来了，但句子级选择器仍然强烈偏向 top1 错误文档。
+
+### Problems Encountered
+
+- `retrieval_top_k` 扩大后，gold 文档进入上下文的数量增加，但 `gold_cited` 完全没有增加。
+- 当前抽取器把所有候选句放在同一个池子里按 overlap 排序，容易让错误文档中的高重合句子挤掉 gold 证据。
+- 长日志、错误码、路径、产品模板字段会制造非常高的 overlap score。
+- gold 文档有时候答案句更短、更概括，反而在简单 overlap 规则下得分低。
+
+### Root Cause
+
+- 当前 evidence score 使用的是 `overlap_terms_count / log2(retrieval_rank + 1)`，没有 IDF 权重，也没有句子长度、字段噪声、标题匹配、answer-like pattern 等特征。
+- 候选句选择直接跨文档竞争，top1 错误文档可以用多个高分句子占满 `max_sentences=3`。
+- 检索阶段提升的是文档级召回，但回答阶段没有 section-level / sentence-level 的独立检索机制。
+
+### Solution
+
+- 不再继续盲目扩大 `top_k`。
+- 把当前问题定位为 evidence selection bottleneck。
+- 下一步应实现一个更合理的 sentence / section selector：
+  1. 使用 BM25 / IDF 风格的句子级打分，而不是纯 overlap。
+  2. 限制同一文档占用过多答案句。
+  3. 过滤日志噪声或降低日志长句权重。
+  4. 比较新 selector 对 `gold_cited`、F1、拒答率的影响。
+
+### Why This Choice
+
+- 这个分析把“检索召回问题”和“证据选择问题”分开了。
+- 如果不做这一步，可能会误以为 top_k、阈值、Agent workflow 能解决问题。
+- 真实结果已经证明：gold 文档进入上下文不是终点，能否选中 gold 证据才是下一阶段关键。
+
+### Verification
+
+- `python -m ruff check .` 通过。
+- `python -m pytest -q` 通过，当前为 26 个测试。
+- `python scripts\analyze_evidence_selection.py` 已真实运行。
+- `artifacts/evidence_selection_analysis_dev.json` 已生成，并被 `.gitignore` 忽略。
+
+### What I Still Do Not Understand
+
+- 句子级 BM25 是否能显著提升 `gold_cited`。
+- section-level selector 是否比 sentence-level selector 更适合 TechQA 文档。
+- 是否应该引入去噪规则，例如降低 dump、trace、路径、十六进制错误码的权重。
+- 如果限制每个文档最多贡献一句，是否会提高 gold citation，还是会损失多证据答案。
+
+### Next Step
+
+- 下一步实现一个改进版 evidence selector。
+- 建议先做 `BM25SentenceEvidenceSelector`：
+  1. 用 answerable dev 问题构建候选句或 section。
+  2. 用 IDF 风格分数替代纯 overlap。
+  3. 支持每个文档最多选择 N 句。
+  4. 和当前 overlap selector 对比 `gold_cited`、`average_token_f1`、`unanswerable_refusal_rate`。

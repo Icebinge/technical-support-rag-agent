@@ -8,14 +8,14 @@ from ts_rag_agent.domain.dataset import DatasetStats, TechQASample
 
 
 def load_nvidia_samples(train_json_path: Path) -> list[TechQASample]:
-    """Load NVIDIA TechQA-RAG-Eval rows into typed samples."""
+    """读取 NVIDIA TechQA-RAG-Eval 样本并转换为类型化对象。"""
 
     rows = json.loads(train_json_path.read_text(encoding="utf-8"))
     return [TechQASample.model_validate(row) for row in rows]
 
 
 def list_corpus_filenames(corpus_zip_path: Path) -> set[str]:
-    """Return document basenames available in the compressed corpus."""
+    """返回压缩语料包中存在的文档文件名。"""
 
     with ZipFile(corpus_zip_path) as archive:
         return {Path(info.filename).name for info in archive.infolist() if not info.is_dir()}
