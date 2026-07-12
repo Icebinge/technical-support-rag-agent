@@ -6,8 +6,8 @@ from ts_rag_agent.application.evidence_selection import (
     OverlapSentenceEvidenceSelector,
     SentenceEvidenceCandidate,
     SentenceEvidenceSelector,
-    tokenize_text,
 )
+from ts_rag_agent.application.text_metrics import token_f1
 from ts_rag_agent.domain.answer import AnswerCitation, AnswerEvaluationMetrics, GeneratedAnswer
 from ts_rag_agent.domain.dataset import PrimeQAQuestion
 from ts_rag_agent.domain.retrieval import RetrievalResult
@@ -132,7 +132,7 @@ def evaluate_answers(
         cited_doc_ids = {citation.document_id for citation in answer.citations}
         if question.answer_doc_id in cited_doc_ids:
             gold_doc_cited += 1
-        token_f1_values.append(_token_f1(answer.answer, question.answer))
+        token_f1_values.append(token_f1(answer.answer, question.answer))
 
     for question in unanswerable_questions:
         answer = answer_by_question_id[question.id]
@@ -160,30 +160,3 @@ def evaluate_answers(
         if token_f1_values
         else 0.0,
     )
-
-
-def _token_f1(prediction: str, gold: str) -> float:
-    prediction_tokens = tokenize_text(prediction)
-    gold_tokens = tokenize_text(gold)
-    if not prediction_tokens or not gold_tokens:
-        return 0.0
-
-    prediction_counts = _count_tokens(prediction_tokens)
-    gold_counts = _count_tokens(gold_tokens)
-    overlap = sum(
-        min(prediction_counts[token], gold_counts[token])
-        for token in prediction_counts.keys() & gold_counts.keys()
-    )
-    if overlap == 0:
-        return 0.0
-
-    precision = overlap / len(prediction_tokens)
-    recall = overlap / len(gold_tokens)
-    return 2 * precision * recall / (precision + recall)
-
-
-def _count_tokens(tokens: list[str]) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for token in tokens:
-        counts[token] = counts.get(token, 0) + 1
-    return counts

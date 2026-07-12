@@ -2041,3 +2041,185 @@ max_citation_rank: 3
   2. gold 文档中是否存在更接近标准答案的句子。
   3. 当前 selector 选错是因为句子太短、太泛、还是答案跨句。
   4. 决定下一步做 section-level selector，还是 answer-aware reranker。
+
+## 2026-07-12 - Stage 11: BM25 Sentence Answer Gap Analysis
+
+### Goal
+
+- 分析为什么 bm25-sentence 提高了 gold citation，但答案 token F1 仍然低。
+- 对比当前选中的 evidence sentences 和 gold 文档中更接近标准答案的 sentence/window。
+- 判断下一步应该做 section-level selector，还是 answer-aware reranker。
+
+### What I Studied
+
+- citation 正确不等于 answer span 正确。
+- query-to-sentence scoring 容易选中标题、症状、日志、trace、错误描述，因为它们和问题关键词高度重合。
+- TechQA 的标准答案很多来自 gold 文档中的 resolving / cause / answer 片段，而不是问题复述片段。
+- 如果 gold 文档中存在高 F1 的连续句子窗口，但当前 selector 没选中，说明瓶颈是 answer-aware evidence selection。
+
+### What I Built Or Changed
+
+- 新增公共 token F1 工具：
+  `src/ts_rag_agent/application/text_metrics.py`
+- 将 `rag_answering.py` 里的私有 token F1 逻辑改为复用公共函数。
+- 新增 answer gap 分析模块：
+  `src/ts_rag_agent/application/answer_gap_analysis.py`
+- 新增分析脚本：
+  `scripts/analyze_answer_gap.py`
+- 新增测试：
+  `tests/test_answer_gap_analysis.py`
+
+### Commands And Evidence
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+
+python scripts\analyze_answer_gap.py `
+  --evidence-selector bm25-sentence `
+  --retrieval-top-k 5 `
+  --max-candidates-per-document 3 `
+  --output artifacts\answer_gap_analysis_dev_bm25_sentence_mcpd3.json
+```
+
+验证命令结果：
+
+```text
+ruff: passed
+pytest: 31 passed
+```
+
+### Main Results
+
+固定条件：
+
+```text
+dataset: PrimeQA/TechQA dev
+retriever: BM25
+retrieval_top_k: 5
+evidence_selector: bm25_sentence
+max_candidates_per_document: 3
+max_sentences: 3
+max_window_sentences: 3
+```
+
+结果：
+
+```text
+total_answerable_questions: 160
+gold_document_available: 160
+gold_in_context: 107
+selected_gold_citation: 91
+
+average_selected_answer_token_f1: 0.2159
+average_best_gold_sentence_token_f1: 0.7349
+average_best_gold_window_token_f1: 0.8881
+```
+
+Bucket 分布：
+
+| Bucket | Count |
+| --- | ---: |
+| gold_not_in_context | 53 |
+| gold_in_context_not_selected | 16 |
+| gold_window_beats_selected_answer | 91 |
+| gold_sentence_beats_selected_answer | 0 |
+| selected_answer_low_overlap | 0 |
+| selected_answer_reasonable_overlap | 0 |
+| gold_document_missing | 0 |
+
+### Example Observations
+
+#### 1. 选中了症状，但 gold 文档里的解决方案更接近答案
+
+```text
+question_id: DEV_Q002
+selected_answer_token_f1: 0.0213
+best_gold_sentence_f1: 0.7568
+best_gold_window_f1: 0.9333
+```
+
+当前 selector 选中了 `PROBLEM(ABSTRACT)`、dump、javacore 片段，但标准答案对应的是：
+
+```text
+RESOLVING THE PROBLEM Install the missing libraries ...
+```
+
+#### 2. 选中了问题复述，但 gold 文档里的 resolving 段落几乎就是标准答案
+
+```text
+question_id: DEV_Q012
+selected_answer_token_f1: 0.0
+best_gold_sentence_f1: 0.619
+best_gold_window_f1: 0.9735
+```
+
+当前 selector 选中了错误标题和症状：
+
+```text
+Argument list too long
+```
+
+但 gold 文档中的 resolving window 更接近标准答案。
+
+#### 3. gold 文档进入上下文后，仍可能被相邻主题或日志句子干扰
+
+```text
+question_id: DEV_Q258
+selected_answer_token_f1: 0.0308
+best_gold_sentence_f1: 1.0
+best_gold_window_f1: 1.0
+```
+
+gold 文档中存在完全匹配标准答案的句子，但 selector 仍选了告警、workspace、application health 等相邻上下文。
+
+### Problems Encountered
+
+- bm25-sentence 可以找到 gold 文档，但仍倾向于选 query-overlap 最高的句子。
+- 这些高 overlap 句子往往是标题、症状、日志、trace 或错误消息，不是答案。
+- gold 文档里的答案 span 往往带有 `RESOLVING THE PROBLEM`、`CAUSE`、`ANSWER` 等结构信号。
+- 单纯扩大 sentence window 只能说明 gold 文档有答案，但不会自动让 selector 学会选答案段。
+
+### Root Cause
+
+- 当前 selector 是 query-aware，不是 answer-aware。
+- 它只知道“这句话像不像问题”，不知道“这句话是不是在回答问题”。
+- 标准答案更像 gold 文档中的解决方案段、原因段或结论段，而不是和问题表面词最像的句子。
+- 因此，citation-oriented selector 解决了“引用哪篇文档”的一部分问题，但没有解决“引用文档里的哪段答案”的问题。
+
+### Solution
+
+- 不继续盲目调 `min_evidence_score` 或 `max_candidates_per_document`。
+- 将下一阶段目标从 sentence scoring 改为 answer-aware span selection。
+- 优先考虑 section-level 或 answer-aware reranking，而不是直接进入 Agent。
+- 继续保留 bm25-sentence 作为 document/citation 候选来源，但不能把它当最终 answer selector。
+
+### Why This Choice
+
+- Stage 11 证明了 gold 文档里有高质量答案 span：平均 best gold window F1 达到 0.8881。
+- 当前 selected answer 平均 F1 只有 0.2159，说明差距主要来自 span selection，而不是数据缺答案。
+- 如果现在进入 Agent workflow，只会把错误 evidence 包装成更复杂的流程。
+- 更合理的下一步是让系统学会选“回答型片段”，再谈 Agent 编排。
+
+### Verification
+
+- `python -m ruff check .` 通过。
+- `python -m pytest -q` 通过，当前为 31 个测试。
+- `artifacts/answer_gap_analysis_dev_bm25_sentence_mcpd3.json` 已生成。
+- 实验产物在 `artifacts/` 下，并被 `.gitignore` 忽略。
+
+### What I Still Do Not Understand
+
+- 使用 section-level selector 能否直接命中 resolving/cause/answer 段。
+- 是否需要显式识别文档结构标题，例如 `RESOLVING THE PROBLEM`、`CAUSE`、`ANSWER`。
+- answer-aware reranker 是先用规则特征实现，还是接一个小模型/LLM judge。
+- 如果用 gold answer 做 oracle 分析，如何避免把 oracle 结果误当作真实可部署方法。
+
+### Next Step
+
+- 做 Stage 12：Answer-aware section/span selector prototype。
+- 第一版先不接 LLM，先做规则和结构特征：
+  1. 给 resolving/cause/answer 类标题附近的句子加权。
+  2. 降低 symptom/problem/trace/dump/error log 类句子的权重。
+  3. 在 gold-in-context 的样本上比较 selected answer F1。
+  4. 再决定是否做 learned reranker 或 LLM judge。
