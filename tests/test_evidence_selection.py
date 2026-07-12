@@ -2,6 +2,7 @@ from ts_rag_agent.application.evidence_selection import (
     AnswerAwareBM25SentenceEvidenceSelector,
     BM25SentenceEvidenceSelector,
     OverlapSentenceEvidenceSelector,
+    SectionSpanBM25SentenceEvidenceSelector,
     create_sentence_evidence_selector,
 )
 from ts_rag_agent.domain.dataset import PrimeQADocument, PrimeQAQuestion
@@ -150,3 +151,81 @@ def test_selector_factory_creates_answer_aware_selector():
     )
 
     assert selector.name == "answer_aware_bm25_sentence"
+
+
+def test_section_span_selector_prefers_answer_section_window():
+    question = PrimeQAQuestion(
+        id="q1",
+        title="Unable to open profile on Redhat Linux",
+        text="Getting GPF and javacore dump.",
+        answer="Install the missing adwaita libraries and restart the profile tool.",
+        answerable=True,
+        answer_doc_id="gold",
+        doc_ids=["gold"],
+    )
+    document = PrimeQADocument(
+        id="gold",
+        title="Profile fails to open",
+        text=(
+            "PROBLEM(ABSTRACT) Unable to open profile on Redhat Linux with GPF "
+            "and javacore dump. "
+            "RESOLVING THE PROBLEM Install the missing adwaita libraries. "
+            "Restart the profile tool."
+        ),
+    )
+    retrieval_results = [RetrievalResult(document=document, score=10.0, rank=1)]
+
+    candidates = SectionSpanBM25SentenceEvidenceSelector(
+        min_sentence_chars=8,
+        max_candidates_per_document=3,
+        max_window_sentences=2,
+    ).rank_sentence_candidates(question, retrieval_results)
+
+    assert "Install the missing adwaita libraries" in candidates[0].sentence
+    assert "Restart the profile tool" in candidates[0].sentence
+    assert "PROBLEM(ABSTRACT)" not in candidates[0].sentence
+
+
+def test_selector_factory_creates_section_span_selector():
+    selector = create_sentence_evidence_selector(
+        selector_name="section-span",
+        min_sentence_chars=8,
+        max_candidates_per_document=2,
+    )
+
+    assert selector.name == "section_span_bm25_sentence"
+
+
+def test_section_span_selector_promotes_security_bulletin_cve_span():
+    question = PrimeQAQuestion(
+        id="q1",
+        title="Security Bulletin Java SDK CVE-2015-0410",
+        text="",
+        answer="CVEID: CVE-2015-0410 CVSS Base Score: 5.",
+        answerable=True,
+        answer_doc_id="gold",
+        doc_ids=["gold"],
+    )
+    document = PrimeQADocument(
+        id="gold",
+        title="Security Bulletin",
+        text=(
+            "SUMMARY There are multiple vulnerabilities in IBM SDK Java Technology "
+            "Edition used by the product. "
+            "CVEID: CVE-2015-0410 DESCRIPTION: An unspecified vulnerability could "
+            "allow a remote attacker to cause a denial of service. CVSS Base Score: 5."
+        ),
+    )
+    retrieval_results = [RetrievalResult(document=document, score=10.0, rank=1)]
+
+    candidates = SectionSpanBM25SentenceEvidenceSelector(
+        min_sentence_chars=8,
+        max_candidates_per_document=1,
+        max_window_sentences=2,
+    ).rank_sentence_candidates(question, retrieval_results)
+
+    assert "SUMMARY" not in candidates[0].sentence
+    assert (
+        "CVEID: CVE-2015-0410" in candidates[0].sentence
+        or "CVSS Base Score" in candidates[0].sentence
+    )

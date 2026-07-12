@@ -2378,3 +2378,150 @@ RESOLVING THE PROBLEM Install the missing libraries ...
   2. 对 resolving/cause/answer section 做候选召回。
   3. 在 section 内做 sentence/window selection。
   4. 对比 answer-aware sentence selector 是否继续提升 F1。
+
+## 2026-07-13 - Stage 13: Section-Level Answer Span Selector
+
+### Goal
+
+- 实现一个 section-level answer span selector 原型。
+- 从“全篇文档句子打分”升级为“先识别 section，再在 section 内选择句子/window”。
+- 验证它是否能缩小 Stage 12 发现的 answer-gap。
+
+### What I Studied
+
+- section/window 选择不等于自然提升 F1。
+- answer-like section 在 gold 文档和相邻错误文档中都会出现，因此结构信号需要和 query matching 一起使用。
+- 多句 window 可能包含更完整答案，也可能带来更多噪声。
+- 对 section-span selector 来说，每个文档最多贡献多少个候选 span 是一个强影响参数。
+
+### What I Built Or Changed
+
+- 新增 `SectionSpanBM25SentenceEvidenceSelector`。
+- 支持命令行参数：
+  `--evidence-selector section-span`
+- 新 selector 会：
+  1. 按 TechQA 文档中的 section heading 切分文本。
+  2. 在 section 内生成 1 到 3 句连续 window。
+  3. 使用 section heading 参与打分，但不把 heading 拼进最终答案文本。
+  4. 给 CVE/CVSS、restriction、limitation、enhancement 等答案型 span 加权。
+  5. 给 SUMMARY、affected-products 这类背景段降权。
+- 更新脚本 help 文案：
+  `evaluate_verified_rag.py`
+  `analyze_evidence_selection.py`
+  `analyze_answer_gap.py`
+  `sweep_verified_rag_thresholds.py`
+- 新增 section-span 相关测试。
+
+### Commands And Evidence
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+
+python scripts\evaluate_verified_rag.py `
+  --evidence-selector section-span `
+  --max-candidates-per-document 1 `
+  --min-evidence-score 15 `
+  --output artifacts\verified_rag_dev_section_span_mcpd1_v2_report.json
+
+python scripts\evaluate_verified_rag.py `
+  --evidence-selector section-span `
+  --max-candidates-per-document 3 `
+  --min-evidence-score 15 `
+  --output artifacts\verified_rag_dev_section_span_mcpd3_v2_report.json
+
+python scripts\analyze_answer_gap.py `
+  --evidence-selector section-span `
+  --max-candidates-per-document 1 `
+  --output artifacts\answer_gap_analysis_dev_section_span_mcpd1_v2.json
+```
+
+验证命令结果：
+
+```text
+ruff: passed
+pytest: 36 passed
+```
+
+### Main Results
+
+对比 verified RAG 指标：
+
+| Selector | Config | gold_doc_citation_rate | average_token_f1 | answerable_refusal_rate | unanswerable_refusal_rate |
+| --- | --- | ---: | ---: | ---: | ---: |
+| answer-aware | mcpd=3, score=15 | 0.5696 | 0.2449 | 0.0125 | 0.0267 |
+| section-span v1 | mcpd=1, score=15 | 0.5687 | 0.2129 | 0.0000 | 0.0000 |
+| section-span v2 | mcpd=1, score=15 | 0.5750 | 0.2378 | 0.0000 | 0.0000 |
+| section-span v2 | mcpd=3, score=15 | 0.4088 | 0.2041 | 0.1437 | 0.1467 |
+
+Answer-gap 结果：
+
+| Selector | Config | selected_gold_citation | average_selected_answer_token_f1 | average_best_gold_window_token_f1 |
+| --- | --- | ---: | ---: | ---: |
+| answer-aware | mcpd=3 | 90 | 0.2501 | 0.8881 |
+| section-span v1 | mcpd=1 | 91 | 0.2181 | 0.8881 |
+| section-span v2 | mcpd=1 | 92 | 0.2432 | 0.8881 |
+
+### Problems Encountered
+
+- 第一版 section-span 明显低于 answer-aware：F1 只有 0.2129。
+- `max_candidates_per_document=3` 会让错误文档中的 answer-like windows 霸占候选，结果比 `mcpd=1` 更差。
+- `max_sentences=1` 没有解决问题，反而导致 gold citation 和拒答表现变差。
+- 安全公告类问题中，正确答案常在 `CVEID`、`DESCRIPTION`、`CVSS Base Score` 附近，而不是普通 `RESOLVING THE PROBLEM` section。
+- section heading 本身只能说明“这里像答案区”，不能说明“这里回答了当前问题”。
+
+### Root Cause
+
+- section-span v1 太相信 section 结构，忽略了不同问题类型的答案形态。
+- TechQA 中有多种答案格式：
+  1. resolving/problem-solution 型。
+  2. cause/limitation 型。
+  3. CVE/CVSS security bulletin 型。
+  4. RFE/enhancement 型。
+  5. 附件/链接型。
+- 同一个错误文档也可能包含高质量 answer section，因此只靠 heading 会推高错误答案段。
+- 多 window 拼接会提高召回，但也会降低答案精度。
+
+### Solution
+
+- 保留 section-span 原型，但不把它替代 answer-aware。
+- 将 `max_candidates_per_document=1` 作为当前 section-span 的更合理配置。
+- 加入少量 answer-span pattern：
+  `CVEID`
+  `CVSS Base Score`
+  `restriction`
+  `limitation`
+  `enhancement`
+- 对 `SUMMARY`、`affected products and versions`、`remediation/fixes` 做背景段降权。
+
+### Why This Choice
+
+- v2 证明 section/span 方向有价值：F1 从 0.2129 提到 0.2378，selected gold citation 从 91 到 92。
+- 但它仍没有超过 answer-aware 的 0.2449，所以不能宣称 Stage 13 成功替代 Stage 12。
+- 当前最强非 LLM 原型仍然是 answer-aware selector。
+- section-span 更适合作为下一版 hybrid selector 或 reranker feature，而不是直接作为主 selector。
+
+### Verification
+
+- `python -m ruff check .` 通过。
+- `python -m pytest -q` 通过，当前为 36 个测试。
+- `artifacts/verified_rag_dev_section_span_mcpd1_v2_report.json` 已生成。
+- `artifacts/verified_rag_dev_section_span_mcpd3_v2_report.json` 已生成。
+- `artifacts/answer_gap_analysis_dev_section_span_mcpd1_v2.json` 已生成。
+- 实验产物在 `artifacts/` 下，并被 `.gitignore` 忽略。
+
+### What I Still Do Not Understand
+
+- section-span v2 提升的样本主要是哪几类问题。
+- answer-aware 和 section-span 是否能融合，而不是二选一。
+- 是否应该让 section-span 只在特定问题类型上启用，例如 security bulletin 或 limitation 类问题。
+- 是否需要一个 learned reranker 来学习 query-answer matching，而不是继续手写规则。
+
+### Next Step
+
+- 不要继续单独堆 section-span 规则。
+- 下一步更合理的是做 selector comparison analysis：
+  1. 找出 answer-aware 赢、section-span 输的样本。
+  2. 找出 section-span 赢、answer-aware 输的样本。
+  3. 按问题类型分类，例如 CVE、安全公告、limitation、how-to、附件/链接。
+  4. 决定是否做 hybrid selector，还是转向 learned reranker / LLM judge。

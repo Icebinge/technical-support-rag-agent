@@ -231,7 +231,7 @@ class BM25SentenceEvidenceSelector:
         retrieval_prior = 1 / math.log2(row.retrieval_result.rank + 1)
         overlap_bonus = 0.25 * len(row.overlap_terms)
         score = (bm25_score + overlap_bonus) * (1 + 0.35 * retrieval_prior)
-        score *= _sentence_noise_penalty(row.sentence)
+        score *= _sentence_noise_penalty(row.scoring_text or row.sentence)
         score *= self._score_scale
 
         return SentenceEvidenceCandidate(
@@ -301,9 +301,103 @@ class AnswerAwareBM25SentenceEvidenceSelector(BM25SentenceEvidenceSelector):
             idf_by_term=idf_by_term,
             avg_sentence_length=avg_sentence_length,
         )
-        adjusted_score = candidate.score + _answer_section_bonus(row.sentence)
-        adjusted_score *= _answer_section_multiplier(row.sentence)
-        adjusted_score *= _problem_statement_penalty(row.sentence)
+        scoring_text = row.scoring_text or row.sentence
+        adjusted_score = candidate.score + _answer_section_bonus(scoring_text)
+        adjusted_score *= _answer_section_multiplier(scoring_text)
+        adjusted_score *= _problem_statement_penalty(scoring_text)
+        return SentenceEvidenceCandidate(
+            sentence=candidate.sentence,
+            retrieval_result=candidate.retrieval_result,
+            score=adjusted_score,
+            overlap_terms=candidate.overlap_terms,
+        )
+
+
+class SectionSpanBM25SentenceEvidenceSelector(AnswerAwareBM25SentenceEvidenceSelector):
+    """Answer-aware selector that scores windows inside document sections."""
+
+    name = "section_span_bm25_sentence"
+
+    def __init__(
+        self,
+        min_sentence_chars: int = 24,
+        max_candidates_per_document: int = 1,
+        k1: float = 1.2,
+        b: float = 0.35,
+        score_scale: float = 2.5,
+        max_window_sentences: int = 3,
+    ) -> None:
+        if max_window_sentences <= 0:
+            raise ValueError("max_window_sentences must be positive")
+
+        super().__init__(
+            min_sentence_chars=min_sentence_chars,
+            max_candidates_per_document=max_candidates_per_document,
+            k1=k1,
+            b=b,
+            score_scale=score_scale,
+        )
+        self._max_window_sentences = max_window_sentences
+
+    def _collect_sentence_rows(
+        self,
+        query_terms: set[str],
+        retrieval_results: Sequence[RetrievalResult],
+    ) -> list[_SentenceRow]:
+        rows = []
+        seen_spans = set()
+
+        for retrieval_result in retrieval_results:
+            sections = _split_document_sections(retrieval_result.document.text)
+            for section in sections:
+                sentences = [
+                    normalize_sentence(sentence)
+                    for sentence in split_sentences(section.text)
+                    if len(normalize_sentence(sentence)) >= self._min_sentence_chars
+                ]
+                for span in _build_sentence_windows(sentences, self._max_window_sentences):
+                    if span in seen_spans:
+                        continue
+
+                    scoring_text = _build_section_scoring_text(
+                        heading=section.heading,
+                        span=span,
+                    )
+                    terms = _content_terms(tokenize_text(span))
+                    overlap_terms = tuple(sorted(query_terms & terms))
+                    if not overlap_terms and not _has_answer_section_signal(scoring_text):
+                        continue
+
+                    seen_spans.add(span)
+                    rows.append(
+                        _SentenceRow(
+                            sentence=span,
+                            retrieval_result=retrieval_result,
+                            terms=terms,
+                            overlap_terms=overlap_terms,
+                            scoring_text=scoring_text,
+                        )
+                    )
+
+        return rows
+
+    def _score_sentence_row(
+        self,
+        row: _SentenceRow,
+        query_terms: set[str],
+        idf_by_term: dict[str, float],
+        avg_sentence_length: float,
+    ) -> SentenceEvidenceCandidate:
+        candidate = super()._score_sentence_row(
+            row=row,
+            query_terms=query_terms,
+            idf_by_term=idf_by_term,
+            avg_sentence_length=avg_sentence_length,
+        )
+        scoring_text = row.scoring_text or row.sentence
+        adjusted_score = candidate.score + _section_span_answer_pattern_bonus(scoring_text)
+        adjusted_score *= _section_span_background_penalty(scoring_text)
+        adjusted_score *= _section_span_length_penalty(row.sentence)
         return SentenceEvidenceCandidate(
             sentence=candidate.sentence,
             retrieval_result=candidate.retrieval_result,
@@ -336,10 +430,19 @@ def create_sentence_evidence_selector(
             min_sentence_chars=min_sentence_chars,
             max_candidates_per_document=max_candidates_per_document,
         )
+    if normalized_name in {
+        "section_span",
+        "section_span_bm25",
+        "section_span_bm25_sentence",
+    }:
+        return SectionSpanBM25SentenceEvidenceSelector(
+            min_sentence_chars=min_sentence_chars,
+            max_candidates_per_document=max_candidates_per_document,
+        )
 
     raise ValueError(
         "selector_name must be one of: overlap, overlap_sentence, bm25, "
-        "bm25_sentence, answer_aware, answer_aware_bm25_sentence"
+        "bm25_sentence, answer_aware, answer_aware_bm25_sentence, section_span"
     )
 
 
@@ -349,6 +452,13 @@ class _SentenceRow:
     retrieval_result: RetrievalResult
     terms: set[str]
     overlap_terms: tuple[str, ...]
+    scoring_text: str = ""
+
+
+@dataclass(frozen=True)
+class _DocumentSection:
+    heading: str
+    text: str
 
 
 STOPWORDS = {
@@ -541,3 +651,93 @@ def _problem_statement_penalty(sentence: str) -> float:
     if " null " in f" {normalized} ":
         penalty *= 0.6
     return penalty
+
+
+SECTION_HEADING_PATTERN = re.compile(
+    r"\b("
+    r"problem\(abstract\)|problem summary|symptom|error description|question|"
+    r"environment|summary|affected products and versions|remediation/fixes|"
+    r"cause|answer|resolving the problem|resolution|solution|"
+    r"workaround|fix|corrective action|local fix|diagnosing the problem|"
+    r"collecting data|steps to reproduce"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _split_document_sections(text: str) -> list[_DocumentSection]:
+    matches = list(SECTION_HEADING_PATTERN.finditer(text))
+    if not matches:
+        return [_DocumentSection(heading="", text=text)]
+
+    sections = []
+    if matches[0].start() > 0:
+        prefix = text[: matches[0].start()].strip()
+        if prefix:
+            sections.append(_DocumentSection(heading="", text=prefix))
+
+    for index, match in enumerate(matches):
+        section_start = match.end()
+        section_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        section_text = text[section_start:section_end].strip()
+        if section_text:
+            sections.append(
+                _DocumentSection(
+                    heading=normalize_sentence(match.group(1)),
+                    text=section_text,
+                )
+            )
+
+    return sections
+
+
+def _build_sentence_windows(sentences: list[str], max_window_sentences: int) -> list[str]:
+    windows = []
+    max_size = min(max_window_sentences, len(sentences))
+    for window_size in range(1, max_size + 1):
+        for start_index in range(0, len(sentences) - window_size + 1):
+            windows.append(" ".join(sentences[start_index : start_index + window_size]))
+    return windows
+
+
+def _build_section_scoring_text(heading: str, span: str) -> str:
+    if not heading:
+        return span
+    return f"{heading} {span}"
+
+
+def _section_span_answer_pattern_bonus(text: str) -> float:
+    normalized = text.lower()
+    bonus = 0.0
+    if re.search(r"\bcveid\b|\bcvss base score\b|\bcvss vector\b", normalized):
+        bonus += 45.0
+    if re.search(r"\b(description:|description)\b", normalized) and "cve" in normalized:
+        bonus += 20.0
+    if re.search(r"\b(restriction|limitation|known current limitation)\b", normalized):
+        bonus += 22.0
+    if re.search(r"\b(rfe|enhancement)\b", normalized):
+        bonus += 16.0
+    if re.search(r"\b(use|set|enable|disable|install|apply|code|configure)\b", normalized):
+        bonus += 6.0
+    return bonus
+
+
+def _section_span_background_penalty(text: str) -> float:
+    normalized = text.lower()
+    penalty = 1.0
+    if re.search(r"\bsummary\b", normalized):
+        penalty *= 0.6
+    if re.search(r"\baffected products and versions\b", normalized):
+        penalty *= 0.55
+    if re.search(r"\bremediation/fixes\b", normalized):
+        penalty *= 0.8
+    return penalty
+
+
+def _section_span_length_penalty(text: str) -> float:
+    token_count = len(tokenize_text(text))
+    if token_count > 180:
+        return 0.65
+    if token_count > 120:
+        return 0.8
+    return 1.0
