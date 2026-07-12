@@ -69,6 +69,9 @@ and out of git.
 Local dataset verification from 2026-07-12 is recorded in
 [docs/dataset_snapshot.md](docs/dataset_snapshot.md).
 
+The project learning route and implementation notes are recorded in
+[docs/learning_journal.md](docs/learning_journal.md).
+
 ## Dataset Policy
 
 This project treats data splits conservatively:
