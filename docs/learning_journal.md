@@ -2525,3 +2525,167 @@ Answer-gap 结果：
   2. 找出 section-span 赢、answer-aware 输的样本。
   3. 按问题类型分类，例如 CVE、安全公告、limitation、how-to、附件/链接。
   4. 决定是否做 hybrid selector，还是转向 learned reranker / LLM judge。
+
+## 2026-07-13 - Stage 14: Selector Comparison Analysis
+
+### Goal
+
+- 不再只看整体平均 F1。
+- 对比 answer-aware 和 section-span 在每个问题上的胜负。
+- 按问题类型拆解，判断 section-span 是否适合做全局主 selector，还是只适合特定类型。
+
+### What I Studied
+
+- 一个 selector 整体平均分较低，不代表它没有价值。
+- 如果两个 selector 在不同问题类型上互补，下一步应该考虑 hybrid routing，而不是继续单点调参。
+- 只保存 30 条样例的 answer-gap 报告不适合做严肃比较，需要重新生成全量 case 报告。
+
+### What I Built Or Changed
+
+- 新增 selector comparison 分析模块：
+  `src/ts_rag_agent/application/selector_comparison_analysis.py`
+- 新增脚本：
+  `scripts/compare_selectors.py`
+- 新增测试：
+  `tests/test_selector_comparison_analysis.py`
+- 脚本支持：
+  1. 读取两个 answer-gap JSON。
+  2. 按 question_id 对齐。
+  3. 计算 F1 delta。
+  4. 判断 baseline win / challenger win / tie。
+  5. 基于标题、问题文本、gold answer 做粗粒度 question type 分类。
+
+### Commands And Evidence
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+
+python scripts\analyze_answer_gap.py `
+  --evidence-selector answer-aware `
+  --max-candidates-per-document 3 `
+  --sample-limit 1000 `
+  --output artifacts\answer_gap_analysis_dev_answer_aware_mcpd3_full.json
+
+python scripts\analyze_answer_gap.py `
+  --evidence-selector section-span `
+  --max-candidates-per-document 1 `
+  --sample-limit 1000 `
+  --output artifacts\answer_gap_analysis_dev_section_span_mcpd1_v2_full.json
+
+python scripts\compare_selectors.py `
+  --baseline-report artifacts\answer_gap_analysis_dev_answer_aware_mcpd3_full.json `
+  --challenger-report artifacts\answer_gap_analysis_dev_section_span_mcpd1_v2_full.json `
+  --baseline-label answer-aware `
+  --challenger-label section-span `
+  --f1-win-margin 0.03 `
+  --sample-limit-per-bucket 30 `
+  --output artifacts\selector_comparison_answer_aware_vs_section_span.json
+```
+
+验证命令结果：
+
+```text
+ruff: passed
+pytest: 38 passed
+```
+
+### Main Results
+
+整体胜负：
+
+```text
+total_compared: 160
+answer-aware wins: 68
+section-span wins: 47
+ties: 45
+avg_f1_delta: -0.007
+answer-aware gold citations: 90
+section-span gold citations: 92
+```
+
+按问题类型统计：
+
+| Question Type | Count | answer-aware wins | section-span wins | ties |
+| --- | ---: | ---: | ---: | ---: |
+| security_bulletin | 22 | 5 | 15 | 2 |
+| limitation_or_restriction | 8 | 0 | 4 | 4 |
+| how_to_or_lookup | 14 | 5 | 7 | 2 |
+| install_upgrade_config | 26 | 12 | 6 | 8 |
+| error_or_log | 24 | 11 | 3 | 10 |
+| attachment_or_link | 19 | 5 | 4 | 10 |
+| other | 47 | 30 | 8 | 9 |
+
+### Example Observations
+
+- section-span 明显赢在 security bulletin：
+  - `DEV_Q098`
+  - `DEV_Q129`
+  - `DEV_Q182`
+  - 这些样本里 `CVEID`、`DESCRIPTION`、`CVSS Base Score` 规则能把答案 span 从 SUMMARY 背景段里拉出来。
+- answer-aware 在普通排障和配置类问题上更稳：
+  - `DEV_Q071`
+  - `DEV_Q120`
+  - `DEV_Q106`
+  - 这些样本里 section-span 容易选择过长的说明段或步骤段，F1 被稀释。
+- section-span 的 gold citation 稍高，但平均 F1 稍低，说明它更常引用 gold 文档，却不一定选中最短、最贴近 gold answer 的 span。
+
+### Problems Encountered
+
+- answer-gap 原始报告默认只保存样例，不是全量结果，因此不能直接做可靠 selector comparison。
+- question type 分类目前是规则型粗分类，可能会有误分。
+- F1 win margin 的选择会影响胜负统计，本次使用 `0.03` 作为最小胜出差距。
+- section-span 的优势集中在安全公告和限制类问题，但它在普通问题上拖累整体平均值。
+
+### Root Cause
+
+- 不同问题类型的答案形态不同：
+  1. security bulletin 依赖 `CVEID`、`DESCRIPTION`、`CVSS`。
+  2. limitation/restriction 依赖短 cause/limitation span。
+  3. 普通 how-to / troubleshooting 更依赖 resolving/problem-solution 结构和具体操作句。
+- 单一 selector 很难同时覆盖所有类型。
+- section-span 的结构粒度更强，但 query-answer matching 仍然较弱。
+
+### Solution
+
+- 不把 section-span 作为全局替代方案。
+- 保留 answer-aware 作为默认主 selector。
+- 把 section-span 作为特定问题类型的候选 selector，尤其是：
+  1. security bulletin。
+  2. limitation_or_restriction。
+  3. 部分 how_to_or_lookup。
+- 下一步应该做 hybrid selector routing，而不是继续单独调 section-span。
+
+### Why This Choice
+
+- 整体上 answer-aware 仍然赢：68 胜 vs 47 胜。
+- 但 section-span 在 security_bulletin 上优势很明显：15 胜 vs 5 胜。
+- 这说明项目已经进入“按问题类型路由 selector”的阶段，而不是继续寻找一个万能规则。
+
+### Verification
+
+- `python -m ruff check .` 通过。
+- `python -m pytest -q` 通过，当前为 38 个测试。
+- `artifacts/answer_gap_analysis_dev_answer_aware_mcpd3_full.json` 已生成。
+- `artifacts/answer_gap_analysis_dev_section_span_mcpd1_v2_full.json` 已生成。
+- `artifacts/selector_comparison_answer_aware_vs_section_span.json` 已生成。
+- 实验产物在 `artifacts/` 下，并被 `.gitignore` 忽略。
+
+### What I Still Do Not Understand
+
+- question type 分类是否足够可靠，是否需要单独评估分类准确性。
+- section-span 在 security bulletin 上的优势是否来自 CVE/CVSS 规则，还是来自 window 选择。
+- hybrid routing 应该按问题类型硬规则切换，还是让两个 selector 都产出候选后做 late fusion。
+- 如果未来引入 learned reranker，应不应该把 question type、section type、selector score 都作为特征。
+
+### Next Step
+
+- 做 Stage 15：hybrid selector routing 原型。
+- 第一版不要训练模型，先做规则路由：
+  1. security_bulletin -> section-span。
+  2. limitation_or_restriction -> section-span。
+  3. 其他类型 -> answer-aware。
+- 跑 verified RAG 和 answer-gap，比较：
+  1. 是否超过 answer-aware 的 F1 0.2449。
+  2. 是否保持低 answerable refusal。
+  3. 是否保留 section-span 在 security bulletin 上的优势。
