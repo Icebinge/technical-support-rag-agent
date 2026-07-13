@@ -234,6 +234,73 @@ def test_section_span_selector_promotes_security_bulletin_cve_span():
     )
 
 
+def test_section_span_selector_prefers_requested_cve_over_adjacent_cve():
+    question = PrimeQAQuestion(
+        id="q1",
+        title="Security Bulletin OpenSSL CVE-2016-8610",
+        text="I need vulnerability details for CVE-2016-8610.",
+        answer="CVEID: CVE-2016-8610 DESCRIPTION: SSL TLS protocol denial of service.",
+        answerable=True,
+        answer_doc_id="gold",
+        doc_ids=["gold"],
+    )
+    document = PrimeQADocument(
+        id="gold",
+        title="Security Bulletin",
+        text=(
+            "VULNERABILITY DETAILS "
+            "CVEID: CVE-2016-2183 DESCRIPTION: OpenSSL could allow a remote "
+            "attacker to obtain sensitive information. CVSS Base Score: 5. "
+            "CVEID: CVE-2016-8610 DESCRIPTION: SSL TLS protocol is vulnerable "
+            "to a denial of service during a handshake. CVSS Base Score: 7.5."
+        ),
+    )
+    retrieval_results = [RetrievalResult(document=document, score=10.0, rank=1)]
+
+    candidates = SectionSpanBM25SentenceEvidenceSelector(
+        min_sentence_chars=8,
+        max_candidates_per_document=1,
+        max_window_sentences=1,
+    ).rank_sentence_candidates(question, retrieval_results)
+
+    assert "CVEID: CVE-2016-8610" in candidates[0].sentence
+    assert "CVEID: CVE-2016-2183" not in candidates[0].sentence
+
+
+def test_section_span_selector_penalizes_translated_reference_noise():
+    noisy_reference = "".join(chr(0x30A0 + index % 32) for index in range(120))
+    question = PrimeQAQuestion(
+        id="q1",
+        title="Security Bulletin Java Runtime CVE-2015-0138",
+        text="I need details about CVE-2015-0138.",
+        answer="CVEID: CVE-2015-0138 DESCRIPTION: Java Runtime vulnerability.",
+        answerable=True,
+        answer_doc_id="gold",
+        doc_ids=["gold"],
+    )
+    document = PrimeQADocument(
+        id="gold",
+        title="Security Bulletin",
+        text=(
+            f"{noisy_reference} Security Bulletin: Java Runtime "
+            "(CVE-2015-0138) [http://www.ibm.com/support/docview.wss?uid=swg1]. "
+            "VULNERABILITY DETAILS "
+            "CVEID: CVE-2015-0138 DESCRIPTION: Java Runtime vulnerability "
+            "affects the product. CVSS Base Score: 5."
+        ),
+    )
+    retrieval_results = [RetrievalResult(document=document, score=10.0, rank=1)]
+
+    candidates = SectionSpanBM25SentenceEvidenceSelector(
+        min_sentence_chars=8,
+        max_candidates_per_document=1,
+        max_window_sentences=1,
+    ).rank_sentence_candidates(question, retrieval_results)
+
+    assert "CVEID: CVE-2015-0138" in candidates[0].sentence
+    assert noisy_reference not in candidates[0].sentence
+
+
 def test_hybrid_routing_selector_uses_section_span_for_security_bulletin_details():
     question = PrimeQAQuestion(
         id="q1",

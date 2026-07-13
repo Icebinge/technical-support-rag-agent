@@ -3248,3 +3248,195 @@ Observed pattern:
   2. reward spans containing the requested CVE,
   3. penalize spans dominated by non-requested CVEs,
   4. penalize translated/reference-link sections when they are not the only relevant span.
+
+## Stage 18 - CVE-Anchored Section Span Scoring
+
+### Goal
+
+- Improve section-span precision for security bulletin detail routes.
+- Keep the method no-leak:
+  - use question title/text,
+  - use retrieved document text,
+  - do not use gold answer or gold document id.
+- Fix the Stage 17 pattern where security detail questions could select:
+  - adjacent non-target CVEs,
+  - translated/reference-link noise,
+  - remediation/link-heavy spans instead of vulnerability details.
+
+### What I Studied
+
+Stage 17 left 3 answer-aware wins:
+
+```text
+DEV_Q089
+DEV_Q019
+DEV_Q220
+```
+
+Observed failure details:
+
+- `DEV_Q089`: section-span selected an OpenSSL span from a different document and previously preferred a nearby non-target CVE.
+- `DEV_Q019`: section-span selected translated/reference material before the English bulletin span.
+- `DEV_Q220`: section-span selected remediation/reference-link spans before the actual `VULNERABILITY DETAILS` span.
+
+The important lesson:
+
+- A security bulletin question containing a CVE is not solved by merely rewarding any `CVEID` or `CVSS` text.
+- The selector must check whether the span aligns with the CVE requested by the question.
+
+### What I Built Or Changed
+
+- Added `CVE_PATTERN`.
+- Added CVE extraction helpers:
+  - `_extract_cves_from_terms`
+  - `_extract_cves_from_text`
+  - `_first_cve_in_text`
+- Added `_section_span_cve_alignment_bonus`.
+- Added `_section_span_cve_alignment_multiplier`.
+- Added `_section_span_reference_translation_penalty`.
+- Updated `SectionSpanBM25SentenceEvidenceSelector` scoring order:
+  1. base BM25/answer-aware score
+  2. section-answer pattern bonus
+  3. requested-CVE alignment bonus
+  4. requested-CVE alignment multiplier
+  5. background penalty
+  6. translated/reference-link penalty
+  7. length penalty
+- Added tests for:
+  - preferring the requested CVE over an adjacent non-target CVE,
+  - penalizing translated/reference noise when a clean vulnerability-detail span exists.
+
+### Commands And Evidence
+
+```powershell
+python -m pytest tests\test_evidence_selection.py -q
+python -m ruff check src\ts_rag_agent\application\evidence_selection.py tests\test_evidence_selection.py
+python -m pytest -q
+python -m ruff check .
+
+python scripts\analyze_answer_gap.py `
+  --evidence-selector answer-aware `
+  --max-candidates-per-document 3 `
+  --sample-limit 1000 `
+  --output artifacts\answer_gap_analysis_dev_answer_aware_mcpd3_stage18_cve_anchor.json
+
+python scripts\analyze_answer_gap.py `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --sample-limit 1000 `
+  --output artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage18_cve_anchor.json
+
+python scripts\compare_selectors.py `
+  --baseline-report artifacts\answer_gap_analysis_dev_answer_aware_mcpd3_stage18_cve_anchor.json `
+  --challenger-report artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage18_cve_anchor.json `
+  --baseline-label answer-aware `
+  --challenger-label hybrid-routing-stage18 `
+  --f1-win-margin 0.03 `
+  --sample-limit-per-bucket 30 `
+  --output artifacts\selector_comparison_answer_aware_vs_hybrid_routing_stage18_cve_anchor.json
+```
+
+Verification:
+
+```text
+targeted evidence-selection tests: 17 passed
+full pytest: 48 passed
+ruff: passed
+```
+
+### Main Results
+
+Answer-aware baseline:
+
+```text
+average selected-answer F1: 0.2501
+gold citation: 90 / 160
+```
+
+Stage 18 hybrid:
+
+```text
+average selected-answer F1: 0.2805
+gold citation: 95 / 160
+selected selectors:
+  answer_aware_bm25_sentence: 138
+  section_span_bm25_sentence: 22
+```
+
+Answer-aware vs Stage 18 hybrid:
+
+```text
+total_compared: 160
+answer-aware wins: 2
+hybrid wins: 16
+ties: 142
+avg_f1_delta: +0.0304
+baseline gold citation: 90
+challenger gold citation: 95
+```
+
+Security bulletin route-level result:
+
+```text
+security_bulletin_vulnerability_detail:
+  answer-aware wins: 2
+  hybrid wins: 15
+```
+
+Compared with Stage 17:
+
+```text
+Stage 17 average selected-answer F1: 0.2768
+Stage 18 average selected-answer F1: 0.2805
+
+Stage 17 gold citation: 93 / 160
+Stage 18 gold citation: 95 / 160
+
+Stage 17 answer-aware wins: 3
+Stage 18 answer-aware wins: 2
+
+Stage 17 hybrid wins: 15
+Stage 18 hybrid wins: 16
+```
+
+### Problems Encountered
+
+- The first translated-reference test put the noisy reference and the clean vulnerability detail in the same sentence.
+- That made the test invalid because the selector had no separate span to choose.
+- Fix: split the synthetic document into two sentences so the selector can rank the noisy reference span against the clean vulnerability-detail span.
+
+### Remaining Loss Cases
+
+Stage 18 still loses to answer-aware on:
+
+```text
+DEV_Q089
+DEV_Q019
+```
+
+Observed details:
+
+- `DEV_Q089` now selects the requested CVE, but the final selected answer is still weaker than answer-aware because multiple cross-document CVE windows are included.
+- `DEV_Q019` now promotes the English target-CVE span above the translated reference span, but the gold answer is actually closer to a summary/affected-runtime statement than to the vulnerability-detail paragraph.
+
+### Why This Choice
+
+- CVE anchoring improves the exact weakness found in Stage 17.
+- It is still no-leak and explainable.
+- It improves both F1 and gold citation.
+- The remaining errors no longer look like simple CVE-selection errors, so adding more CVE rules is unlikely to be the best next move.
+
+### What I Still Do Not Understand
+
+- Whether security-bulletin detail routes should use fewer selected evidence windows than general answer-aware routes.
+- Whether retrieval rank or product-title alignment should be part of section-span scoring.
+- Whether `DEV_Q019` should be rerouted away from vulnerability detail because its actual answer is closer to an affected-runtime summary.
+
+### Next Step
+
+- Do Stage 19: evidence aggregation / document-aware selection.
+- Candidate directions:
+  1. for section-span security detail routes, reduce cross-document evidence mixing,
+  2. prefer higher-ranked retrieved documents when CVE alignment is similar,
+  3. add product-title alignment between question title and document title,
+  4. test whether security detail answers should use top-1 or top-2 spans instead of always taking 3.

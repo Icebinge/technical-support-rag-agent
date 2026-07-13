@@ -405,7 +405,10 @@ class SectionSpanBM25SentenceEvidenceSelector(AnswerAwareBM25SentenceEvidenceSel
         )
         scoring_text = row.scoring_text or row.sentence
         adjusted_score = candidate.score + _section_span_answer_pattern_bonus(scoring_text)
+        adjusted_score += _section_span_cve_alignment_bonus(scoring_text, query_terms)
+        adjusted_score *= _section_span_cve_alignment_multiplier(scoring_text, query_terms)
         adjusted_score *= _section_span_background_penalty(scoring_text)
+        adjusted_score *= _section_span_reference_translation_penalty(scoring_text)
         adjusted_score *= _section_span_length_penalty(row.sentence)
         return SentenceEvidenceCandidate(
             sentence=candidate.sentence,
@@ -737,6 +740,7 @@ SECTION_HEADING_PATTERN = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+CVE_PATTERN = re.compile(r"\bcve-\d{4}-\d{4,7}\b", re.IGNORECASE)
 
 
 def _split_document_sections(text: str) -> list[_DocumentSection]:
@@ -796,6 +800,46 @@ def _section_span_answer_pattern_bonus(text: str) -> float:
     return bonus
 
 
+def _section_span_cve_alignment_bonus(text: str, query_terms: set[str]) -> float:
+    requested_cves = _extract_cves_from_terms(query_terms)
+    if not requested_cves:
+        return 0.0
+
+    span_cves = _extract_cves_from_text(text)
+    if not span_cves:
+        return -18.0
+    if not requested_cves & span_cves:
+        return -45.0
+
+    bonus = 28.0 * len(requested_cves & span_cves)
+    first_cve = _first_cve_in_text(text)
+    if first_cve in requested_cves:
+        bonus += 18.0
+    return bonus
+
+
+def _section_span_cve_alignment_multiplier(text: str, query_terms: set[str]) -> float:
+    requested_cves = _extract_cves_from_terms(query_terms)
+    if not requested_cves:
+        return 1.0
+
+    span_cves = _extract_cves_from_text(text)
+    if not span_cves:
+        return 0.65
+    if not requested_cves & span_cves:
+        return 0.35
+
+    multiplier = 1.35
+    non_requested_cves = span_cves - requested_cves
+    if non_requested_cves:
+        multiplier *= max(0.55, 1.0 - 0.15 * len(non_requested_cves))
+
+    first_cve = _first_cve_in_text(text)
+    if first_cve and first_cve not in requested_cves:
+        multiplier *= 0.68
+    return multiplier
+
+
 def _section_span_background_penalty(text: str) -> float:
     normalized = text.lower()
     penalty = 1.0
@@ -808,6 +852,24 @@ def _section_span_background_penalty(text: str) -> float:
     return penalty
 
 
+def _section_span_reference_translation_penalty(text: str) -> float:
+    normalized = text.lower()
+    penalty = 1.0
+    if _non_ascii_ratio(text) > 0.08 and (
+        "security bulletin" in normalized
+        or "docview" in normalized
+        or CVE_PATTERN.search(normalized)
+    ):
+        penalty *= 0.42
+    if (
+        "support/docview" in normalized
+        and "security bulletin:" in normalized
+        and not re.search(r"\bcveid\b|\bcvss base score\b", normalized)
+    ):
+        penalty *= 0.75
+    return penalty
+
+
 def _section_span_length_penalty(text: str) -> float:
     token_count = len(tokenize_text(text))
     if token_count > 180:
@@ -815,6 +877,28 @@ def _section_span_length_penalty(text: str) -> float:
     if token_count > 120:
         return 0.8
     return 1.0
+
+
+def _extract_cves_from_terms(terms: set[str]) -> set[str]:
+    return {term.lower() for term in terms if CVE_PATTERN.fullmatch(term)}
+
+
+def _extract_cves_from_text(text: str) -> set[str]:
+    return {match.group(0).lower() for match in CVE_PATTERN.finditer(text)}
+
+
+def _first_cve_in_text(text: str) -> str | None:
+    match = CVE_PATTERN.search(text)
+    if not match:
+        return None
+    return match.group(0).lower()
+
+
+def _non_ascii_ratio(text: str) -> float:
+    if not text:
+        return 0.0
+    non_ascii_count = sum(1 for char in text if ord(char) > 127)
+    return non_ascii_count / len(text)
 
 
 def classify_question_route(question: PrimeQAQuestion) -> str:
