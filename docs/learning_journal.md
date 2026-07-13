@@ -10827,3 +10827,262 @@ pytest: 117 passed
   3. 对比 Stage 18 / 当前默认策略的 F1、gold citation、changed answers；
   4. 继续不使用 held-out test set；
   5. 如果端到端没有通过，不进入默认策略。
+
+## Stage 46 - Candidate-Score Guarded Runtime Reranker End-to-End
+
+日期：2026-07-14
+
+### 目标
+
+- 把 Stage 45 选出的 `candidate_score_gte_60` 做成可选 runtime answer-composition policy。
+- 用完整 verified RAG end-to-end 流程对比当前 `top_k` baseline。
+- 继续只使用 `dev` 和既有 train/dev candidate-reranker dataset，不使用 held-out test set。
+- 生成可复查的 comparison JSON 和 SVG 可视化。
+- 不改变默认 runtime 策略。
+
+### 实现内容
+
+- 新增 `CandidateScoreGuardedRerankerCompositionPolicy`：
+  - 训练阶段使用 Stage 31 candidate-reranker dataset 的 `train` split；
+  - runtime 阶段只用 `runtime_features`，不读取 gold answer 或 gold document label；
+  - 采用 Stage 36/39 的主约束：
+    - model 选中 rank 1 时保持 top candidate；
+    - 阻断 `how_to_or_lookup` route；
+    - 选中 rank 必须不超过 5；
+    - model score margin 必须不低于 `0.05`；
+    - 被选 candidate 的 evidence score 必须 `>= 60`。
+- 在 `candidate_reranker_dataset.py` 中公开 `build_candidate_runtime_features()`，避免 runtime policy 依赖私有函数。
+- 扩展 `scripts/evaluate_verified_rag.py`：
+  - 新增 `--composition-policy candidate-score-guarded-reranker`；
+  - 新增 `--candidate-reranker-dataset`；
+  - 新增 `--candidate-reranker-model`；
+  - 新增 `--candidate-reranker-train-split`；
+  - report 中记录 `candidate_reranker` 配置，方便追溯。
+- 新增 `scripts/compare_verified_rag_reports.py` 和 `verified_rag_report_comparison.py`：
+  - 对比 metrics delta；
+  - 用完整 samples 精确计算 gold citation count；
+  - 统计 changed answers；
+  - 统计 answerable verified F1 improved/regressed/tied cases；
+  - 生成 SVG 可视化。
+
+### 实验命令
+
+baseline：
+
+```powershell
+python scripts\evaluate_verified_rag.py `
+  --split dev `
+  --retrieval-top-k 5 `
+  --max-sentences 3 `
+  --min-sentence-score 2.0 `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --composition-policy top-k `
+  --min-evidence-score 15.0 `
+  --max-citation-rank 3 `
+  --min-citations 1 `
+  --sample-limit 1000 `
+  --output artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage46_topk_report.json
+```
+
+candidate-score guarded reranker：
+
+```powershell
+python scripts\evaluate_verified_rag.py `
+  --split dev `
+  --retrieval-top-k 5 `
+  --max-sentences 3 `
+  --min-sentence-score 2.0 `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --composition-policy candidate-score-guarded-reranker `
+  --candidate-reranker-dataset artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --candidate-reranker-model logistic_best_candidate `
+  --candidate-reranker-train-split train `
+  --min-evidence-score 15.0 `
+  --max-citation-rank 3 `
+  --min-citations 1 `
+  --sample-limit 1000 `
+  --output artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage46_candidate_score_guarded_reranker_report.json
+```
+
+comparison 和可视化：
+
+```powershell
+python scripts\compare_verified_rag_reports.py `
+  --baseline-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage46_topk_report.json `
+  --candidate-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage46_candidate_score_guarded_reranker_report.json `
+  --output artifacts\verified_rag_stage46_candidate_score_guarded_comparison.json `
+  --visualization-dir artifacts\verified_rag_stage46_candidate_score_guarded_visuals
+```
+
+### 实验结果
+
+baseline `top_k`：
+
+```text
+original F1: 0.2729
+verified F1: 0.2755
+original gold citation: 95 / 160
+verified gold citation: 95 / 158
+verified answerable refusals: 2
+verified unanswerable refusals: 4
+newly refused: 6
+```
+
+candidate-score guarded reranker：
+
+```text
+original F1: 0.2737
+verified F1: 0.2763
+original gold citation: 95 / 160
+verified gold citation: 95 / 158
+verified answerable refusals: 2
+verified unanswerable refusals: 2
+newly refused: 4
+```
+
+delta：
+
+```text
+original F1 delta: +0.0008
+verified F1 delta: +0.0008
+original gold citation delta: 0
+verified gold citation delta: 0
+verified generated answerable delta: 0
+verified answerable refusal delta: 0
+verified unanswerable refusal delta: -2
+newly refused delta: -2
+```
+
+changed answers：
+
+```text
+original changed answers: 60 / 310
+original changed answerable: 29 / 160
+original changed unanswerable: 31 / 150
+
+verified changed answers: 59 / 310
+verified changed answerable: 28 / 160
+verified changed unanswerable: 31 / 150
+```
+
+answerable verified F1 outcomes：
+
+```text
+comparable generated answerable: 158
+improved: 4
+regressed: 1
+changed but tied: 23
+average delta over comparable: +0.000807
+```
+
+两个 unanswerable 风险样本从 baseline 的拒答变成 candidate 的回答：
+
+```text
+DEV_Q083 - How do you configure the IBM HTTP Server 7 to 8.5 on z/OS for Host On-Demand V11?
+DEV_Q203 - Why WebSphere Application Server transactions are rolled back with these StaleConnectionExceptions?
+```
+
+### 可视化结果
+
+本阶段新增 3 个 SVG：
+
+```text
+artifacts/verified_rag_stage46_candidate_score_guarded_visuals/verified_rag_metric_deltas.svg
+artifacts/verified_rag_stage46_candidate_score_guarded_visuals/verified_rag_changed_answers.svg
+artifacts/verified_rag_stage46_candidate_score_guarded_visuals/verified_rag_answerable_f1_outcomes.svg
+```
+
+完整 comparison artifact：
+
+```text
+artifacts/verified_rag_stage46_candidate_score_guarded_comparison.json
+```
+
+说明：以上 artifact 均在本地 `artifacts/` 下，按 `.gitignore` 规则不纳入 git。
+
+### 问题与原因
+
+- 问题 1：F1 提升很小，但 changed answers 很多。
+  - verified F1 只提升 `+0.0008`；
+  - 但 verified changed answers 达到 `59 / 310`；
+  - 其中 `31` 个是 unanswerable 问题。
+- 问题 2：unanswerable refusal 下降了。
+  - baseline verified unanswerable refusals 是 `4`；
+  - candidate-score guarded reranker 是 `2`；
+  - 这表示策略在两个 unanswerable 样本上变得更不保守。
+- 问题 3：gold citation 没有损失，但也没有增加。
+  - verified gold citation 仍是 `95 / 158`；
+  - citation gained 和 citation lost 都是空列表。
+
+### 修正与处理
+
+- 没有改变默认 runtime。
+- 没有使用 held-out test set。
+- 没有把 candidate-score guarded reranker 设置为默认策略。
+- 把本阶段定位为“可选 runtime 实验通过 F1/citation 基础门槛，但默认化前必须继续做风险分析”。
+- 新增 comparison 工具，避免后续只靠人工读 report。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\verified_rag_report_comparison.py `
+  scripts\compare_verified_rag_reports.py `
+  tests\test_verified_rag_report_comparison.py
+
+pytest -q tests\test_verified_rag_report_comparison.py `
+  tests\test_candidate_score_guarded_composition_policy.py `
+  tests\test_candidate_reranker_dataset.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 7 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 121 passed
+```
+
+### 结论
+
+- Stage 46 端到端 verified RAG 结果显示 candidate-score guarded reranker 在 dev 上：
+  - verified F1 小幅提升 `+0.0008`；
+  - verified gold citation 不变；
+  - answerable refusal 不变；
+  - 但 unanswerable refusal 少了 `2`；
+  - changed answers 达到 `59 / 310`。
+- 因此它可以保留为可选实验入口，但不能进入默认 runtime。
+- 当前主要风险不是 citation loss，而是 answer rewrite 面太宽和 unanswerable 保守性下降。
+
+### 我学到的
+
+- 离线 candidate-level gain 进入 end-to-end 后会被 verifier 大幅压缩，最终 F1 只剩 `+0.0008`。
+- gold citation 不掉不代表策略就安全，因为 unanswerable refusal 可能下降。
+- changed answer count 是 runtime 默认化前必须纳入的风险指标。
+- 完整 sample report 很重要；如果只看 aggregate metrics，会漏掉 `DEV_Q083` 和 `DEV_Q203` 这类拒答退化。
+
+### 下一步
+
+- 做 Stage 47：专门分析 Stage 46 的 changed-answer 和 unanswerable-risk cases。
+- 目标：
+  1. 聚焦 `DEV_Q083`、`DEV_Q203` 两个 unanswerable refusal regression；
+  2. 分析 59 个 verified changed answers 的 route、rank、score、citation 分布；
+  3. 判断是否能设计更窄的 runtime gate，降低 changed-answer 面和 unanswerable 风险；
+  4. 仍然不使用 held-out test set；
+  5. 在没有解决风险前，不把 candidate-score guarded reranker 默认化。

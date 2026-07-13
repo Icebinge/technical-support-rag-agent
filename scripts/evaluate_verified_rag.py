@@ -13,6 +13,12 @@ from ts_rag_agent.application.answer_composition import (
     create_answer_composition_policy,
 )
 from ts_rag_agent.application.answer_verification import AnswerVerifier
+from ts_rag_agent.application.candidate_reranker_dataset_audit import (
+    load_candidate_reranker_rows,
+)
+from ts_rag_agent.application.candidate_score_guarded_composition_policy import (
+    fit_candidate_score_guarded_reranker_composition_policy,
+)
 from ts_rag_agent.application.evidence_selection import (
     SentenceEvidenceSelector,
     create_sentence_evidence_selector,
@@ -74,11 +80,36 @@ def main(
         typer.Option(
             "--composition-policy",
             help=(
-                "Answer composition policy: top-k or route-aware. "
-                "top-k keeps the current default runtime behavior."
+                "Answer composition policy: top-k, route-aware, or "
+                "candidate-score-guarded-reranker. top-k keeps the current "
+                "default runtime behavior."
             ),
         ),
     ] = "top-k",
+    candidate_reranker_dataset: Annotated[
+        Path | None,
+        typer.Option(
+            "--candidate-reranker-dataset",
+            help=(
+                "Candidate-reranker JSONL dataset used only by "
+                "candidate-score-guarded-reranker."
+            ),
+        ),
+    ] = None,
+    candidate_reranker_model: Annotated[
+        str,
+        typer.Option(
+            "--candidate-reranker-model",
+            help="Candidate reranker model used by candidate-score-guarded-reranker.",
+        ),
+    ] = "logistic_best_candidate",
+    candidate_reranker_train_split: Annotated[
+        str,
+        typer.Option(
+            "--candidate-reranker-train-split",
+            help="Training split for candidate-score-guarded-reranker.",
+        ),
+    ] = "train",
     min_evidence_score: Annotated[
         float,
         typer.Option("--min-evidence-score", help="Verifier minimum evidence score."),
@@ -136,7 +167,19 @@ def main(
         evidence_selector=evidence_selector,
         max_candidates_per_document=max_candidates_per_document,
     )
-    answer_composition_policy = _create_composition_policy(composition_policy)
+    answer_composition_policy = _create_composition_policy(
+        composition_policy=composition_policy,
+        sentence_selector_name=sentence_selector.name,
+        candidate_reranker_dataset=candidate_reranker_dataset,
+        candidate_reranker_model=candidate_reranker_model,
+        candidate_reranker_train_split=candidate_reranker_train_split,
+    )
+    candidate_reranker_config = _candidate_reranker_report_config(
+        composition_policy=composition_policy,
+        candidate_reranker_dataset=candidate_reranker_dataset,
+        candidate_reranker_model=candidate_reranker_model,
+        candidate_reranker_train_split=candidate_reranker_train_split,
+    )
     evaluator = VerifiedRAGEvaluator(
         retriever=retriever,
         answer_generator=ExtractiveAnswerGenerator(
@@ -167,6 +210,7 @@ def main(
         evidence_selector_name=sentence_selector.name,
         max_candidates_per_document=max_candidates_per_document,
         composition_policy_name=answer_composition_policy.name,
+        candidate_reranker_config=candidate_reranker_config,
         min_evidence_score=min_evidence_score,
         max_citation_rank=max_citation_rank,
         min_citations=min_citations,
@@ -227,6 +271,7 @@ def _build_report(
     evidence_selector_name: str,
     max_candidates_per_document: int,
     composition_policy_name: str,
+    candidate_reranker_config: dict | None,
     min_evidence_score: float,
     max_citation_rank: int,
     min_citations: int,
@@ -253,6 +298,7 @@ def _build_report(
             "min_sentence_score": min_sentence_score,
             "max_candidates_per_document": max_candidates_per_document,
             "composition_policy": composition_policy_name,
+            "candidate_reranker": candidate_reranker_config,
             "answer_verifier": "citation_and_evidence_gate",
             "min_evidence_score": min_evidence_score,
             "max_citation_rank": max_citation_rank,
@@ -380,11 +426,58 @@ def _create_selector(
         raise typer.BadParameter(str(exc)) from exc
 
 
-def _create_composition_policy(composition_policy: str) -> AnswerCompositionPolicy:
+def _create_composition_policy(
+    composition_policy: str,
+    sentence_selector_name: str,
+    candidate_reranker_dataset: Path | None,
+    candidate_reranker_model: str,
+    candidate_reranker_train_split: str,
+) -> AnswerCompositionPolicy:
+    if _is_candidate_score_guarded_reranker_policy(composition_policy):
+        if candidate_reranker_dataset is None:
+            raise typer.BadParameter(
+                "--candidate-reranker-dataset is required when "
+                "--composition-policy candidate-score-guarded-reranker is used."
+            )
+        _ensure_file_exists(candidate_reranker_dataset)
+        try:
+            rows = load_candidate_reranker_rows(candidate_reranker_dataset)
+            return fit_candidate_score_guarded_reranker_composition_policy(
+                rows=rows,
+                selector_name=sentence_selector_name,
+                model_name=candidate_reranker_model,
+                train_split=candidate_reranker_train_split,
+            )
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
     try:
         return create_answer_composition_policy(composition_policy)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
+
+
+def _candidate_reranker_report_config(
+    composition_policy: str,
+    candidate_reranker_dataset: Path | None,
+    candidate_reranker_model: str,
+    candidate_reranker_train_split: str,
+) -> dict | None:
+    if not _is_candidate_score_guarded_reranker_policy(composition_policy):
+        return None
+    return {
+        "dataset": str(candidate_reranker_dataset) if candidate_reranker_dataset else None,
+        "model": candidate_reranker_model,
+        "train_split": candidate_reranker_train_split,
+        "runtime_guard": "candidate_score_gte_60",
+    }
+
+
+def _is_candidate_score_guarded_reranker_policy(composition_policy: str) -> bool:
+    normalized = composition_policy.strip().lower().replace("-", "_")
+    return normalized in {
+        "candidate_score_guarded_reranker",
+        "candidate_score_gte_60_guarded_reranker",
+    }
 
 
 def _resolve_questions_path(training_dir: Path, split: str) -> Path:

@@ -158,7 +158,7 @@ def build_candidate_rows_for_question(
             question_id=question.id,
             candidate_id=f"{question.id}::candidate_{candidate_rank:03d}",
             candidate_rank=candidate_rank,
-            runtime_features=_runtime_features(
+            runtime_features=build_candidate_runtime_features(
                 question=question,
                 candidate=candidate,
                 question_route=question_route,
@@ -182,6 +182,22 @@ def build_candidate_rows_for_question(
             start=1,
         )
     ]
+
+
+def build_candidate_runtime_features(
+    question: PrimeQAQuestion,
+    candidate: SentenceEvidenceCandidate,
+    question_route: str,
+    selector_name: str,
+) -> dict[str, Any]:
+    """Build runtime-safe candidate features without using gold labels."""
+
+    return _runtime_features(
+        question=question,
+        candidate=candidate,
+        question_route=question_route,
+        selector_name=selector_name,
+    )
 
 
 def summarize_question_candidates(
