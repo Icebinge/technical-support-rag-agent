@@ -3820,3 +3820,256 @@ top1 gold citation: 48 / 160
   2. use top1 for concise direct-answer routes only when the first candidate has strong answer-section signals,
   3. apply conservative near-duplicate removal,
   4. test policy against Stage 18 top3 and reject it unless it improves F1 without large citation loss.
+
+## 2026-07-13 - Stage 21: Route-Aware Answer Composition Policy
+
+### Goal
+
+- Do not blindly change `max_sentences` from 3 to 2 after Stage 20.
+- Build a route-aware composition policy that only shortens answers in low-risk
+  direct-answer cases.
+- Preserve citation-sensitive behavior for security bulletin and limitation
+  routes.
+- Record the policy as a reproducible analysis first, not as a default runtime
+  behavior.
+
+### What I Studied
+
+- Stage 20 showed that global top2 is not safe:
+  - it slightly improves F1,
+  - but it loses too many gold citations.
+- A better policy needs to decide per question route.
+- Route-aware composition should use only deployable signals:
+  - question route,
+  - candidate score,
+  - retrieval rank,
+  - answer/action wording in the selected sentence,
+  - duplicate sentence similarity.
+- It must not use `candidate_token_f1` or gold answer labels for policy
+  decisions. Those are only used after the policy runs to evaluate quality.
+
+### What I Built Or Changed
+
+- Added route-aware composition policy module:
+  `src/ts_rag_agent/application/route_aware_composition_policy.py`
+- Added CLI analysis script:
+  `scripts/analyze_route_aware_composition.py`
+- Added tests:
+  `tests/test_route_aware_composition_policy.py`
+
+Policy behavior:
+
+```text
+Policy name:
+route_aware_top1_direct_otherwise_top3
+
+Direct-answer routes eligible for top1:
+how_to_or_lookup
+install_upgrade_config
+
+Citation-sensitive routes kept at top3:
+security_bulletin_vulnerability_detail
+security_bulletin_affected_product
+security_bulletin_remediation
+security_bulletin_post_fix_behavior
+limitation_or_restriction
+```
+
+Default top1 gate:
+
+```text
+strong_first_score_min: 100.0
+strong_first_score_ratio_min: 1.15
+strong_first_score_margin_min: 20.0
+max_top1_retrieval_rank: 3
+duplicate_threshold: 0.96
+```
+
+The top1 decision also requires an answer/action signal in the first sentence,
+such as `install`, `configure`, `use`, `set`, `apply`, `download`, `fix`,
+`solution`, or `workaround`.
+
+### Commands And Evidence
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+
+python scripts\analyze_route_aware_composition.py `
+  --answer-gap-report artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage18_cve_anchor.json `
+  --output artifacts\route_aware_composition_policy_stage21_hybrid_stage18.json
+```
+
+Validation:
+
+```text
+ruff: passed
+pytest: 52 passed
+```
+
+Stage 21 report:
+
+```text
+artifacts/route_aware_composition_policy_stage21_hybrid_stage18.json
+```
+
+Aggregate result:
+
+```text
+total_cases: 160
+baseline F1: 0.2808
+policy F1: 0.2851
+average F1 delta: +0.0043
+
+baseline gold citation: 95 / 160
+policy gold citation: 94 / 160
+citation delta: -1
+
+changed_answer_count: 10
+f1_improved_count: 5
+f1_regressed_count: 4
+citation_lost_count: 1
+citation_gained_count: 0
+```
+
+Strategy counts:
+
+```text
+keep_top3_default: 125
+keep_top3_citation_sensitive: 25
+top1_direct_strong_signal: 10
+```
+
+Route-level result:
+
+```text
+how_to_or_lookup:
+  cases: 14
+  baseline F1: 0.2508
+  policy F1: 0.2854
+  F1 delta: +0.0346
+  citation delta: 0
+  top1_direct_strong_signal: 2
+
+install_upgrade_config:
+  cases: 24
+  baseline F1: 0.2064
+  policy F1: 0.2148
+  F1 delta: +0.0084
+  citation delta: -1
+  top1_direct_strong_signal: 8
+
+security bulletin routes:
+  policy kept top3
+  citation delta: 0
+```
+
+The policy passed the configured offline gate:
+
+```text
+accepted_for_runtime_experiment: true
+reason: F1 gain meets threshold and citation loss is bounded
+```
+
+### Problems Encountered
+
+- The first Stage 21 report showed F1 changes even for routes where the policy
+  kept top3.
+- That was not a model improvement. It was an analysis bug.
+- The baseline F1 was read from the old answer-gap report, while policy F1 was
+  recomputed from candidate sentences with the current metric function.
+- This mixed two measurement paths and made unchanged answers look changed.
+
+### Root Cause
+
+- Stage 20 stored `selected_answer_token_f1` in the answer-gap report.
+- Stage 21 initially used that stored value for baseline F1.
+- Policy F1 was freshly computed from the selected candidate sentences.
+- Even small rounding or metric-path differences are enough to create false
+  deltas.
+
+### Solution
+
+- Changed Stage 21 analysis so baseline and policy F1 are both recomputed from
+  the same candidate sentences.
+- Reran the report.
+- After the fix, all unchanged `keep_top3` routes had zero F1 delta.
+
+### Why This Choice
+
+- The policy needs to be evaluated with a fair counterfactual:
+  - baseline answer = current selected candidates joined together,
+  - policy answer = policy-selected candidates joined together,
+  - both scored with the same `token_f1` function.
+- This avoids overclaiming improvements from stale or rounded metrics.
+- The policy is deliberately conservative:
+  - only 10 of 160 answers changed,
+  - security and limitation routes stayed top3,
+  - only one gold citation was lost.
+
+### Key Case Notes
+
+Best positive case:
+
+```text
+question_id: DEV_Q008
+route: how_to_or_lookup
+question: How can I export a private key from DataPower Gateway Appliance?
+baseline F1: 0.3939
+policy F1: 0.9630
+citation delta: 0
+```
+
+Main risk case:
+
+```text
+question_id: DEV_Q202
+route: install_upgrade_config
+question: Why is installation manager cores when try to install netcool using GUI mode in AIX 7.1?
+baseline F1: 0.3178
+policy F1: 0.1455
+citation delta: -1
+```
+
+This single case explains the current citation loss.
+
+### Decision
+
+- Do not change the default runtime yet.
+- Accept the policy only as a candidate for a runtime experiment.
+- The offline result is promising because it improves F1 with only one citation
+  loss, but it still needs an end-to-end run through the real answer generator
+  and verifier path.
+
+### What I Learned
+
+- Route-aware composition is much safer than global top1/top2.
+- `how_to_or_lookup` benefits most from selective top1 shortening.
+- `install_upgrade_config` has some benefit but also contains the only citation
+  loss, so it needs stricter gating or extra risk checks.
+- Metric-path consistency matters. Even a small difference between stored metric
+  values and recomputed metric values can create fake gains or losses.
+
+### Remaining Questions
+
+- Should `install_upgrade_config` require an even stronger top1 gate than
+  `how_to_or_lookup`?
+- Can the policy detect cases like `DEV_Q202` without using gold labels?
+- Should the next runtime experiment keep this exact gate, or split thresholds
+  by route?
+- Does the end-to-end verified RAG report preserve the offline gain once the
+  policy is integrated into the answer generator?
+
+### Next Step
+
+- Do Stage 22: optional runtime integration of the route-aware composition
+  policy.
+- Add a non-default composition policy option to the answer generator and
+  evaluation script.
+- Run end-to-end verified RAG with:
+  1. Stage 18 top3 baseline,
+  2. Stage 21 route-aware policy.
+- Keep the policy disabled by default unless the end-to-end report confirms:
+  1. F1 improves,
+  2. gold citation loss stays bounded,
+  3. verification behavior does not regress.
