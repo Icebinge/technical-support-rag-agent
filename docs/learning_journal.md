@@ -6517,3 +6517,344 @@ pytest: 79 passed
   4. dev/train 差异；
   5. runtime feature 是否含有 label leakage 风险。
 - 审计通过后，再考虑训练一个简单 baseline reranker。
+
+## Stage 32 - Candidate Reranker Dataset Audit with Visualizations
+
+### 目标
+
+- 接着 Stage 31 的 candidate-reranker feature dataset，先做训练前审计。
+- 本阶段不训练模型、不改 runtime，只验证数据是否适合进入 baseline reranker 实验。
+- 审计重点：
+  1. candidate label F1 分布；
+  2. best candidate rank 分布；
+  3. route-level oracle gain；
+  4. dev/train split 差异；
+  5. `runtime_features` 是否有明显 label leakage 风险；
+  6. 输出可复跑的 JSON 审计报告和 SVG 可视化结果。
+
+### 起始状态
+
+```text
+git: main...origin/main clean
+
+Stage 31 dataset:
+artifacts/candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl
+  rows: 8060
+  unique row questions: 610
+
+Stage 31 summary:
+artifacts/candidate_reranker_dataset_stage31_dev_train_hybrid_summary.json
+  question_summaries: 610
+  zero-candidate questions: 0
+```
+
+### 本阶段新增内容
+
+- 新增 `src/ts_rag_agent/application/candidate_reranker_dataset_audit.py`
+  - `CandidateRerankerQuestionAudit`
+  - `F1DistributionBucket`
+  - `RankDistributionBucket`
+  - `RouteOracleGainSummary`
+  - `SplitAuditSummary`
+  - `FeatureLeakageAudit`
+  - `DatasetConsistencyAudit`
+  - `CandidateRerankerDatasetAudit`
+  - JSONL / summary 读取函数
+  - dataset audit 主函数
+  - SVG bar chart 生成函数
+- 新增 `scripts/audit_candidate_reranker_dataset.py`
+  - 要求同时传入 Stage 31 JSONL 和 summary JSON。
+  - 输出 audit JSON。
+  - 输出 4 个 SVG 可视化图表。
+- 新增 `tests/test_candidate_reranker_dataset_audit.py`
+  - 验证 label/rank/route/split 汇总。
+  - 验证 consistency mismatch 会被如实报告。
+  - 验证 obvious runtime feature label leakage 能被识别。
+  - 验证 `title_query_overlap_count`、`candidate_sentence_count` 这类聚合特征不会被误判为原始文本泄漏。
+
+### 命令
+
+```powershell
+python scripts\audit_candidate_reranker_dataset.py `
+  --dataset artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --summary artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid_summary.json `
+  --output artifacts\candidate_reranker_dataset_stage32_audit.json `
+  --visualization-dir artifacts\candidate_reranker_dataset_stage32_visuals
+```
+
+### 结果
+
+基础规模：
+
+```text
+total_rows: 8060
+total_questions: 610
+```
+
+Consistency audit：
+
+```text
+summary_total_rows: 8060
+actual_total_rows: 8060
+total_rows_match: true
+
+summary_total_questions: 610
+actual_question_summary_count: 610
+row_question_count: 610
+total_questions_match: true
+
+row_questions_without_summary_count: 0
+summary_questions_without_rows_count: 0
+rows_by_split_match: true
+rows_by_route_match: true
+```
+
+Candidate token F1 label 分布：
+
+```text
+0.00-0.05: 1807 / 8060 = 22.42%
+0.05-0.10: 1758 / 8060 = 21.81%
+0.10-0.20: 2702 / 8060 = 33.52%
+0.20-0.40: 1302 / 8060 = 16.15%
+0.40-0.60: 297 / 8060 = 3.68%
+0.60-0.80: 106 / 8060 = 1.32%
+0.80-1.00: 88 / 8060 = 1.09%
+```
+
+Best candidate token F1 分布：
+
+```text
+0.00-0.05: 4 / 610 = 0.66%
+0.05-0.10: 5 / 610 = 0.82%
+0.10-0.20: 111 / 610 = 18.20%
+0.20-0.40: 235 / 610 = 38.52%
+0.40-0.60: 99 / 610 = 16.23%
+0.60-0.80: 69 / 610 = 11.31%
+0.80-1.00: 87 / 610 = 14.26%
+```
+
+Best candidate rank 分布：
+
+```text
+rank_1: 113 / 610 = 18.52%
+rank_2: 81 / 610 = 13.28%
+rank_3: 68 / 610 = 11.15%
+rank_4_5: 91 / 610 = 14.92%
+rank_6_10: 152 / 610 = 24.92%
+rank_11_25: 105 / 610 = 17.21%
+missing: 0 / 610 = 0.00%
+```
+
+Split summary：
+
+```text
+dev:
+  question_count: 160
+  average_oracle_gain_vs_top_candidate: +0.2125
+  best_rank_1_rate: 21.88%
+  gold_document_candidate_rate: 66.87%
+
+train:
+  question_count: 450
+  average_oracle_gain_vs_top_candidate: +0.1861
+  best_rank_1_rate: 17.33%
+  gold_document_candidate_rate: 60.22%
+```
+
+Route-level oracle gain：
+
+```text
+security_bulletin_post_fix_behavior:
+  n: 3
+  average_oracle_gain_vs_top_candidate: +0.3409
+  positive_oracle_gain_rate: 100.00%
+  gold_document_candidate_rate: 66.67%
+
+other:
+  n: 241
+  average_oracle_gain_vs_top_candidate: +0.2185
+  positive_oracle_gain_rate: 83.40%
+  gold_document_candidate_rate: 59.34%
+
+error_or_log:
+  n: 119
+  average_oracle_gain_vs_top_candidate: +0.2167
+  positive_oracle_gain_rate: 86.55%
+  gold_document_candidate_rate: 53.78%
+
+install_upgrade_config:
+  n: 91
+  average_oracle_gain_vs_top_candidate: +0.1836
+  positive_oracle_gain_rate: 76.92%
+  gold_document_candidate_rate: 51.65%
+
+how_to_or_lookup:
+  n: 55
+  average_oracle_gain_vs_top_candidate: +0.1629
+  positive_oracle_gain_rate: 78.18%
+  gold_document_candidate_rate: 65.45%
+
+limitation_or_restriction:
+  n: 11
+  average_oracle_gain_vs_top_candidate: +0.1523
+  positive_oracle_gain_rate: 72.73%
+  gold_document_candidate_rate: 45.45%
+
+security_bulletin_vulnerability_detail:
+  n: 87
+  average_oracle_gain_vs_top_candidate: +0.1241
+  positive_oracle_gain_rate: 77.01%
+  gold_document_candidate_rate: 89.66%
+
+security_bulletin_remediation:
+  n: 2
+  average_oracle_gain_vs_top_candidate: +0.0741
+  positive_oracle_gain_rate: 100.00%
+  gold_document_candidate_rate: 100.00%
+
+security_bulletin_affected_product:
+  n: 1
+  average_oracle_gain_vs_top_candidate: +0.0000
+  positive_oracle_gain_rate: 0.00%
+  gold_document_candidate_rate: 100.00%
+```
+
+Feature leakage audit：
+
+```text
+suspicious_runtime_feature_keys: []
+text_like_runtime_feature_keys: []
+non_scalar_runtime_feature_keys: []
+label_leakage_detected_from_keys: false
+```
+
+注意：这个 leakage audit 是静态 key/value-shape 审计，只能说明没有发现明显的 label key、raw text/id 字段或非标量字段混入 `runtime_features`。它不是统计意义上的因果安全证明。
+
+Visualization artifacts：
+
+```text
+artifacts/candidate_reranker_dataset_stage32_visuals/candidate_label_f1_distribution.svg
+artifacts/candidate_reranker_dataset_stage32_visuals/best_candidate_rank_distribution.svg
+artifacts/candidate_reranker_dataset_stage32_visuals/route_oracle_gain.svg
+artifacts/candidate_reranker_dataset_stage32_visuals/split_oracle_gain.svg
+```
+
+Audit JSON：
+
+```text
+artifacts/candidate_reranker_dataset_stage32_audit.json
+```
+
+上述 artifact 都是本地生成结果，没有纳入 git。
+
+### 解释
+
+- Candidate row 的 label 分布非常偏低：
+  - F1 `< 0.20` 的 candidate row 有 `6267 / 8060 = 77.75%`。
+  - F1 `>= 0.60` 的 candidate row 只有 `194 / 8060 = 2.41%`。
+- 但 question-level best candidate 明显更好：
+  - best candidate F1 `>= 0.40` 的 question 有 `255 / 610 = 41.80%`。
+  - best candidate F1 `>= 0.80` 的 question 有 `87 / 610 = 14.26%`。
+- 当前 selector 已经把 best candidate 放在 rank 1 的比例只有 `18.52%`。
+- 但 best candidate 在 rank 1-10 的比例是：
+  `113 + 81 + 68 + 91 + 152 = 505 / 610 = 82.79%`
+- 这说明 Stage 31 的 candidate pool 对 reranker 是有意义的：
+  - 大多数 case 的 best candidate 没有离候选前列太远；
+  - 但当前 top1 排序明显不够。
+- dev 和 train 方向一致：
+  - dev oracle gain 更高，gold-document candidate rate 也更高；
+  - train 仍有 `+0.1861` 的平均 oracle gain，不是只有 dev 有空间。
+- route-level 看，`other` 和 `error_or_log` 是高样本、高 gain 的主要空间。
+- 少样本 route 的 gain 不能过度解释，例如：
+  - `security_bulletin_post_fix_behavior` 只有 3 个 question；
+  - `security_bulletin_remediation` 只有 2 个 question；
+  - `security_bulletin_affected_product` 只有 1 个 question。
+
+### 问题与原因
+
+- 问题 1：候选 row 的正样本很稀疏。
+  - 高 F1 candidate 很少，后续训练 baseline reranker 需要按 question 分组评估，而不能只看 row-level accuracy。
+- 问题 2：best candidate 大多不在 rank 1。
+  - 这说明当前 selector 的排序信号不足，但 candidate pool 中仍存在可学习空间。
+- 问题 3：route 之间样本量差异很大。
+  - 大 route 可以作为主要训练信号，小 route 只能作为诊断维度，不能单独调参过拟合。
+- 问题 4：第一次 leakage 审计规则过严。
+  - 初始规则把 `candidate_sentence_count`、`title_query_overlap_count`、`title_query_overlap_ratio` 这类聚合数值特征误判为 text-like runtime 风险。
+  - 原因是规则粗暴匹配了 `sentence` 和 `title` 字符串，没有区分 raw text/id 字段和派生聚合特征。
+
+### 修正与处理
+
+- 修正 leakage 规则：
+  - 只把明显的 raw text/id 字段视为 text-like 风险，例如 `candidate_sentence`、`document_title`、`document_id`、`question_title`、`question_id` 等。
+  - 不把 `*_count`、`*_ratio` 这类聚合数值特征误判为原始文本泄漏。
+- 重跑 Stage 32 audit。
+- 最终真实结果是：
+  - `label_leakage_detected_from_keys: false`
+  - consistency 全部通过。
+
+### 测试
+
+```powershell
+ruff check src\ts_rag_agent\application\candidate_reranker_dataset_audit.py `
+  scripts\audit_candidate_reranker_dataset.py `
+  tests\test_candidate_reranker_dataset_audit.py
+
+pytest -q tests\test_candidate_reranker_dataset_audit.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 82 passed
+```
+
+### 结论
+
+- Stage 32 审计通过，可以进入 baseline reranker 实验。
+- 当前 dataset/summary 一致，没有发现明显 runtime feature label leakage。
+- 可视化结果已经生成，能直观看到：
+  - candidate labels 严重偏低；
+  - best candidate rank 大量落在 rank 2-10；
+  - route oracle gain 主要集中在 `other`、`error_or_log`、`install_upgrade_config` 等较大 route；
+  - dev/train 都存在正向 reranking 空间。
+- 仍然不能把这个阶段解释为模型收益：
+  - 本阶段没有训练模型；
+  - 没有 end-to-end reranker 结果；
+  - 只有 candidate pool 的 oracle 上限与数据质量审计。
+
+### 我学到的
+
+- 做 learned reranker 前，最重要的不是马上训练，而是确认数据边界和评估单位。
+- row-level label 很偏时，row accuracy 很容易误导；更应该按 question 评估“最终选中的 candidate F1 是否提升”。
+- 静态 leakage 审计也要小心误报：raw text/id 和派生数值特征必须区分。
+- 可视化很有帮助，rank 分布图比单个 oracle gain 数字更能说明为什么 reranker 有必要。
+
+### 下一步
+
+- 做 Stage 33：cross-validated baseline candidate reranker。
+- 建议路线：
+  1. 以 question 为 group 做 deterministic k-fold cross-validation；
+  2. 只使用 `runtime_features`；
+  3. label 先使用 `is_best_candidate_for_question` 或 `candidate_token_f1` 派生目标；
+  4. 指标按 question 汇总：
+     - selected candidate average token F1；
+     - delta vs original top candidate；
+     - selected rank distribution；
+     - route-level delta；
+     - dev/train 或 fold-level stability。
+- Stage 33 仍先做离线 baseline，不改 runtime。
