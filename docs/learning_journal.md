@@ -10564,3 +10564,266 @@ pytest: 114 passed
   4. dev holdout 仍只做确认，不用于选择规则调参；
   5. 继续不使用 held-out test set；
   6. 继续不改变 runtime 默认策略。
+
+## Stage 45 - Risk-aware train-CV objective for runtime proxy guards
+
+### 本阶段目标
+
+- 在 Stage 44 的 train-CV guard family 上，把风险约束前置。
+- 先筛掉不满足风险约束的 guard，再在可行 guard 中最大化 train-CV delta。
+- dev holdout 继续只做确认，不参与选择。
+- 继续不使用 held-out test set。
+- 继续不改变 runtime 默认策略。
+
+### 新增内容
+
+- 新增 `src/ts_rag_agent/application/runtime_document_risk_risk_aware_selection.py`
+  - 复用 Stage 44 的 train-CV / dev holdout guard evaluations；
+  - 校验 Stage 44 report 与当前重算结果一致；
+  - 实现 4 组 risk-aware objective；
+  - 输出每组 objective 的可行 guard、选中 guard、train-CV metrics 和 dev holdout metrics；
+  - 输出 SVG 可视化。
+- 新增 `scripts/select_risk_aware_runtime_document_risk_proxy.py`
+  - 可复跑 Stage 45；
+  - 输入 Stage 43 和 Stage 44 冻结报告；
+  - 输出 JSON 和 SVG。
+- 新增 `tests/test_runtime_document_risk_risk_aware_selection.py`
+  - 覆盖 primary objective 的 train-CV 风险约束；
+  - 覆盖 Stage 44 report mismatch 失败；
+  - 覆盖 SVG 写出。
+
+### 实验命令
+
+```powershell
+python scripts\select_risk_aware_runtime_document_risk_proxy.py `
+  --dataset artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --stage43-report artifacts\candidate_reranker_stage43_runtime_document_risk_proxy_search.json `
+  --stage44-report artifacts\candidate_reranker_stage44_runtime_proxy_train_cv_selection.json `
+  --model logistic_best_candidate `
+  --train-split train `
+  --evaluation-split dev `
+  --train-fold-count 5 `
+  --max-answer-candidates 3 `
+  --output artifacts\candidate_reranker_stage45_runtime_proxy_risk_aware_selection.json `
+  --visualization-dir artifacts\candidate_reranker_stage45_runtime_proxy_risk_aware_visuals
+```
+
+### Objective 设计
+
+本阶段比较 4 组 objective：
+
+```text
+score60_risk_parity:
+  train-CV regressions <= candidate_score_gte_60
+  train-CV citation_lost <= candidate_score_gte_60
+  train-CV gold_citation_delta >= candidate_score_gte_60
+  then maximize train-CV delta
+
+no_citation_loss:
+  train-CV citation_lost <= 0
+  train-CV gold_citation_delta >= 0
+  then maximize train-CV delta
+
+low_regression_no_citation_loss:
+  train-CV regressions <= 2
+  train-CV citation_lost <= 0
+  train-CV gold_citation_delta >= 0
+  then maximize train-CV delta
+
+zero_regression_positive_gold:
+  train-CV regressions <= 0
+  train-CV citation_lost <= 0
+  train-CV gold_citation_delta >= 1
+  then maximize train-CV delta
+```
+
+Primary objective 是 `score60_risk_parity`，原因：
+
+- `candidate_score_gte_60` 是 Stage 43/44 里最稳定的 runtime-only reference；
+- Stage 44 已证明纯 delta 会选出高风险的 `stage36_main`；
+- 因此 Stage 45 先要求“不比 score60 风险更差”，再最大化 delta。
+
+### 实验结果
+
+`score60_risk_parity`：
+
+```text
+selected: candidate_score_gte_60
+constraint: regressions <= 8; citation_lost <= 1; gold_citation_delta >= 2
+
+train-CV:
+  delta +0.0008
+  regressions 8
+  citation lost 1
+  gold citation delta +2
+
+dev holdout:
+  delta +0.0008
+  regressions 1
+  citation lost 0
+  gold citation delta 0
+```
+
+`no_citation_loss`：
+
+```text
+selected: title_rescue_rank4_score90
+constraint: citation_lost <= 0; gold_citation_delta >= 0
+
+train-CV:
+  delta +0.0008
+  regressions 3
+  citation lost 0
+  gold citation delta 0
+
+dev holdout:
+  delta -0.0015
+  regressions 3
+  citation lost 2
+  gold citation delta -1
+```
+
+`low_regression_no_citation_loss`：
+
+```text
+selected: rank4_score90
+constraint: regressions <= 2; citation_lost <= 0; gold_citation_delta >= 0
+
+train-CV:
+  delta +0.0007
+  regressions 2
+  citation lost 0
+  gold citation delta 0
+
+dev holdout:
+  delta +0.0001
+  regressions 0
+  citation lost 0
+  gold citation delta 0
+```
+
+`zero_regression_positive_gold`：
+
+```text
+selected: coverage_preserving_score60
+constraint: regressions <= 0; citation_lost <= 0; gold_citation_delta >= 1
+
+train-CV:
+  delta +0.0006
+  regressions 0
+  citation lost 0
+  gold citation delta +1
+
+dev holdout:
+  delta +0.0000
+  regressions 0
+  citation lost 0
+  gold citation delta 0
+```
+
+### 可视化结果
+
+本阶段新增 5 个 SVG：
+
+```text
+artifacts/candidate_reranker_stage45_runtime_proxy_risk_aware_visuals/stage45_objective_feasible_guard_count.svg
+artifacts/candidate_reranker_stage45_runtime_proxy_risk_aware_visuals/stage45_objective_holdout_delta.svg
+artifacts/candidate_reranker_stage45_runtime_proxy_risk_aware_visuals/stage45_objective_holdout_regressions.svg
+artifacts/candidate_reranker_stage45_runtime_proxy_risk_aware_visuals/stage45_objective_train_delta.svg
+artifacts/candidate_reranker_stage45_runtime_proxy_risk_aware_visuals/stage45_train_guard_delta_under_risk_view.svg
+```
+
+完整 JSON artifact：
+
+```text
+artifacts/candidate_reranker_stage45_runtime_proxy_risk_aware_selection.json
+```
+
+说明：以上 artifact 均在本地 `artifacts/` 下，按 `.gitignore` 规则不纳入 git。
+
+### 问题与原因
+
+- 问题 1：只约束 train-CV citation loss 不够。
+  - `no_citation_loss` 在 train-CV 上 citation loss 为 `0`；
+  - 但它选择的 `title_rescue_rank4_score90` 在 dev 上 citation lost 变成 `2`，delta 变成 `-0.0015`。
+- 问题 2：越严格的风险约束，delta 越低。
+  - `rank4_score90` 和 `coverage_preserving_score60` 都能在 dev 上做到 `0` regression；
+  - 但它们的 dev delta 只有 `+0.0001` 和 `+0.0000`。
+- 问题 3：Stage 45 的 primary objective 不是凭 dev 选出来的。
+  - `candidate_score_gte_60` 是在 train-CV 风险不劣于自身 reference 的约束下被选中；
+  - dev holdout 只是确认它没有出现 Stage 44 那种反向失效。
+
+### 修正与处理
+
+- 没有改变 runtime 默认策略。
+- 没有使用 held-out test set。
+- 没有把 `title_rescue_rank4_score90` 作为推荐策略，即使它满足 train-CV no-citation-loss objective。
+- 把 `candidate_score_gte_60` 提升为“可进入 runtime optional end-to-end 实验”的候选，而不是直接作为默认策略。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\runtime_document_risk_proxy_search.py `
+  src\ts_rag_agent\application\runtime_document_risk_proxy_cv.py `
+  src\ts_rag_agent\application\runtime_document_risk_risk_aware_selection.py `
+  scripts\cross_validate_runtime_document_risk_proxies.py `
+  scripts\select_risk_aware_runtime_document_risk_proxy.py `
+  tests\test_runtime_document_risk_proxy_search.py `
+  tests\test_runtime_document_risk_proxy_cv.py `
+  tests\test_runtime_document_risk_risk_aware_selection.py
+
+pytest -q tests\test_runtime_document_risk_proxy_search.py `
+  tests\test_runtime_document_risk_proxy_cv.py `
+  tests\test_runtime_document_risk_risk_aware_selection.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 9 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 117 passed
+```
+
+### 结论
+
+- Stage 45 的 primary risk-aware objective 选择了 `candidate_score_gte_60`。
+- 这次选择不是 dev 反向调参，而是 train-CV risk parity objective 的结果。
+- dev holdout 确认 `candidate_score_gte_60` 仍是当前最稳的 runtime-only candidate：
+  - delta `+0.0008`
+  - regressions `1`
+  - citation lost `0`
+- 更严格的零回归策略可以降低风险，但收益几乎归零。
+- 本阶段仍然只是离线选择与确认，没有改 runtime 默认行为。
+
+### 我学到的
+
+- 风险约束需要覆盖 regression、citation loss 和 gold citation delta，单看 citation loss 不够。
+- `title_rescue_rank4_score90` 的失败说明 train-CV 的单一风险维度可能在 dev 上迁移不稳。
+- `candidate_score_gte_60` 的价值不是最高 train-CV delta，而是风险/收益平衡稳定。
+- 下一步如果要继续推进，应该进入可选 runtime end-to-end，而不是继续只在离线 proxy 上调阈值。
+
+### 下一步
+
+- 做 Stage 46：把 `candidate_score_gte_60` 作为可选 runtime guard 做 end-to-end verified RAG 实验。
+- 目标：
+  1. 只增加可选参数或实验入口，不改变默认 runtime；
+  2. 用完整 verified RAG end-to-end 指标确认是否超过当前 baseline；
+  3. 对比 Stage 18 / 当前默认策略的 F1、gold citation、changed answers；
+  4. 继续不使用 held-out test set；
+  5. 如果端到端没有通过，不进入默认策略。
