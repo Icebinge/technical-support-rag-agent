@@ -6858,3 +6858,397 @@ pytest: 82 passed
      - route-level delta；
      - dev/train 或 fold-level stability。
 - Stage 33 仍先做离线 baseline，不改 runtime。
+
+## Stage 33 - Cross-Validated Baseline Candidate Reranker
+
+### 目标
+
+- 接着 Stage 32 的 dataset audit，训练前先做一个可复跑的离线 baseline reranker。
+- 本阶段只做 candidate-level reranking CV，不改 runtime，不接入 end-to-end RAG。
+- Stage 32 的下一步里有两个可选 target：
+  - `is_best_candidate_for_question`
+  - `candidate_token_f1`
+- 为了不擅自押一个方向，本阶段同时比较两个 baseline：
+  1. `logistic_best_candidate`
+     - sklearn `LogisticRegression`
+     - target: `is_best_candidate_for_question`
+  2. `ridge_candidate_token_f1`
+     - sklearn `Ridge`
+     - target: `candidate_token_f1`
+- 两个模型都只使用 `row.runtime_features`。
+- 评估单位按 question 聚合，而不是 row-level accuracy。
+
+### 起始状态
+
+```text
+git: main...origin/main clean
+scikit-learn: 1.7.2
+
+input:
+artifacts/candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl
+  rows: 8060
+  questions: 610
+```
+
+### 本阶段新增内容
+
+- 新增 `src/ts_rag_agent/application/candidate_reranker_cv.py`
+  - `CandidateRerankerExample`
+  - `CandidateRerankerSelection`
+  - `CandidateRerankerEvaluationMetrics`
+  - `CandidateRerankerFoldResult`
+  - `CandidateRerankerSegmentMetrics`
+  - `CandidateRerankerModelCVResult`
+  - `CandidateRerankerCVResult`
+  - `CandidateRerankerScorer`
+  - `LogisticBestCandidateScorer`
+  - `RidgeTokenF1Scorer`
+  - deterministic question-level k-fold CV
+  - route/split/fold aggregate metrics
+  - SVG visualization output
+- 新增 `scripts/cross_validate_candidate_reranker.py`
+  - 读取 Stage 31 JSONL。
+  - 支持 `--fold-count`。
+  - 支持 `--models`。
+  - 输出 CV JSON report。
+  - 输出 SVG charts。
+- 新增 `tests/test_candidate_reranker_cv.py`
+  - 验证可学习信号下两个 baseline 都能提升。
+  - 验证非法 fold count 会失败。
+  - 验证未知 model name 会失败。
+  - 验证 SVG 图表输出。
+
+### 特征边界
+
+本阶段模型拟合和打分只使用：
+
+```text
+row.runtime_features
+```
+
+没有使用：
+
+```text
+row.gold_labels
+row.metadata
+row.candidate_rank
+```
+
+说明：
+
+- `gold_labels` 只作为训练 target 和评估 label。
+- `metadata` 不进入模型。
+- 顶层 `candidate_rank` 不作为模型特征，只用于：
+  - 原始 top candidate baseline；
+  - tie-break；
+  - selected rank 分布统计。
+
+### 命令
+
+```powershell
+python scripts\cross_validate_candidate_reranker.py `
+  --dataset artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --fold-count 5 `
+  --models logistic_best_candidate,ridge_candidate_token_f1 `
+  --output artifacts\candidate_reranker_stage33_cv.json `
+  --visualization-dir artifacts\candidate_reranker_stage33_visuals
+```
+
+### 结果
+
+Best model：
+
+```text
+best_model_name: logistic_best_candidate
+selection_metric:
+  max aggregate average_delta_vs_top_candidate,
+  then oracle_gap_closed_rate,
+  then selected_best_candidate_rate
+```
+
+Model comparison：
+
+```text
+baseline original top candidate average F1: 0.2361
+oracle best candidate average F1: 0.4292
+
+logistic_best_candidate:
+  target: is_best_candidate_for_question
+  selected average F1: 0.2590
+  average delta vs top candidate: +0.0229
+  oracle gap closed: 11.85%
+  selected best candidate rate: 22.30%
+  selected gold-document candidate rate: 40.66%
+  improved / regressed / tied: 213 / 147 / 250
+
+ridge_candidate_token_f1:
+  target: candidate_token_f1
+  selected average F1: 0.2558
+  average delta vs top candidate: +0.0197
+  oracle gap closed: 10.19%
+  selected best candidate rate: 20.98%
+  selected gold-document candidate rate: 41.31%
+  improved / regressed / tied: 182 / 137 / 291
+```
+
+`logistic_best_candidate` fold results：
+
+```text
+fold 0:
+  selected average F1: 0.2532
+  delta: +0.0264
+  oracle gap closed: 12.84%
+  selected best rate: 19.67%
+
+fold 1:
+  selected average F1: 0.2493
+  delta: +0.0119
+  oracle gap closed: 6.21%
+  selected best rate: 18.85%
+
+fold 2:
+  selected average F1: 0.2624
+  delta: +0.0150
+  oracle gap closed: 7.93%
+  selected best rate: 24.59%
+
+fold 3:
+  selected average F1: 0.2585
+  delta: +0.0356
+  oracle gap closed: 17.84%
+  selected best rate: 21.31%
+
+fold 4:
+  selected average F1: 0.2714
+  delta: +0.0255
+  oracle gap closed: 14.23%
+  selected best rate: 27.05%
+```
+
+`logistic_best_candidate` selected rank distribution：
+
+```text
+rank_1: 241
+rank_2: 108
+rank_3: 79
+rank_4_5: 65
+rank_6_10: 71
+rank_11_plus: 46
+```
+
+Split metrics for `logistic_best_candidate`：
+
+```text
+train:
+  question_count: 450
+  baseline average F1: 0.2289
+  selected average F1: 0.2551
+  delta: +0.0262
+  oracle gap closed: 14.08%
+  selected best rate: 21.33%
+
+dev:
+  question_count: 160
+  baseline average F1: 0.2565
+  selected average F1: 0.2700
+  delta: +0.0135
+  oracle gap closed: 6.35%
+  selected best rate: 25.00%
+```
+
+Route metrics for `logistic_best_candidate`：
+
+```text
+security_bulletin_post_fix_behavior:
+  n: 3
+  delta: +0.0807
+  oracle gap closed: 23.68%
+  selected best rate: 33.33%
+
+error_or_log:
+  n: 119
+  delta: +0.0602
+  oracle gap closed: 27.78%
+  selected best rate: 26.05%
+
+install_upgrade_config:
+  n: 91
+  delta: +0.0368
+  oracle gap closed: 20.05%
+  selected best rate: 24.18%
+
+security_bulletin_vulnerability_detail:
+  n: 87
+  delta: +0.0235
+  oracle gap closed: 18.94%
+  selected best rate: 31.03%
+
+other:
+  n: 241
+  delta: +0.0092
+  oracle gap closed: 4.20%
+  selected best rate: 15.77%
+
+security_bulletin_remediation:
+  n: 2
+  delta: +0.0000
+  oracle gap closed: 0.00%
+  selected best rate: 0.00%
+
+limitation_or_restriction:
+  n: 11
+  delta: -0.0011
+  oracle gap closed: -0.72%
+  selected best rate: 36.36%
+
+how_to_or_lookup:
+  n: 55
+  delta: -0.0092
+  oracle gap closed: -5.66%
+  selected best rate: 23.64%
+
+security_bulletin_affected_product:
+  n: 1
+  delta: -0.5334
+  oracle gap closed: 0.00%
+  selected best rate: 0.00%
+```
+
+Visualization artifacts：
+
+```text
+artifacts/candidate_reranker_stage33_visuals/candidate_reranker_model_delta.svg
+artifacts/candidate_reranker_stage33_visuals/candidate_reranker_model_gap_closed.svg
+artifacts/candidate_reranker_stage33_visuals/candidate_reranker_best_model_route_delta.svg
+artifacts/candidate_reranker_stage33_visuals/candidate_reranker_best_model_selected_rank.svg
+```
+
+CV JSON：
+
+```text
+artifacts/candidate_reranker_stage33_cv.json
+```
+
+上述 artifact 都是本地生成结果，没有纳入 git。
+
+### 解释
+
+- Stage 33 证明：只用 Stage 31 的 `runtime_features`，确实能学到一点 reranking 信号。
+- `logistic_best_candidate` 比原始 top candidate 提高：
+
+```text
+0.2590 - 0.2361 = +0.0229
+```
+
+- 但它只关闭了 Stage 31 oracle gap 的 `11.85%`：
+
+```text
+oracle gap: 0.4292 - 0.2361 = +0.1931
+model gain: +0.0229
+gap closed: 11.85%
+```
+
+- 所以这是一个正向 baseline，但不是强 reranker。
+- `ridge_candidate_token_f1` 也提升了，但低于 logistic：
+
+```text
+0.2558 - 0.2361 = +0.0197
+```
+
+- `logistic_best_candidate` 的 fold delta 全部为正：
+  - 最低 fold: `+0.0119`
+  - 最高 fold: `+0.0356`
+  - 说明正向提升不是只来自单个 fold。
+- 但 route-level 有明显分化：
+  - `error_or_log`、`install_upgrade_config`、`security_bulletin_vulnerability_detail` 是主要正收益 route；
+  - `how_to_or_lookup` 出现负收益；
+  - 极小样本 route 不能过度解释。
+- selected rank 分布显示模型不是只保守选择 rank 1：
+  - rank 1 选择 241 个；
+  - rank 2-10 选择 323 个；
+  - rank 11+ 选择 46 个。
+- 这说明模型确实在重排候选，但重排仍会带来 147 个 F1 regression。
+
+### 问题与原因
+
+- 问题 1：baseline 有提升，但离 oracle 很远。
+  - 当前 runtime features 仍是浅层手写特征，缺少语义匹配能力。
+- 问题 2：regression 数量不少。
+  - `logistic_best_candidate` 有 147 个 regressed question。
+  - 说明直接替换 top candidate 还不适合作为默认 runtime 行为。
+- 问题 3：route-level 不稳定。
+  - `how_to_or_lookup` 为负收益。
+  - 少样本 security sub-routes 不能单独作为策略依据。
+- 问题 4：selected gold-document candidate rate 只有 40.66%。
+  - 这低于 Stage 31 中 gold-document candidate 出现在候选池的比例。
+  - 说明模型没有充分学会把 gold-document candidate 选出来。
+
+### 修正与处理
+
+- 不接入 runtime。
+- 不把 `logistic_best_candidate` 作为默认策略。
+- 保留 CV 工具，作为后续特征和模型改进的离线评估基线。
+- 下一阶段应该先分析 regression case 和 feature contribution，而不是急着做端到端接入。
+
+### 测试
+
+```powershell
+ruff check src\ts_rag_agent\application\candidate_reranker_cv.py `
+  scripts\cross_validate_candidate_reranker.py `
+  tests\test_candidate_reranker_cv.py
+
+pytest -q tests\test_candidate_reranker_cv.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 85 passed
+```
+
+### 结论
+
+- Stage 33 成功建立了 cross-validated baseline candidate reranker。
+- 最佳 baseline 是 `logistic_best_candidate`：
+
+```text
+average F1: 0.2361 -> 0.2590
+delta: +0.0229
+oracle gap closed: 11.85%
+```
+
+- 这说明 learned reranker 方向成立，但当前 baseline 不够稳，不能进入 runtime。
+- 下一步应从“为什么 regression”入手，而不是继续盲目换模型。
+
+### 我学到的
+
+- 一个 baseline 只要能在 grouped CV 下稳定正收益，就能证明方向不是空想。
+- 但正收益不等于可上线：regression count 和 route-level negative cases 同样重要。
+- `is_best_candidate_for_question` 这个分类目标在当前数据上略优于直接回归 `candidate_token_f1`。
+- question-level CV 比 row-level 训练指标更贴近最终使用方式。
+
+### 下一步
+
+- 做 Stage 34：candidate-reranker regression/error analysis。
+- 重点分析：
+  1. `logistic_best_candidate` 的 improved/regressed/tied case；
+  2. route-level regression 来源，尤其 `how_to_or_lookup`；
+  3. selected rank 太深的 case；
+  4. gold-document candidate 存在但没选中的 case；
+  5. 当前 runtime features 是否缺少关键语义信号。
+- Stage 34 仍然只做离线分析，不改 runtime。
