@@ -5154,3 +5154,208 @@ pytest: 58 passed
   2. 分析 install-only changed cases，看看是否能形成更有价值的 install-specific policy；
   3. 回到 answer-gap 的最大痛点：gold document in context but selected answer weak，继续改 evidence selection 而不是 composition。
 - 当前建议：不要继续在 route-aware composition 上做小阈值调参，转向 evidence selection 或 retrieval。
+
+## Stage 26 - Answer-Gap Priority Analysis
+
+### 目标
+
+- 收口 route-aware composition 的阶段性结论。
+- 不继续做低收益阈值微调。
+- 回到更有收益空间的 answer-gap / evidence-selection 问题。
+- 用 dev + train 的 answer-gap reports 统一排序，找下一阶段最值得改的 route/bucket。
+
+### 起始状态
+
+```text
+git: main...origin/main clean
+```
+
+Stage 25 结论：
+
+- route-aware 已经变成较安全的实验参数。
+- 但 verified F1 提升只有：
+  - dev: `+0.0002`
+  - train: `+0.0005`
+- 默认 runtime 继续使用 `top-k`。
+- 继续调 route-aware composition 的收益空间很小。
+
+### 本阶段新增内容
+
+- 新增 `src/ts_rag_agent/application/answer_gap_priority_analysis.py`
+  - 跨多个 answer-gap report 聚合 route / bucket / route-bucket。
+  - 统计事实字段：
+    - total cases
+    - gold in context
+    - selected gold citation
+    - gold-in-context-not-selected
+    - gold-window-beats-selected
+    - average selected F1
+    - average best gold window F1
+    - average gold-window gap
+  - 生成代表样本。
+  - 生成 heuristic priority score。
+- 新增 `scripts/analyze_answer_gap_priorities.py`
+  - 支持多个 answer-gap report。
+  - 支持 `--min-cases`。
+  - 支持 `--sample-limit-per-group`。
+- 新增 `tests/test_answer_gap_priority_analysis.py`
+  - 覆盖 route/bucket 排序。
+  - 覆盖缺少 `cases` 的错误输入。
+
+### 事实边界
+
+- `priority_score` 是启发式排序指标，不是模型指标。
+- 它只用来帮助决定下一阶段看哪里。
+- 真实事实字段仍然是 count、F1、gold-in-context、selected-gold-citation 等。
+
+### 命令
+
+```powershell
+python scripts\analyze_answer_gap_priorities.py `
+  --answer-gap-reports artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage18_cve_anchor.json,artifacts\answer_gap_analysis_train_hybrid_routing_mcpd3_stage24_cv_source.json `
+  --min-cases 3 `
+  --sample-limit-per-group 5 `
+  --output artifacts\answer_gap_priority_stage26_dev_train_hybrid.json
+```
+
+### 结果
+
+Total cases:
+
+```text
+610 answerable cases
+source reports: dev + train
+```
+
+Top route priorities:
+
+```text
+other:
+  total_cases: 241
+  gold_in_context_count: 143
+  selected_gold_citation_count: 112
+  gold_in_context_not_selected_count: 31
+  gold_window_beats_selected_count: 112
+  average_selected_answer_f1: 0.2322
+  average_best_gold_window_f1: 0.8857
+  average_gold_window_f1_gap: 0.6535
+
+error_or_log:
+  total_cases: 119
+  gold_in_context_count: 64
+  selected_gold_citation_count: 51
+  gold_in_context_not_selected_count: 13
+  gold_window_beats_selected_count: 51
+  average_gold_window_f1_gap: 0.6813
+
+security_bulletin_vulnerability_detail:
+  total_cases: 87
+  gold_in_context_count: 78
+  selected_gold_citation_count: 78
+  gold_window_beats_selected_count: 77
+  average_gold_window_f1_gap: 0.5068
+```
+
+Top route-bucket priorities:
+
+```text
+other::gold_window_beats_selected_answer:
+  total_cases: 112
+  gold_in_context_count: 112
+  selected_gold_citation_count: 112
+  average_selected_answer_f1: 0.3172
+  average_best_gold_window_f1: 0.8953
+  average_gold_window_f1_gap: 0.5781
+
+security_bulletin_vulnerability_detail::gold_window_beats_selected_answer:
+  total_cases: 77
+  gold_in_context_count: 77
+  selected_gold_citation_count: 77
+  average_selected_answer_f1: 0.4590
+  average_best_gold_window_f1: 0.9415
+  average_gold_window_f1_gap: 0.4825
+
+other::gold_in_context_not_selected:
+  total_cases: 31
+  gold_in_context_count: 31
+  selected_gold_citation_count: 0
+  average_selected_answer_f1: 0.1628
+  average_best_gold_window_f1: 0.8740
+  average_gold_window_f1_gap: 0.7112
+```
+
+Representative cases for the top priority:
+
+```text
+TRAIN_Q374
+route: other
+bucket: gold_window_beats_selected_answer
+selected F1: 0.0494
+best gold window F1: 0.9921
+gold retrieval rank: 1
+selected gold candidate count: 3
+
+TRAIN_Q379
+route: other
+bucket: gold_window_beats_selected_answer
+selected F1: 0.0200
+best gold window F1: 0.9565
+gold retrieval rank: 2
+selected gold candidate count: 1
+
+DEV_Q134
+route: other
+bucket: gold_window_beats_selected_answer
+selected F1: 0.1010
+best gold window F1: 1.0000
+gold retrieval rank: 1
+selected gold candidate count: 1
+```
+
+### 解释
+
+- 最大痛点不是单纯 retrieval。
+- 很多 case 已经满足：
+  - gold document is in context；
+  - selected answer already cites gold document；
+  - 但 selected sentence/window 与 gold answer 的 token F1 很低。
+- 这说明下一阶段应优先改 evidence selection 的“gold 文档内部选句/选窗口能力”。
+- `other` route 的问题最大，说明只继续做 security/install/how-to 的手写 route policy 不够。
+
+### 测试
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 60 passed
+```
+
+### 结论
+
+- Stage 26 把方向从 composition 阈值调参切回 evidence selection。
+- 下一阶段最值得做的是：
+  `other::gold_window_beats_selected_answer`
+- 这类问题的 gold 文档通常已经被检索并引用，但候选句/窗口不够 answer-like。
+- 继续做 route-aware composition 的边际收益不高。
+
+### 我学到的
+
+- 只看 gold citation 会误导判断：有些答案已经引用 gold 文档，但句子选得很差。
+- `gold_window_beats_selected_answer` 比 `gold_in_context_not_selected` 更像“选句质量”问题。
+- route 分类为 `other` 并不意味着低价值；它反而是最大的损失池。
+- 下一阶段需要让 selector 更会在一个已知相关文档内部选出 answer span，而不是继续缩短最终答案。
+
+### 下一步
+
+- 做 Stage 27：针对 `other::gold_window_beats_selected_answer` 设计 answer-window selector 改进。
+- 候选方向：
+  1. 在 `other` route 上引入更强的 section/window answer-pattern scoring；
+  2. 对 selected gold document 内部做 second-pass window rerank；
+  3. 用 `best_gold_window` 代表样本分析哪些非 gold 特征可以帮助 selector 找到答案窗口。
+- 不建议下一步继续调 route-aware composition。
