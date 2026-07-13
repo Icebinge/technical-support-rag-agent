@@ -11086,3 +11086,253 @@ pytest: 121 passed
   3. 判断是否能设计更窄的 runtime gate，降低 changed-answer 面和 unanswerable 风险；
   4. 仍然不使用 held-out test set；
   5. 在没有解决风险前，不把 candidate-score guarded reranker 默认化。
+
+## Stage 47 - Changed-Answer And Unanswerable-Risk Analysis
+
+日期：2026-07-14
+
+### 目标
+
+- 专门分析 Stage 46 的 `59 / 310` 个 verified changed answers。
+- 聚焦两个 unanswerable refusal regression：
+  - `DEV_Q083`
+  - `DEV_Q203`
+- 统计 changed answers 的 route、outcome、citation rank、evidence score 分布。
+- 生成可复查 JSON 和 SVG 可视化。
+- 继续不使用 held-out test set，不改变默认 runtime。
+
+### 实现内容
+
+- 新增 `verified_rag_changed_answer_risk_analysis.py`：
+  - 读取 baseline/candidate verified RAG report；
+  - 读取 PrimeQA question metadata；
+  - 用现有 `classify_question_route()` 计算 route；
+  - 逐题识别 verified answer 是否变化；
+  - 统计 answerable F1 improved/regressed/tied；
+  - 统计 unanswerable refusal regression；
+  - 统计 candidate citations 的 best/worst rank、score bucket、是否含 out-of-rank citation。
+- 新增 `scripts/analyze_verified_rag_changed_answer_risk.py`：
+  - 输出 Stage 47 JSON；
+  - 输出 SVG 可视化。
+- 新增 `svg_charts.py`：
+  - 把 Stage 46 comparison 模块里的横向柱图渲染抽成共享工具；
+  - Stage 46 comparison 和 Stage 47 risk analysis 共同复用。
+
+### 实验命令
+
+```powershell
+python scripts\analyze_verified_rag_changed_answer_risk.py `
+  --baseline-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage46_topk_report.json `
+  --candidate-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage46_candidate_score_guarded_reranker_report.json `
+  --output artifacts\verified_rag_stage47_changed_answer_risk_analysis.json `
+  --visualization-dir artifacts\verified_rag_stage47_changed_answer_risk_visuals
+```
+
+### 分析结果
+
+总体：
+
+```text
+changed verified answers: 59
+changed answerable: 28
+changed unanswerable: 31
+unanswerable refusal regressions: 2
+answerable improved: 4
+answerable regressed: 1
+answerable tied changed: 23
+candidate has out-of-rank citation: 44
+unanswerable regressions with out-of-rank citation: 2
+```
+
+route distribution：
+
+```text
+other: 24
+error_or_log: 17
+install_upgrade_config: 12
+limitation_or_restriction: 3
+security_bulletin_vulnerability_detail: 3
+```
+
+outcome distribution：
+
+```text
+answerable_f1_improved: 4
+answerable_f1_regressed: 1
+answerable_f1_tied_changed: 23
+unanswerable_answer_changed: 29
+unanswerable_refusal_regression: 2
+```
+
+candidate citation rank：
+
+```text
+best_rank:
+  rank_1: 51
+  rank_2: 6
+  rank_3: 2
+
+worst_rank:
+  rank_1: 1
+  rank_2: 5
+  rank_3: 9
+  rank_4_5: 44
+```
+
+out-of-rank by outcome：
+
+```text
+answerable_f1_improved: 2 / 4
+answerable_f1_regressed: 1 / 1
+answerable_f1_tied_changed: 19 / 23
+unanswerable_answer_changed: 20 / 29
+unanswerable_refusal_regression: 2 / 2
+```
+
+evidence score：
+
+```text
+max_evidence_score:
+  score_60_99: 13
+  score_gte_100: 46
+
+min_evidence_score:
+  score_15_59: 5
+  score_60_99: 42
+  score_gte_100: 12
+```
+
+两个 unanswerable refusal regression：
+
+```text
+DEV_Q083
+route: install_upgrade_config
+baseline reasons: citation_rank_too_low
+candidate reasons: verified
+candidate citation ranks: 1, 4, 4
+candidate evidence scores: 72.408, 101.9876, 99.4177
+
+DEV_Q203
+route: error_or_log
+baseline reasons: citation_rank_too_low
+candidate reasons: verified
+candidate citation ranks: 3, 4, 5
+candidate evidence scores: 84.1343, 139.5853, 128.1817
+```
+
+观察性 rank-contained gate 影响：
+
+```text
+如果要求 candidate answer 的所有 citation retrieval_rank <= verifier max rank 3：
+  会挡住 changed cases: 44 / 59
+  会挡住 unanswerable refusal regressions: 2 / 2
+```
+
+注意：这只是基于已保存 report 输出的观察性分析，不是已验证 runtime gate。
+
+### 可视化结果
+
+本阶段新增 4 个 SVG：
+
+```text
+artifacts/verified_rag_stage47_changed_answer_risk_visuals/stage47_changed_by_route.svg
+artifacts/verified_rag_stage47_changed_answer_risk_visuals/stage47_changed_by_outcome.svg
+artifacts/verified_rag_stage47_changed_answer_risk_visuals/stage47_out_of_rank_by_outcome.svg
+artifacts/verified_rag_stage47_changed_answer_risk_visuals/stage47_candidate_worst_rank.svg
+```
+
+完整 JSON artifact：
+
+```text
+artifacts/verified_rag_stage47_changed_answer_risk_analysis.json
+```
+
+说明：以上 artifact 均在本地 `artifacts/` 下，按 `.gitignore` 规则不纳入 git。
+
+### 问题与原因
+
+- 问题 1：风险不是单一 route 导致。
+  - `other`、`error_or_log`、`install_upgrade_config` 都有明显 changed answers；
+  - 两个 unanswerable refusal regression 分别来自 `install_upgrade_config` 和 `error_or_log`。
+- 问题 2：candidate 通过 verifier 的方式过于宽松。
+  - verifier 当前只要求 best citation rank `<= 3`；
+  - candidate answer 可以同时携带 rank4/rank5 citations；
+  - Stage 47 中 `44 / 59` 个 changed candidate answers 含 out-of-rank citation。
+- 问题 3：out-of-rank 信号能覆盖两个拒答退化，但会挡掉很多其它 changed cases。
+  - 它会挡住两个 unanswerable refusal regression；
+  - 但也会挡住 `2 / 4` 个 answerable improved cases；
+  - 所以不能直接声明它就是默认策略。
+
+### 修正与处理
+
+- 没有改变默认 runtime。
+- 没有使用 held-out test set。
+- 没有把 rank-contained 条件直接加入默认策略。
+- 将 rank-contained 条件记录为下一阶段需要真实端到端验证的候选 guard。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\svg_charts.py `
+  src\ts_rag_agent\application\verified_rag_report_comparison.py `
+  src\ts_rag_agent\application\verified_rag_changed_answer_risk_analysis.py `
+  scripts\analyze_verified_rag_changed_answer_risk.py `
+  tests\test_verified_rag_report_comparison.py `
+  tests\test_verified_rag_changed_answer_risk_analysis.py
+
+pytest -q tests\test_verified_rag_report_comparison.py `
+  tests\test_verified_rag_changed_answer_risk_analysis.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 4 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 123 passed
+```
+
+### 结论
+
+- Stage 46 的主要风险不是 gold citation loss，而是 candidate answer 太容易通过 verifier。
+- 两个 unanswerable refusal regression 都符合相同模式：
+  - baseline 因 `citation_rank_too_low` 拒答；
+  - candidate 加入一个 rank<=3 citation 后通过；
+  - 但最终 answer 仍携带 rank4/rank5 citations。
+- `all citations rank <= 3` 是一个强信号：
+  - 能覆盖 `2 / 2` 个 unanswerable refusal regression；
+  - 但会影响 `44 / 59` 个 changed cases；
+  - 因此必须进入下一阶段 end-to-end 验证，不能直接默认化。
+
+### 我学到的
+
+- 只看 best citation rank 会隐藏“答案中仍混入低 rank 文档”的风险。
+- changed answer 风险主要来自 answer composition 放宽，而不是 route classifier 某一类失效。
+- 对 unanswerable 问题来说，“通过 verifier”本身也可能是坏事，因为 gold label 是不可回答。
+- 可视化 route/outcome/rank 分布比单看两个样本更能解释为什么 Stage 46 不能默认化。
+
+### 下一步
+
+- 做 Stage 48：把 rank-contained 条件做成可选 runtime guard 并重跑 end-to-end verified RAG。
+- 目标：
+  1. candidate-score guarded reranker 只有在最终 selected citations 全部 `retrieval_rank <= 3` 时才允许改写；
+  2. 对比 Stage 46 candidate 和 Stage 46 top-k baseline；
+  3. 重点检查是否消除 `DEV_Q083`、`DEV_Q203` 两个 unanswerable refusal regression；
+  4. 同时量化 answerable improved/regressed 的损失；
+  5. 仍然不使用 held-out test set；
+  6. 不改变默认 runtime。
