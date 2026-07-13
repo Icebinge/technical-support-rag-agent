@@ -232,6 +232,30 @@ def guarded_candidate_answer_experiment_to_dict(
     return asdict(result)
 
 
+def build_topk_leading_candidate_answer_cases_from_decisions(
+    decisions: Sequence[CandidateRerankerPolicyDecision],
+    rows: Sequence[Mapping[str, Any]],
+    gold_answers_by_question_key: Mapping[str, str],
+    max_answer_candidates: int = 3,
+) -> list[GuardedCandidateAnswerCase]:
+    """Build full top-k leading-candidate rewrite cases from policy decisions."""
+
+    if max_answer_candidates <= 0:
+        raise ValueError("max_answer_candidates must be positive")
+    row_index = _build_row_index(rows)
+    mode_name = f"top{max_answer_candidates}_leading_candidate_rewrite"
+    return [
+        _topk_leading_candidate_case(
+            decision=decision,
+            row_index=row_index,
+            gold_answers_by_question_key=gold_answers_by_question_key,
+            max_answer_candidates=max_answer_candidates,
+            mode_name=mode_name,
+        )
+        for decision in decisions
+    ]
+
+
 def write_guarded_candidate_answer_visualizations(
     result: GuardedCandidateAnswerExperimentResult,
     output_dir: Path,
@@ -309,16 +333,12 @@ def _evaluate_policy(
 
     if gold_answers_by_question_key is not None:
         topk_mode_name = f"top{max_answer_candidates}_leading_candidate_rewrite"
-        topk_cases = [
-            _topk_leading_candidate_case(
-                decision=decision,
-                row_index=row_index,
-                gold_answers_by_question_key=gold_answers_by_question_key,
-                max_answer_candidates=max_answer_candidates,
-                mode_name=topk_mode_name,
-            )
-            for decision in decisions
-        ]
+        topk_cases = build_topk_leading_candidate_answer_cases_from_decisions(
+            decisions=decisions,
+            rows=rows,
+            gold_answers_by_question_key=gold_answers_by_question_key,
+            max_answer_candidates=max_answer_candidates,
+        )
         mode_evaluations.append(
             _mode_evaluation(topk_mode_name, topk_cases, sample_limit)
         )

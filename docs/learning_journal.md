@@ -8664,3 +8664,304 @@ pytest: 2 passed
   4. 按 route、selected rank、score margin、candidate score、document transition 做归因；
   5. 判断是否存在可泛化的 stricter gate；
   6. 继续不改 runtime，除非后续端到端证据足够。
+
+## Stage 38 - Top3 Guarded Answer Changed-Case Error Analysis
+
+### 目标
+
+- 接着 Stage 37，专门分析 `top3_leading_candidate_rewrite` 的 changed cases。
+- 本阶段重点不是再看 headline average F1，而是解释：
+  1. 22 个 top3 regression 来自哪里；
+  2. 4 个 citation lost 和 4 个 citation gained 发生在什么条件下；
+  3. selected rank、model score margin、candidate score、document transition 是否能形成更稳的 gate；
+  4. 是否存在可以进入下一步 policy 实验的 stricter gate。
+- 本阶段仍然是离线分析，不改 runtime。
+
+### 起始状态
+
+```text
+git: main...origin/main clean
+latest committed stage: Stage 37
+
+Stage 37 main top3 proxy:
+baseline F1: 0.2655
+policy F1:   0.2665
+delta:       +0.0010
+regressions: 22 / 610
+citation lost / gained: 4 / 4
+```
+
+### 边界说明
+
+- Stage 37 JSON 只保存 aggregate 和 sample cases，不保存完整 610 个 case。
+- 因此 Stage 38 的做法是：
+  1. 读取 Stage 37 report；
+  2. 校验 Stage 37 main policy、mode、aggregate 指标；
+  3. 从 Stage 31 candidate dataset 和本地 PrimeQA gold answers 复算完整 610 个 top3 cases；
+  4. 再做 changed-case attribution。
+- 这避免把 sample cases 当作全量事实。
+- gate audit 是 post-hoc analysis，不是 runtime 策略变更。
+
+### 本阶段新增内容
+
+- 更新 `src/ts_rag_agent/application/guarded_candidate_reranker_answer_experiment.py`
+  - 新增 `build_topk_leading_candidate_answer_cases_from_decisions`
+  - 目的：让 Stage 38 可以复用 Stage 37 的 top-k case 构造逻辑，而不是复制一份。
+- 新增 `src/ts_rag_agent/application/guarded_candidate_reranker_changed_case_analysis.py`
+  - 复算 full top3 cases；
+  - 校验 Stage 37 aggregate；
+  - 输出 changed-case metrics；
+  - 输出 regression/citation loss/citation gain cases；
+  - 按 route、rank bucket、model margin bucket、candidate score bucket、document transition 归因；
+  - 做 stricter gate post-hoc audit；
+  - 输出 SVG 可视化。
+- 新增 `scripts/analyze_guarded_candidate_changed_cases.py`
+  - 读取 Stage 31 dataset；
+  - 读取 Stage 37 report；
+  - 读取本地 PrimeQA dev/train gold answers；
+  - 输出 Stage 38 JSON 和 SVG。
+- 新增 `tests/test_guarded_candidate_reranker_changed_case_analysis.py`
+  - 验证 changed-case attribution；
+  - 验证 Stage 37 report 一致性校验；
+  - 验证 SVG 写出。
+
+### 命令
+
+```powershell
+python scripts\analyze_guarded_candidate_changed_cases.py `
+  --dataset artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --stage37-report artifacts\candidate_reranker_stage37_answer_experiment.json `
+  --model logistic_best_candidate `
+  --fold-count 5 `
+  --splits dev,train `
+  --max-answer-candidates 3 `
+  --sample-limit 50 `
+  --output artifacts\candidate_reranker_stage38_changed_case_analysis.json `
+  --visualization-dir artifacts\candidate_reranker_stage38_changed_case_visuals
+```
+
+### 结果
+
+复核后的 main top3 proxy：
+
+```text
+question_count: 610
+changed_case_count: 189
+average_delta_vs_baseline: +0.0010
+improved_count: 26
+regressed_count: 22
+citation_lost_count: 4
+citation_gained_count: 4
+gold_citation_delta: 0
+```
+
+Regression route summary：
+
+```text
+other:                                  8 cases, avg delta -0.0602
+error_or_log:                            6 cases, avg delta -0.0194
+install_upgrade_config:                  5 cases, avg delta -0.0488
+security_bulletin_vulnerability_detail:  2 cases, avg delta -0.0037
+security_bulletin_affected_product:      1 case,  avg delta -0.0941
+```
+
+Rank bucket summary：
+
+```text
+rank_2: 80 changed, 0 improved, 0 regressed, avg delta +0.0000
+rank_3: 58 changed, 0 improved, 0 regressed, avg delta +0.0000
+rank_4: 32 changed, 15 improved, 15 regressed, avg delta +0.0106
+rank_5: 19 changed, 11 improved, 7 regressed, avg delta +0.0155
+```
+
+解释：
+
+- `rank_2` 和 `rank_3` 在 top3 proxy 中只是重排原 top3，token F1 和 citation 基本不变。
+- 真正影响 answer text 的 case 来自 `rank_4` 和 `rank_5`。
+- 22 / 22 个 regression 都来自 rank 4/5 replacement。
+
+Model score margin bucket summary：
+
+```text
+margin 0.05-0.10: 41 changed, avg delta -0.0019, regressions 6
+margin 0.10-0.20: 65 changed, avg delta +0.0029, regressions 8
+margin 0.20-0.40: 78 changed, avg delta +0.0068, regressions 7
+margin 0.40+:      5 changed, avg delta -0.0013, regressions 1
+```
+
+Candidate score bucket summary：
+
+```text
+score < 60:    48 changed, avg delta -0.0025, regressions 13, citation lost 2, citation gained 0
+score 60-90:   77 changed, avg delta +0.0057, regressions 7,  citation lost 2, citation gained 4
+score 90-120:  46 changed, avg delta +0.0060, regressions 2,  citation lost 0, citation gained 0
+score 120+:    18 changed, avg delta +0.0018, regressions 0,  citation lost 0, citation gained 0
+```
+
+Document transition summary：
+
+```text
+new_non_gold_leading_document:       88 changed, avg delta +0.0021, regressions 14, citation lost 3
+new_gold_leading_document:           67 changed, avg delta +0.0072, regressions 2,  citation gained 4
+same_leading_document:               23 changed, avg delta +0.0081, regressions 2,  citation lost 1
+gold_to_non_gold_leading_document:   11 changed, avg delta -0.0208, regressions 4
+```
+
+Post-hoc stricter gate audit：
+
+```text
+current main policy:
+  delta +0.0010
+  regressions 22
+  citation lost/gained 4/4
+  gold citation delta 0
+
+rank_lte_3:
+  blocked replacements: 51
+  delta: +0.0000
+  regressions: 0
+  citation lost/gained: 0/0
+  note: removes all real top3 effects, so it is not useful as a positive policy.
+
+model_margin_gte_0.10:
+  blocked replacements: 41
+  delta: +0.0012
+  regressions: 16
+  citation lost/gained: 3/3
+  gold citation delta: 0
+
+model_margin_gte_0.20:
+  blocked replacements: 106
+  delta: +0.0009
+  regressions: 8
+  citation lost/gained: 2/3
+  gold citation delta: +1
+
+candidate_score_gte_60:
+  blocked replacements: 48
+  delta: +0.0012
+  regressions: 9
+  citation lost/gained: 2/4
+  gold citation delta: +2
+
+candidate_score_gte_90:
+  blocked replacements: 125
+  delta: +0.0005
+  regressions: 2
+  citation lost/gained: 0/0
+  gold citation delta: 0
+
+same_leading_document_only:
+  blocked replacements: 166
+  delta: +0.0003
+  regressions: 2
+  citation lost/gained: 1/0
+  gold citation delta: -1
+```
+
+### 可视化结果
+
+本阶段新增 SVG 可视化：
+
+```text
+artifacts/candidate_reranker_stage38_changed_case_visuals/stage38_changed_case_outcomes.svg
+artifacts/candidate_reranker_stage38_changed_case_visuals/stage38_regressions_by_route.svg
+artifacts/candidate_reranker_stage38_changed_case_visuals/stage38_gate_audit_delta.svg
+artifacts/candidate_reranker_stage38_changed_case_visuals/stage38_gate_audit_regressions.svg
+```
+
+Stage 38 主 JSON artifact：
+
+```text
+artifacts/candidate_reranker_stage38_changed_case_analysis.json
+```
+
+说明：以上 artifact 都在本地 `artifacts/` 下，按 `.gitignore` 规则不纳入 git。
+
+### 问题与原因
+
+- 问题 1：Stage 37 artifact 没有保存完整 case list。
+  - 原因：Stage 37 为了避免 JSON 过大，只保存 aggregate 和 sample cases；
+  - 修正：Stage 38 读取 Stage 37 report 做一致性校验，再从 dataset 复算 full cases。
+- 问题 2：rank gate 容易产生误读。
+  - `rank_lte_3` 能把 regression 清零；
+  - 但它也把 top3 proxy 的真实文本变化基本清零，delta 变成 `+0.0000`；
+  - 因此它不是正向策略，只是说明风险集中在 rank 4/5。
+- 问题 3：model margin 不是唯一解释变量。
+  - `margin_0.20_0.40` 仍有 7 个 regression；
+  - 高 margin 也可能选错，因为模型 confidence 不等于 answer utility。
+- 问题 4：candidate score 更有解释力。
+  - `score < 60` 的 changed cases 平均 delta 为负；
+  - candidate_score_gte_60 同时提升 delta、减少 regression、改善 gold citation delta；
+  - 但这仍是 post-hoc evidence，需要下一步独立评估。
+
+### 修正与处理
+
+- 不接入 runtime。
+- 不把任何 Stage 38 gate 直接设为默认。
+- 把 `candidate_score_gte_60` 标记为下一步候选 gate，而不是结论。
+- 下一步需要把 candidate score gate 放回 policy evaluation：
+  - 复用 grouped-CV selections；
+  - 加入 `selected_candidate_score >= 60` 约束；
+  - 同时比较 main policy、model_margin_gte_0.10、candidate_score_gte_60、candidate_score_gte_90；
+  - 观察 top3 proxy 和 single-candidate proxy 是否仍稳定。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\guarded_candidate_reranker_changed_case_analysis.py `
+  tests\test_guarded_candidate_reranker_changed_case_analysis.py
+
+pytest -q tests\test_guarded_candidate_reranker_changed_case_analysis.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 94 passed
+```
+
+### 结论
+
+- Stage 38 的核心结论：
+  - top3 regression 集中在 rank 4/5 replacement；
+  - 低 candidate score 是更强的风险信号；
+  - `candidate_score_gte_60` 是当前最值得进入下一步验证的 post-hoc gate；
+  - 它在 Stage 38 audit 中把 regression 从 22 降到 9，并把 delta 从 `+0.0010` 提到 `+0.0012`；
+  - 但它仍是后验分析结果，不能直接接 runtime。
+
+### 我学到的
+
+- 对 top3 answer 来说，rank 2/3 的“替换”很多时候只是重排，不会改变 token F1 或 citation。
+- regression 不只看 model margin，candidate 本身的 evidence score 更有解释力。
+- citation 总量为 0 delta 时，case-level citation lost/gained 仍然必须拆开看。
+- post-hoc gate 可以提出候选，但必须经过独立 policy evaluation 才能进入下一阶段。
+- 记录 artifact 结构的限制很重要，否则下一步会误把 sample 当作 full data。
+
+### 下一步
+
+- 做 Stage 39：candidate-score guarded policy evaluation。
+- 目标：
+  1. 把 `selected_candidate_score >= 60` 做成候选约束；
+  2. 对比 Stage 36 main policy、`model_margin_gte_0.10`、`candidate_score_gte_60`、`candidate_score_gte_90`；
+  3. 同时输出 single-candidate proxy 和 top3 proxy；
+  4. 重点看 delta、regression count、citation lost/gained、gold citation delta；
+  5. 如果候选 gate 稳定，再考虑进入 verified RAG dev split runtime-style 实验；
+  6. 继续不改默认 runtime。
