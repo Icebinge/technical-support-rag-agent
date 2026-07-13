@@ -6038,3 +6038,246 @@ pytest: 71 passed
   2. 分析型 gate search：离线扫描多组门控条件，先找 dev/train 都不下降的条件，再决定是否实现。
   3. 暂停窗口替换路线，转向 retrieval/reranker 层，重新分析 `gold_in_context_not_selected`。
 - 当前建议：先做方向 2，只做离线 gate search，不改默认 runtime。
+
+## Stage 30 - Local-Window Replacement Gate Search
+
+### 目标
+
+- 接着 Stage 29 的负实验，验证是否存在“替换安全门控”。
+- 只做离线 gate search，不改默认 runtime。
+- 使用完整候选文本重新跑 dev/train，而不是只读取 answer-gap JSON 里的截断句子。
+- gate 特征只能使用 runtime 可见信息：
+  - baseline candidate text
+  - forced local-window candidate text
+  - question route
+  - citation document id
+- F1 只用于离线评估，不参与 gate 判断。
+
+### 起始状态
+
+```text
+git: main...origin/main clean
+```
+
+Stage 29 结论：
+
+- 强制 local-window replacement 在 dev/train 都下降。
+- citation 不变但 F1 下降，说明问题是同一文档内部窗口替换不安全。
+- 下一步必须先做 gate search，而不是继续扩大窗口或调权重。
+
+### 本阶段新增内容
+
+- 新增 `src/ts_rag_agent/application/local_window_gate_search.py`
+  - 定义 `LocalWindowGateConfig`。
+  - 定义 5 组候选 gate：
+    - `strict_answer_gain_no_heading`
+    - `moderate_answer_gain_no_problem`
+    - `compact_same_signal_no_heading`
+    - `answer_heading_gain`
+    - `shorter_same_signal_no_problem`
+  - 支持 candidate-level gate：
+    - token 长度限制
+    - sentence 数限制
+    - added token 限制
+    - length ratio 限制
+    - anchor coverage 限制
+    - answer-signal delta 限制
+    - problem/question heading noise 阻断
+    - noise growth 阻断
+  - 输出每个 gate 在每个 split 和 overall 的：
+    - average F1
+    - delta vs baseline
+    - delta vs forced local-window
+    - changed cases
+    - replacement count
+    - gold citation delta
+    - win counts
+  - stable gate candidate 条件：
+    - 每个 split average delta vs baseline 不为负；
+    - 每个 split citation 不下降；
+    - 所有 split 总计至少发生过替换。
+- 新增 `scripts/analyze_local_window_gate_search.py`
+  - 重新加载 TechQA dev/train。
+  - 重新建立 BM25 index。
+  - 对每个 answerable question 重新生成：
+    - baseline `hybrid-routing` candidates；
+    - forced `local-window-rerank` candidates；
+    - gated candidates。
+  - 避免使用报告中被截断的 candidate sentence。
+- 新增 `tests/test_local_window_gate_search.py`
+  - 验证安全窗口可以通过 gate。
+  - 验证 problem/symptom noise 会被阻断。
+  - 验证非 `other` route 不替换。
+  - 验证 stable candidate 必须跨 split 不下降且至少有实际替换。
+
+### 事实边界
+
+- 本阶段没有修改默认 selector。
+- 本阶段没有实现 runtime gate 参数。
+- 本阶段没有使用 gold answer 参与 gate 判断。
+- 本阶段没有引入 LLM judge。
+- `stable_gate_candidates` 是离线搜索结果，不等于已经可以默认上线。
+
+### 命令
+
+```powershell
+python scripts\analyze_local_window_gate_search.py `
+  --splits dev,train `
+  --max-candidates-per-document 3 `
+  --output artifacts\local_window_gate_search_stage30_dev_train.json
+```
+
+### 结果
+
+Baseline 与 forced local-window：
+
+```text
+dev baseline F1: 0.2805
+dev forced local-window F1: 0.2410
+
+train baseline F1: 0.2596
+train forced local-window F1: 0.2497
+```
+
+Stable gate candidates：
+
+```text
+stable_gate_candidates:
+  - strict_answer_gain_no_heading
+```
+
+`strict_answer_gain_no_heading`：
+
+```text
+dev:
+  F1: 0.2805
+  delta vs baseline: +0.0000
+  changed cases: 0
+  replacements: 0
+  wins: tie 160
+
+train:
+  F1: 0.2597
+  delta vs baseline: +0.0001
+  changed cases: 3
+  replacements: 3
+  wins: tie 450
+
+overall:
+  F1: 0.2651
+  delta vs baseline: +0.0000
+  changed cases: 3
+  replacements: 3
+  wins: tie 610
+```
+
+`moderate_answer_gain_no_problem`：
+
+```text
+dev:
+  F1: 0.2781
+  delta vs baseline: -0.0024
+  changed cases: 13
+  wins: baseline 4, tie 156
+
+train:
+  F1: 0.2606
+  delta vs baseline: +0.0010
+  changed cases: 31
+  wins: gated 8, baseline 4, tie 438
+
+overall:
+  F1: 0.2652
+  delta vs baseline: +0.0001
+  changed cases: 44
+  wins: gated 8, baseline 8, tie 594
+```
+
+其他 gate：
+
+```text
+answer_heading_gain:
+  dev delta: -0.0014
+  train delta: +0.0003
+
+compact_same_signal_no_heading:
+  dev delta: -0.0017
+  train delta: +0.0002
+
+shorter_same_signal_no_problem:
+  dev delta: +0.0000
+  train delta: +0.0000
+  changed cases: 0
+```
+
+### 解释
+
+- Stage 30 找到了一个非降 gate：`strict_answer_gain_no_heading`。
+- 但它的实际工程价值很弱：
+  - dev 完全没有替换；
+  - train 只替换 3 个 case；
+  - 所有 case 在 `f1_win_margin=0.03` 下仍然都是 tie；
+  - overall average delta 四舍五入后仍是 `+0.0000`。
+- `moderate_answer_gain_no_problem` 虽然 overall 看起来最高，且 train 有 `+0.0010`，但 dev 下降 `-0.0024`，不能作为稳定 gate。
+- 这说明：
+  - gate 变宽会重新引入噪声窗口；
+  - gate 变严会几乎不替换；
+  - local-window 路线目前处于“安全但无收益”或“有替换但不稳定”的两难。
+
+### 问题与原因
+
+- 问题 1：安全门控和收益之间冲突明显。
+  - 严格 gate 防住了噪声，但几乎不触发。
+  - 宽松 gate 触发更多，但 dev 下降。
+- 问题 2：当前特征仍然只看文本形态。
+  - 它能识别明显的 heading noise；
+  - 但不能稳定判断“替换后是否更接近最终答案”。
+- 问题 3：Stage 26 的 gap 很大，但局部规则很难吃到这部分收益。
+  - 这说明更可能需要学习式 reranker 或更强的 answer-candidate scorer，而不是继续手写窗口规则。
+
+### 修正与处理
+
+- 保留 gate search 工具作为离线诊断工具。
+- 不实现 runtime gate。
+- 不把 `strict_answer_gain_no_heading` 晋升为 runtime 参数。
+- 不继续扩大 local-window gate 的规则集合，避免继续局部调参。
+
+### 测试
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 76 passed
+```
+
+### 结论
+
+- Stage 30 找到了“非降但几乎无收益”的 gate。
+- 这不足以支撑 runtime 实现。
+- local-window replacement 路线目前应暂时收口：
+  - 强制替换失败；
+  - subtype gating 失败；
+  - safety gate 只有极小 no-op 级收益。
+
+### 我学到的
+
+- “不下降”不等于“值得工程化”。
+- 如果一个 gate 的安全性来自几乎不触发，它不能解决 Stage 26 的大 gap。
+- 手写规则已经接近瓶颈，继续调 threshold 可能只是围着噪声打转。
+- answer-gap 的最大空间仍在，但需要更强的 candidate scoring，而不是继续扩大固定规则。
+
+### 下一步
+
+- Stage 31 应该先在两条路线之间做选择：
+  1. 收口 local-window 规则路线，转向 learned / feature-based candidate reranker 的离线数据集构建。
+  2. 暂停 evidence selection，回到 retrieval 层重新看 `gold_in_context_not_selected`。
+- 当前建议：选择方向 1。
+  - 用现有 answer-gap / best_gold_window 生成训练样本；
+  - 先做离线 feature dataset，不训练模型；
+  - 明确区分 runtime-visible features 和 gold-derived labels。
