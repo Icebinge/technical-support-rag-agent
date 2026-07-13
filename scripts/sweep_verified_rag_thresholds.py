@@ -61,7 +61,7 @@ def main(
             help=(
                 "Sentence selector: overlap, bm25-sentence, answer-aware, "
                 "answer-window, section-span, hybrid-routing, or "
-                "hybrid-window-routing."
+                "hybrid-window-routing, or local-window-rerank."
             ),
         ),
     ] = "overlap",

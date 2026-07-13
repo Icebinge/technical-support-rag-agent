@@ -5809,3 +5809,232 @@ pytest: 67 passed
   - 不使用 gold answer；
   - 只在 baseline 已选候选的 document / section 范围内 rerank；
   - dev 不能下降，train 不能只靠单 split 偶然上涨。
+
+## Stage 29 - Local Second-Pass Window Rerank Prototype
+
+### 目标
+
+- 接着 Stage 28 的结论，验证 candidate-level local rerank 是否比 subtype gating 更稳。
+- 原型只处理 `other` route。
+- 原型只围绕 baseline 已选候选的局部文档窗口生成替换候选。
+- 不使用 gold answer、best_gold_window 或 LLM judge。
+- 不改变默认 runtime selector。
+
+### 起始状态
+
+```text
+git: main...origin/main clean
+```
+
+Stage 28 结论：
+
+- 没有任何 `other` subtype 在 dev/train 上稳定支持 answer-window。
+- subtype gating 不应进入 runtime。
+- 下一步应验证更细粒度的 local second-pass rerank。
+
+### 本阶段新增内容
+
+- 新增 `src/ts_rag_agent/application/local_window_rerank.py`
+  - 新增 `LocalWindowRerankEvidenceSelector`。
+  - 默认包装当前 `HybridRoutingEvidenceSelector`。
+  - 只对 `question_route == "other"` 的前 3 个 baseline candidates 做局部窗口替换。
+  - 在候选句子所在文档的相邻句子范围内生成最多 3 句窗口。
+  - 用 query overlap、anchor coverage、answer signal、compactness 和 noise penalty 做局部窗口排序。
+  - 保留原候选分数和候选顺序，只替换候选文本。
+- 更新 selector factory：
+  - 新增 `local-window-rerank`
+  - 新增 `local_window_rerank`
+- 更新 `trace_selector_route`
+  - `other` route 记录为 `local_window_rerank`
+  - 非 `other` route 记录为保留 baseline `hybrid_routing`
+- 更新脚本 help：
+  - `analyze_answer_gap.py`
+  - `analyze_evidence_selection.py`
+  - `evaluate_verified_rag.py`
+  - `sweep_verified_rag_thresholds.py`
+- 新增 `tests/test_local_window_rerank.py`
+  - 覆盖局部窗口扩展。
+  - 覆盖非目标 route 保持 base selector。
+  - 覆盖 factory 创建。
+  - 覆盖 trace 解释。
+
+### 事实边界
+
+- 本阶段没有把 `local-window-rerank` 设为默认 selector。
+- 本阶段没有使用 gold answer 参与 rerank。
+- 本阶段没有使用离线 `best_gold_window` 参与 rerank。
+- 本阶段没有引入 LLM judge。
+- 本阶段的 local rerank 是强制替换式原型，不包含“替换安全门控”。
+
+### 命令
+
+Dev answer-gap：
+
+```powershell
+python scripts\analyze_answer_gap.py `
+  --split dev `
+  --evidence-selector local-window-rerank `
+  --max-candidates-per-document 3 `
+  --sample-limit 1000 `
+  --output artifacts\answer_gap_analysis_dev_local_window_rerank_mcpd3_stage29.json
+```
+
+Dev selector comparison：
+
+```powershell
+python scripts\compare_selectors.py `
+  --baseline-report artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage18_cve_anchor.json `
+  --challenger-report artifacts\answer_gap_analysis_dev_local_window_rerank_mcpd3_stage29.json `
+  --baseline-label hybrid-stage18 `
+  --challenger-label local-window-stage29 `
+  --sample-limit-per-bucket 50 `
+  --output artifacts\selector_comparison_hybrid_vs_local_window_stage29_dev.json
+```
+
+Train answer-gap：
+
+```powershell
+python scripts\analyze_answer_gap.py `
+  --split train `
+  --evidence-selector local-window-rerank `
+  --max-candidates-per-document 3 `
+  --sample-limit 1000 `
+  --output artifacts\answer_gap_analysis_train_local_window_rerank_mcpd3_stage29.json
+```
+
+Train selector comparison：
+
+```powershell
+python scripts\compare_selectors.py `
+  --baseline-report artifacts\answer_gap_analysis_train_hybrid_routing_mcpd3_stage24_cv_source.json `
+  --challenger-report artifacts\answer_gap_analysis_train_local_window_rerank_mcpd3_stage29.json `
+  --baseline-label hybrid-stage24-train `
+  --challenger-label local-window-stage29-train `
+  --sample-limit-per-bucket 50 `
+  --output artifacts\selector_comparison_hybrid_vs_local_window_stage29_train.json
+```
+
+### 结果
+
+Dev answer-gap：
+
+```text
+baseline F1: 0.2805
+local-window F1: 0.2410
+F1 delta: -0.0395
+
+baseline gold citation: 95 / 160
+local-window gold citation: 95 / 160
+citation delta: 0
+
+baseline gold_window_beats_selected_answer: 95
+local-window gold_window_beats_selected_answer: 95
+```
+
+Dev selector comparison：
+
+```text
+baseline wins: 47
+local-window wins: 10
+ties: 103
+avg F1 delta: -0.0395
+
+other route:
+  baseline wins: 47
+  local-window wins: 10
+  ties: 14
+```
+
+Train answer-gap：
+
+```text
+baseline F1: 0.2596
+local-window F1: 0.2497
+F1 delta: -0.0099
+
+baseline gold citation: 232 / 450
+local-window gold citation: 232 / 450
+citation delta: 0
+
+baseline gold_window_beats_selected_answer: 231
+local-window gold_window_beats_selected_answer: 230
+```
+
+Train selector comparison：
+
+```text
+baseline wins: 73
+local-window wins: 33
+ties: 344
+avg F1 delta: -0.0099
+
+other route:
+  baseline wins: 73
+  local-window wins: 33
+  ties: 64
+```
+
+### 解释
+
+- 强制 local window replacement 在 dev/train 都下降。
+- citation 没有变化：
+  - dev citation delta: 0
+  - train citation delta: 0
+- 说明问题不是引用了错误文档，而是同一文档/局部窗口中混入了不该进入最终答案的上下文。
+- 赢例通常是 local window 补全了相邻答案句，例如 support guide、步骤补全、属性说明。
+- 负例更常见，通常是 local window 把以下内容带入答案：
+  - `QUESTION`
+  - `SYMPTOM`
+  - `DIAGNOSING THE PROBLEM`
+  - 相邻但不同问题的解释段
+  - 过长的配置说明或背景说明
+- 这和 Stage 27 的失败原因一致：窗口扩展会提高局部召回，但更容易稀释答案。
+
+### 问题与原因
+
+- 问题 1：只要强制替换，就无法区分“补全答案”和“引入噪声”。
+- 问题 2：局部窗口排序仍然只看 query/anchor/answer-like 信号，不知道替换后是否更贴近最终答案。
+- 问题 3：保留候选顺序但替换文本，会让 citation 不变、F1 下降；这说明 rerank 的核心不是引用选择，而是替换安全性。
+
+### 修正与处理
+
+- 保留 `local-window-rerank` 作为可选实验 selector。
+- 不晋升默认 runtime。
+- 不继续在强制替换版本上调权重。
+- 下一步如果继续这个方向，必须先设计替换安全门控，而不是继续扩大窗口。
+
+### 测试
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 71 passed
+```
+
+### 结论
+
+- Stage 29 是负实验。
+- `local-window-rerank` 原型证明：candidate-level local rerank 比 route-level answer-window 更精细，但“强制替换”仍然不可用。
+- 当前不能把 local second-pass window rerank 作为默认或推荐 runtime 策略。
+
+### 我学到的
+
+- 不改变 citation 也可能显著降低 F1。
+- evidence selection 的下一层问题不是“找更多局部窗口”，而是“判断什么时候不能替换原句”。
+- candidate-level 比 route-level 更接近根因，但还缺少替换安全门控。
+- 继续调 score 权重很可能只是局部优化，不能解决强制替换的结构问题。
+
+### 下一步
+
+- 做 Stage 30 前需要先确认是否引入“替换安全门控”。
+- 可选方向：
+  1. 保守门控：只有 local window 同时满足 answer-signal 增强、长度不过长、且不包含 problem/question/symptom heading 时才替换。
+  2. 分析型 gate search：离线扫描多组门控条件，先找 dev/train 都不下降的条件，再决定是否实现。
+  3. 暂停窗口替换路线，转向 retrieval/reranker 层，重新分析 `gold_in_context_not_selected`。
+- 当前建议：先做方向 2，只做离线 gate search，不改默认 runtime。

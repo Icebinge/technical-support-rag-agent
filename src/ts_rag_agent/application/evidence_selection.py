@@ -634,11 +634,24 @@ def create_sentence_evidence_selector(
             answer_window_max_candidates_per_document=1,
             section_span_max_candidates_per_document=1,
         )
+    if normalized_name in {
+        "local_window",
+        "local_window_rerank",
+        "local_window_rerank_hybrid",
+    }:
+        from ts_rag_agent.application.local_window_rerank import (
+            LocalWindowRerankEvidenceSelector,
+        )
+
+        return LocalWindowRerankEvidenceSelector(
+            min_sentence_chars=min_sentence_chars,
+            max_candidates_per_document=max_candidates_per_document,
+        )
 
     raise ValueError(
         "selector_name must be one of: overlap, overlap_sentence, bm25, "
         "bm25_sentence, answer_aware, answer_aware_bm25_sentence, answer_window, "
-        "section_span, hybrid_routing, hybrid_window_routing"
+        "section_span, hybrid_routing, hybrid_window_routing, local_window_rerank"
     )
 
 
@@ -1185,6 +1198,19 @@ def trace_selector_route(
     """Trace selector routing without using gold answers."""
 
     question_route = classify_question_route(question)
+    if selector_name.startswith("local_window_rerank"):
+        if question_route == "other":
+            return SelectorRouteTrace(
+                question_route=question_route,
+                selected_selector_name="local_window_rerank",
+                route_reason=f"{question_route} routed to local-window rerank",
+            )
+        return SelectorRouteTrace(
+            question_route=question_route,
+            selected_selector_name="hybrid_routing",
+            route_reason=f"{question_route} kept on baseline hybrid-routing",
+        )
+
     if selector_name.startswith("hybrid_window_routing"):
         if question_route in {
             "security_bulletin_vulnerability_detail",
