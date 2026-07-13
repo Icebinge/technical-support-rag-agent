@@ -80,9 +80,10 @@ def main(
         typer.Option(
             "--composition-policy",
             help=(
-                "Answer composition policy: top-k, route-aware, or "
-                "candidate-score-guarded-reranker. top-k keeps the current "
-                "default runtime behavior."
+                "Answer composition policy: top-k, route-aware, "
+                "candidate-score-guarded-reranker, or "
+                "candidate-score-rank-contained-reranker. top-k keeps the "
+                "current default runtime behavior."
             ),
         ),
     ] = "top-k",
@@ -92,7 +93,7 @@ def main(
             "--candidate-reranker-dataset",
             help=(
                 "Candidate-reranker JSONL dataset used only by "
-                "candidate-score-guarded-reranker."
+                "candidate-score reranker composition policies."
             ),
         ),
     ] = None,
@@ -173,12 +174,14 @@ def main(
         candidate_reranker_dataset=candidate_reranker_dataset,
         candidate_reranker_model=candidate_reranker_model,
         candidate_reranker_train_split=candidate_reranker_train_split,
+        max_citation_rank=max_citation_rank,
     )
     candidate_reranker_config = _candidate_reranker_report_config(
         composition_policy=composition_policy,
         candidate_reranker_dataset=candidate_reranker_dataset,
         candidate_reranker_model=candidate_reranker_model,
         candidate_reranker_train_split=candidate_reranker_train_split,
+        max_citation_rank=max_citation_rank,
     )
     evaluator = VerifiedRAGEvaluator(
         retriever=retriever,
@@ -432,12 +435,13 @@ def _create_composition_policy(
     candidate_reranker_dataset: Path | None,
     candidate_reranker_model: str,
     candidate_reranker_train_split: str,
+    max_citation_rank: int,
 ) -> AnswerCompositionPolicy:
     if _is_candidate_score_guarded_reranker_policy(composition_policy):
         if candidate_reranker_dataset is None:
             raise typer.BadParameter(
                 "--candidate-reranker-dataset is required when "
-                "--composition-policy candidate-score-guarded-reranker is used."
+                "--composition-policy uses a candidate-score reranker."
             )
         _ensure_file_exists(candidate_reranker_dataset)
         try:
@@ -447,6 +451,13 @@ def _create_composition_policy(
                 selector_name=sentence_selector_name,
                 model_name=candidate_reranker_model,
                 train_split=candidate_reranker_train_split,
+                rank_contained_max_retrieval_rank=(
+                    max_citation_rank
+                    if _is_candidate_score_rank_contained_reranker_policy(
+                        composition_policy
+                    )
+                    else None
+                ),
             )
         except ValueError as exc:
             raise typer.BadParameter(str(exc)) from exc
@@ -461,14 +472,25 @@ def _candidate_reranker_report_config(
     candidate_reranker_dataset: Path | None,
     candidate_reranker_model: str,
     candidate_reranker_train_split: str,
+    max_citation_rank: int,
 ) -> dict | None:
     if not _is_candidate_score_guarded_reranker_policy(composition_policy):
         return None
+    rank_contained = _is_candidate_score_rank_contained_reranker_policy(
+        composition_policy
+    )
     return {
         "dataset": str(candidate_reranker_dataset) if candidate_reranker_dataset else None,
         "model": candidate_reranker_model,
         "train_split": candidate_reranker_train_split,
-        "runtime_guard": "candidate_score_gte_60",
+        "runtime_guard": (
+            "candidate_score_gte_60_all_selected_citations_rank_lte_max_citation_rank"
+            if rank_contained
+            else "candidate_score_gte_60"
+        ),
+        "rank_contained_max_retrieval_rank": max_citation_rank
+        if rank_contained
+        else None,
     }
 
 
@@ -477,6 +499,16 @@ def _is_candidate_score_guarded_reranker_policy(composition_policy: str) -> bool
     return normalized in {
         "candidate_score_guarded_reranker",
         "candidate_score_gte_60_guarded_reranker",
+        "candidate_score_rank_contained_reranker",
+        "candidate_score_gte_60_rank_contained_guarded_reranker",
+    }
+
+
+def _is_candidate_score_rank_contained_reranker_policy(composition_policy: str) -> bool:
+    normalized = composition_policy.strip().lower().replace("-", "_")
+    return normalized in {
+        "candidate_score_rank_contained_reranker",
+        "candidate_score_gte_60_rank_contained_guarded_reranker",
     }
 
 

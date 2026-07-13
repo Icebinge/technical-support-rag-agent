@@ -11336,3 +11336,269 @@ pytest: 123 passed
   4. 同时量化 answerable improved/regressed 的损失；
   5. 仍然不使用 held-out test set；
   6. 不改变默认 runtime。
+
+## Stage 48 - Rank-Contained Runtime Guard End-to-End
+
+日期：2026-07-14
+
+### 目标
+
+- 把 Stage 47 的观察性 rank-contained 条件做成可选 runtime guard。
+- 新 guard 只在最终 selected citations 全部满足 `retrieval_rank <= max_citation_rank` 时才允许 candidate reranker 改写。
+- 用完整 verified RAG end-to-end 对比：
+  - Stage 46 top-k baseline；
+  - Stage 46 candidate-score guarded reranker；
+  - Stage 48 rank-contained guarded reranker。
+- 重点确认 `DEV_Q083`、`DEV_Q203` 两个 unanswerable refusal regression 是否消失。
+- 继续不使用 held-out test set，不改变默认 runtime。
+
+### 实现内容
+
+- 扩展 `CandidateScoreGuardedRerankerCompositionPolicy`：
+  - 新增 `rank_contained_max_retrieval_rank` 参数；
+  - 保持原 `candidate_score_gte_60_guarded_reranker` 行为不变；
+  - 新增 rank-contained 模式的 policy name：
+    `candidate_score_gte_60_rank_contained_guarded_reranker`；
+  - 当 candidate reranker 选中的最终候选集合里任一 citation 的 retrieval rank 超过阈值时，拒绝改写并保持 top-k。
+- 扩展 `scripts/evaluate_verified_rag.py`：
+  - 新增 policy alias：`candidate-score-rank-contained-reranker`；
+  - rank-contained 阈值直接使用同次评估的 `--max-citation-rank`；
+  - report 中记录：
+    - `runtime_guard`
+    - `rank_contained_max_retrieval_rank`
+- 新增单测覆盖 rank-contained block 行为。
+
+### 实验命令
+
+rank-contained runtime：
+
+```powershell
+python scripts\evaluate_verified_rag.py `
+  --split dev `
+  --retrieval-top-k 5 `
+  --max-sentences 3 `
+  --min-sentence-score 2.0 `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --composition-policy candidate-score-rank-contained-reranker `
+  --candidate-reranker-dataset artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --candidate-reranker-model logistic_best_candidate `
+  --candidate-reranker-train-split train `
+  --min-evidence-score 15.0 `
+  --max-citation-rank 3 `
+  --min-citations 1 `
+  --sample-limit 1000 `
+  --output artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage48_rank_contained_reranker_report.json
+```
+
+对比 top-k：
+
+```powershell
+python scripts\compare_verified_rag_reports.py `
+  --baseline-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage46_topk_report.json `
+  --candidate-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage48_rank_contained_reranker_report.json `
+  --output artifacts\verified_rag_stage48_rank_contained_vs_topk_comparison.json `
+  --visualization-dir artifacts\verified_rag_stage48_rank_contained_vs_topk_visuals
+```
+
+对比 Stage 46 candidate：
+
+```powershell
+python scripts\compare_verified_rag_reports.py `
+  --baseline-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage46_candidate_score_guarded_reranker_report.json `
+  --candidate-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage48_rank_contained_reranker_report.json `
+  --output artifacts\verified_rag_stage48_rank_contained_vs_stage46_candidate_comparison.json `
+  --visualization-dir artifacts\verified_rag_stage48_rank_contained_vs_stage46_candidate_visuals
+```
+
+changed-answer risk：
+
+```powershell
+python scripts\analyze_verified_rag_changed_answer_risk.py `
+  --baseline-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage46_topk_report.json `
+  --candidate-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage48_rank_contained_reranker_report.json `
+  --output artifacts\verified_rag_stage48_rank_contained_changed_answer_risk_analysis.json `
+  --visualization-dir artifacts\verified_rag_stage48_rank_contained_changed_answer_risk_visuals
+```
+
+### 实验结果
+
+Stage 46 top-k baseline：
+
+```text
+verified F1: 0.2755
+verified gold citation: 95 / 158
+verified answerable refusals: 2
+verified unanswerable refusals: 4
+newly refused: 6
+DEV_Q083: refused, citation_rank_too_low
+DEV_Q203: refused, citation_rank_too_low
+```
+
+Stage 46 candidate-score guarded reranker：
+
+```text
+verified F1: 0.2763
+verified gold citation: 95 / 158
+verified answerable refusals: 2
+verified unanswerable refusals: 2
+newly refused: 4
+DEV_Q083: verified
+DEV_Q203: verified
+```
+
+Stage 48 rank-contained guarded reranker：
+
+```text
+verified F1: 0.2763
+verified gold citation: 95 / 158
+verified answerable refusals: 2
+verified unanswerable refusals: 4
+newly refused: 6
+DEV_Q083: refused, citation_rank_too_low
+DEV_Q203: refused, citation_rank_too_low
+```
+
+相对 top-k：
+
+```text
+verified F1 delta: +0.0008
+verified gold citation delta: 0
+verified generated answerable delta: 0
+verified answerable refusal delta: 0
+verified unanswerable refusal delta: 0
+newly refused delta: 0
+changed verified answers: 15 / 310
+answerable F1 outcomes:
+  improved: 2
+  regressed: 0
+  changed but tied: 4
+```
+
+相对 Stage 46 candidate：
+
+```text
+verified F1 delta: 0.0000
+verified gold citation delta: 0
+verified generated answerable delta: 0
+verified answerable refusal delta: 0
+verified unanswerable refusal delta: +2
+newly refused delta: +2
+changed verified answers: 44 / 310
+```
+
+Stage 48 changed-answer risk：
+
+```text
+changed verified answers: 15
+changed answerable: 6
+changed unanswerable: 9
+unanswerable refusal regressions: 0
+answerable improved: 2
+answerable regressed: 0
+answerable tied changed: 4
+candidate has out-of-rank citation: 0
+```
+
+### 可视化结果
+
+本阶段新增可视化目录：
+
+```text
+artifacts/verified_rag_stage48_rank_contained_vs_topk_visuals
+artifacts/verified_rag_stage48_rank_contained_vs_stage46_candidate_visuals
+artifacts/verified_rag_stage48_rank_contained_changed_answer_risk_visuals
+```
+
+完整 JSON artifacts：
+
+```text
+artifacts/verified_rag_dev_hybrid_routing_mcpd3_stage48_rank_contained_reranker_report.json
+artifacts/verified_rag_stage48_rank_contained_vs_topk_comparison.json
+artifacts/verified_rag_stage48_rank_contained_vs_stage46_candidate_comparison.json
+artifacts/verified_rag_stage48_rank_contained_changed_answer_risk_analysis.json
+```
+
+说明：以上 artifact 均在本地 `artifacts/` 下，按 `.gitignore` 规则不纳入 git。
+
+### 问题与原因
+
+- Stage 48 修掉了 Stage 46 的两个 unanswerable refusal regression。
+  - `DEV_Q083` 和 `DEV_Q203` 都回到拒答；
+  - 拒答原因仍是 `citation_rank_too_low`。
+- rank-contained guard 大幅降低 changed answer 面。
+  - Stage 46 candidate vs top-k：`59 / 310`；
+  - Stage 48 rank-contained vs top-k：`15 / 310`。
+- 当前 dev 结果没有看到 F1 损失。
+  - Stage 48 verified F1 仍是 `0.2763`；
+  - 相对 top-k 仍是 `+0.0008`；
+  - 相对 Stage 46 candidate 是 `0.0000`。
+
+### 修正与处理
+
+- 没有改变默认 runtime。
+- 没有使用 held-out test set。
+- 没有把 rank-contained 策略默认化。
+- 将 rank-contained guarded reranker 保留为可选 runtime policy，并进入下一阶段 train split 稳定性验证。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\candidate_score_guarded_composition_policy.py `
+  scripts\evaluate_verified_rag.py `
+  tests\test_candidate_score_guarded_composition_policy.py
+
+pytest -q tests\test_candidate_score_guarded_composition_policy.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 124 passed
+```
+
+### 结论
+
+- Stage 48 在 dev verified RAG 上达到了本阶段目标：
+  - 保留 Stage 46 的 F1 提升；
+  - 修复 `DEV_Q083`、`DEV_Q203` 两个 unanswerable refusal regression；
+  - gold citation 不损失；
+  - changed answers 从 `59` 降到 `15`；
+  - candidate out-of-rank citation 从 `44` 降到 `0`。
+- 但这仍然只是 dev split 结果。
+- 按前面 Stage 23/25 的教训，不能只凭 dev 成功就默认化；必须检查 train split 是否稳定。
+
+### 我学到的
+
+- Stage 47 的观察性信号经 runtime 验证后确实有效：rank-contained guard 能消除这次的两个 unanswerable refusal regression。
+- “所有 selected citations rank<=3” 比 route-based block 更直接命中风险来源。
+- 更窄 guard 不一定牺牲 aggregate F1；在本次 dev 上反而保留了 Stage 46 的 F1。
+- 但 train split 可能暴露新的 route 或 citation trade-off，仍需下一阶段验证。
+
+### 下一步
+
+- 做 Stage 49：在 train split 上验证 rank-contained guarded reranker 的稳定性。
+- 目标：
+  1. 同参数跑 train top-k baseline；
+  2. 同参数跑 train rank-contained guarded reranker；
+  3. 对比 F1、gold citation、answerable/unanswerable refusal、changed answers；
+  4. 分析 train changed-answer risk；
+  5. 仍然不使用 held-out test set；
+  6. train 也稳定后，再考虑是否进入默认化评审。

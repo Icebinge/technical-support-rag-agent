@@ -54,6 +54,43 @@ def test_candidate_score_guarded_reranker_blocks_low_score_replacement():
     assert policy.last_trace.selected_candidate_score == 59.9
 
 
+def test_candidate_score_guarded_reranker_blocks_rank_contained_replacement():
+    policy = CandidateScoreGuardedRerankerCompositionPolicy(
+        scorer=_FixedScorer([0.2, 0.95, 0.1]),
+        selector_name="test_selector",
+        rank_contained_max_retrieval_rank=3,
+    )
+    candidates = [
+        _candidate(
+            "doc-top",
+            score=100.0,
+            sentence="Top ranked baseline answer.",
+            retrieval_rank=4,
+        ),
+        _candidate(
+            "doc-selected",
+            score=80.0,
+            sentence="Selected stronger answer.",
+            retrieval_rank=1,
+        ),
+        _candidate("doc-third", score=70.0, sentence="Third answer.", retrieval_rank=2),
+    ]
+
+    decision = policy.select(
+        question=_question(),
+        candidates=candidates,
+        max_sentences=3,
+    )
+
+    assert policy.name == "candidate_score_gte_60_rank_contained_guarded_reranker"
+    assert decision.selected_candidates == candidates
+    assert decision.reason == "selected_citation_rank_exceeds_limit"
+    assert policy.last_trace is not None
+    assert policy.last_trace.action == "keep_top_candidate"
+    assert policy.last_trace.proposed_worst_retrieval_rank == 4
+    assert policy.last_trace.rank_contained_max_retrieval_rank == 3
+
+
 class _FixedScorer:
     def __init__(self, scores: list[float]) -> None:
         self._scores = scores
@@ -73,7 +110,12 @@ def _question() -> PrimeQAQuestion:
     )
 
 
-def _candidate(document_id: str, score: float, sentence: str) -> SentenceEvidenceCandidate:
+def _candidate(
+    document_id: str,
+    score: float,
+    sentence: str,
+    retrieval_rank: int = 1,
+) -> SentenceEvidenceCandidate:
     return SentenceEvidenceCandidate(
         sentence=sentence,
         retrieval_result=RetrievalResult(
@@ -83,7 +125,7 @@ def _candidate(document_id: str, score: float, sentence: str) -> SentenceEvidenc
                 text=sentence,
             ),
             score=100.0,
-            rank=1,
+            rank=retrieval_rank,
         ),
         score=score,
         overlap_terms=("configure",),

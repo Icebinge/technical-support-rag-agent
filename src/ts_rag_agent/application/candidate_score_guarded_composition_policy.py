@@ -39,23 +39,38 @@ class RuntimeCandidateRerankerDecisionTrace:
     selected_candidate_rank: int
     selected_candidate_score: float
     model_score_margin_vs_top_candidate: float
+    proposed_worst_retrieval_rank: int | None = None
+    rank_contained_max_retrieval_rank: int | None = None
 
 
 class CandidateScoreGuardedRerankerCompositionPolicy:
     """Runtime answer composition using a trained reranker plus score>=60 guard."""
-
-    name = "candidate_score_gte_60_guarded_reranker"
 
     def __init__(
         self,
         scorer: CandidateRerankerScorer,
         selector_name: str,
         policy_config: CandidateRerankerPolicyConfig | None = None,
+        rank_contained_max_retrieval_rank: int | None = None,
     ) -> None:
+        if (
+            rank_contained_max_retrieval_rank is not None
+            and rank_contained_max_retrieval_rank <= 0
+        ):
+            raise ValueError("rank_contained_max_retrieval_rank must be positive")
         self._scorer = scorer
         self._selector_name = selector_name
         self._policy_config = policy_config or _candidate_score_gte60_config()
+        self._rank_contained_max_retrieval_rank = rank_contained_max_retrieval_rank
         self._last_trace: RuntimeCandidateRerankerDecisionTrace | None = None
+
+    @property
+    def name(self) -> str:
+        """Stable policy name used in experiment reports."""
+
+        if self._rank_contained_max_retrieval_rank is not None:
+            return "candidate_score_gte_60_rank_contained_guarded_reranker"
+        return "candidate_score_gte_60_guarded_reranker"
 
     @property
     def last_trace(self) -> RuntimeCandidateRerankerDecisionTrace | None:
@@ -78,11 +93,13 @@ class CandidateScoreGuardedRerankerCompositionPolicy:
                 selected_candidate_rank=0,
                 selected_candidate_score=0.0,
                 model_score_margin_vs_top_candidate=0.0,
+                proposed_worst_retrieval_rank=None,
+                rank_contained_max_retrieval_rank=self._rank_contained_max_retrieval_rank,
             )
             return AnswerCompositionDecision(
                 selected_candidates=[],
                 question_route=classify_question_route(question),
-                strategy="candidate_score_gte_60_guarded_reranker",
+                strategy=self.name,
                 reason="no candidates available",
             )
 
@@ -111,17 +128,29 @@ class CandidateScoreGuardedRerankerCompositionPolicy:
             model_score_margin_vs_top_candidate=margin,
         )
         if blocked_reason is None:
-            selected_candidates = _leading_rewrite_candidates(
+            proposed_candidates = _leading_rewrite_candidates(
                 leading_candidate=selected_candidate,
                 baseline_candidates=candidates,
                 limit=max_sentences,
             )
-            action = "replace_with_model_candidate"
-            reason = "candidate_score_gte_60_accepted"
+            proposed_worst_retrieval_rank = _worst_retrieval_rank(proposed_candidates)
+            rank_contained_blocked_reason = _rank_contained_blocked_reason(
+                proposed_candidates=proposed_candidates,
+                max_retrieval_rank=self._rank_contained_max_retrieval_rank,
+            )
+            if rank_contained_blocked_reason is None:
+                selected_candidates = proposed_candidates
+                action = "replace_with_model_candidate"
+                reason = "candidate_score_gte_60_accepted"
+            else:
+                selected_candidates = list(candidates[:max_sentences])
+                action = "keep_top_candidate"
+                reason = rank_contained_blocked_reason
         else:
             selected_candidates = list(candidates[:max_sentences])
             action = "keep_top_candidate"
             reason = blocked_reason
+            proposed_worst_retrieval_rank = None
 
         self._last_trace = RuntimeCandidateRerankerDecisionTrace(
             action=action,
@@ -129,11 +158,13 @@ class CandidateScoreGuardedRerankerCompositionPolicy:
             selected_candidate_rank=selected_rank,
             selected_candidate_score=round(selected_candidate.score, 4),
             model_score_margin_vs_top_candidate=margin,
+            proposed_worst_retrieval_rank=proposed_worst_retrieval_rank,
+            rank_contained_max_retrieval_rank=self._rank_contained_max_retrieval_rank,
         )
         return AnswerCompositionDecision(
             selected_candidates=selected_candidates,
             question_route=question_route,
-            strategy="candidate_score_gte_60_guarded_reranker",
+            strategy=self.name,
             reason=reason,
         )
 
@@ -143,6 +174,7 @@ def fit_candidate_score_guarded_reranker_composition_policy(
     selector_name: str,
     model_name: str = "logistic_best_candidate",
     train_split: str = "train",
+    rank_contained_max_retrieval_rank: int | None = None,
 ) -> CandidateScoreGuardedRerankerCompositionPolicy:
     """Fit a runtime candidate-score guarded reranker composition policy."""
 
@@ -162,6 +194,7 @@ def fit_candidate_score_guarded_reranker_composition_policy(
     return CandidateScoreGuardedRerankerCompositionPolicy(
         scorer=scorer,
         selector_name=selector_name,
+        rank_contained_max_retrieval_rank=rank_contained_max_retrieval_rank,
     )
 
 
@@ -228,6 +261,28 @@ def _leading_rewrite_candidates(
         if len(selected) >= limit:
             break
     return selected[:limit]
+
+
+def _rank_contained_blocked_reason(
+    proposed_candidates: Sequence[SentenceEvidenceCandidate],
+    max_retrieval_rank: int | None,
+) -> str | None:
+    if max_retrieval_rank is None:
+        return None
+    if any(
+        candidate.retrieval_result.rank > max_retrieval_rank
+        for candidate in proposed_candidates
+    ):
+        return "selected_citation_rank_exceeds_limit"
+    return None
+
+
+def _worst_retrieval_rank(
+    candidates: Sequence[SentenceEvidenceCandidate],
+) -> int | None:
+    if not candidates:
+        return None
+    return max(candidate.retrieval_result.rank for candidate in candidates)
 
 
 def _candidate_score_gte60_config() -> CandidateRerankerPolicyConfig:
