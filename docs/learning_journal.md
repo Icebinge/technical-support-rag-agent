@@ -2689,3 +2689,172 @@ section-span gold citations: 92
   1. 是否超过 answer-aware 的 F1 0.2449。
   2. 是否保持低 answerable refusal。
   3. 是否保留 section-span 在 security bulletin 上的优势。
+
+## 2026-07-13 - Stage 15: Hybrid Selector Routing Prototype
+
+### Goal
+
+- 基于 Stage 14 的 selector comparison，做一个不训练模型的 hybrid selector。
+- 对安全公告和限制类问题使用 section-span。
+- 对其他问题继续使用 answer-aware。
+- 验证 hybrid 是否能超过当前最强非 LLM baseline：answer-aware F1 0.2449。
+
+### What I Studied
+
+- selector routing 不能使用 gold answer，否则会发生 evaluation leakage。
+- Stage 14 的 question type analysis 可以使用 gold answer 做错误分析，但 Stage 15 的真实路由只能看 question title/text。
+- 如果 hybrid 只是把两个 selector 硬切换，最关键的是不要伤害原本 answer-aware 擅长的普通问题。
+
+### What I Built Or Changed
+
+- 新增 `HybridRoutingEvidenceSelector`。
+- 支持命令行参数：
+  `--evidence-selector hybrid-routing`
+- 新增无泄漏路由函数：
+  `classify_question_route`
+- 路由规则：
+  1. `security_bulletin` -> `SectionSpanBM25SentenceEvidenceSelector`
+  2. `limitation_or_restriction` -> `SectionSpanBM25SentenceEvidenceSelector`
+  3. 其他类型 -> `AnswerAwareBM25SentenceEvidenceSelector`
+- 具体配置：
+  - answer-aware: `max_candidates_per_document=3`
+  - section-span: `max_candidates_per_document=1`
+- 更新脚本 help 文案。
+- 新增测试，验证：
+  1. security bulletin 走 section-span。
+  2. 普通问题走 answer-aware。
+  3. 路由分类不读取 gold answer。
+  4. factory 可以创建 hybrid selector。
+
+### Commands And Evidence
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+
+python scripts\evaluate_verified_rag.py `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --min-evidence-score 15 `
+  --output artifacts\verified_rag_dev_hybrid_routing_m15_report.json
+
+python scripts\analyze_answer_gap.py `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --sample-limit 1000 `
+  --output artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_full.json
+
+python scripts\compare_selectors.py `
+  --baseline-report artifacts\answer_gap_analysis_dev_answer_aware_mcpd3_full.json `
+  --challenger-report artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_full.json `
+  --baseline-label answer-aware `
+  --challenger-label hybrid-routing `
+  --f1-win-margin 0.03 `
+  --sample-limit-per-bucket 30 `
+  --output artifacts\selector_comparison_answer_aware_vs_hybrid_routing.json
+```
+
+验证命令结果：
+
+```text
+ruff: passed
+pytest: 42 passed
+```
+
+### Main Results
+
+Verified RAG 对比：
+
+| Selector | gold_doc_citation_rate | average_token_f1 | answerable_refusal_rate | unanswerable_refusal_rate |
+| --- | ---: | ---: | ---: | ---: |
+| answer-aware | 0.5696 | 0.2449 | 0.0125 | 0.0267 |
+| section-span v2 | 0.5750 | 0.2378 | 0.0000 | 0.0000 |
+| hybrid-routing | 0.5823 | 0.2715 | 0.0125 | 0.0267 |
+
+Answer-gap：
+
+| Selector | selected_gold_citation | average_selected_answer_token_f1 | average_best_gold_window_token_f1 |
+| --- | ---: | ---: | ---: |
+| answer-aware | 90 | 0.2501 | 0.8881 |
+| section-span v2 | 92 | 0.2432 | 0.8881 |
+| hybrid-routing | 92 | 0.2764 | 0.8881 |
+
+Answer-aware vs hybrid-routing comparison：
+
+```text
+total_compared: 160
+answer-aware wins: 5
+hybrid-routing wins: 16
+ties: 139
+avg_f1_delta: +0.0263
+answer-aware gold citations: 90
+hybrid-routing gold citations: 92
+```
+
+按问题类型：
+
+| Question Type | Count | answer-aware wins | hybrid-routing wins | ties |
+| --- | ---: | ---: | ---: | ---: |
+| security_bulletin | 22 | 5 | 15 | 2 |
+| limitation_or_restriction | 8 | 0 | 1 | 7 |
+| error_or_log | 24 | 0 | 0 | 24 |
+| install_upgrade_config | 26 | 0 | 0 | 26 |
+| how_to_or_lookup | 14 | 0 | 0 | 14 |
+| attachment_or_link | 19 | 0 | 0 | 19 |
+| other | 47 | 0 | 0 | 47 |
+
+### Problems Encountered
+
+- Stage 14 的 question type 分类使用了 gold answer，因此不能直接复用到在线 selector routing。
+- limitation/restriction 类在 analysis 中有 8 条，但真实路由只靠 title/text，能捕捉到的显式 limitation/restriction 更少。
+- 当前 hybrid 是硬规则路由，不是 learned routing。
+- hybrid 的提升主要来自 security bulletin，对其他类型几乎保持 answer-aware 原样。
+
+### Root Cause
+
+- Security bulletin 的问题标题通常显式包含 `Security Bulletin`、`CVE`、`CVSS`，因此可以无泄漏识别。
+- Limitation/restriction 有些只在 gold answer 中体现，问题文本未必显式写出，所以无泄漏路由较难捕捉。
+- Answer-aware 本身已经覆盖普通 troubleshooting / configuration 问题，因此 hybrid 只需要在特定类型切换 selector。
+
+### Solution
+
+- 保留一个非常保守的 routing 原型：
+  - 明确安全公告 -> section-span。
+  - 明确 limitation/restriction -> section-span。
+  - 其他全部 -> answer-aware。
+- 不引入任何 gold answer 信息。
+- 不让 section-span 全局接管，避免破坏普通问题。
+
+### Why This Choice
+
+- Hybrid-routing 首次显著超过当前最强非 LLM baseline：
+  - F1: 0.2715 vs 0.2449
+  - gold citation: 0.5823 vs 0.5696
+  - answerable refusal: 0.0125，与 answer-aware 持平
+- 对比分析显示 hybrid 的收益集中在 security bulletin，不会大面积伤害其他类型。
+- 这说明 Stage 14 的结论是正确的：不是继续寻找万能 selector，而是按问题类型路由。
+
+### Verification
+
+- `python -m ruff check .` 通过。
+- `python -m pytest -q` 通过，当前为 42 个测试。
+- `artifacts/verified_rag_dev_hybrid_routing_m15_report.json` 已生成。
+- `artifacts/answer_gap_analysis_dev_hybrid_routing_mcpd3_full.json` 已生成。
+- `artifacts/selector_comparison_answer_aware_vs_hybrid_routing.json` 已生成。
+- 实验产物在 `artifacts/` 下，并被 `.gitignore` 忽略。
+
+### What I Still Do Not Understand
+
+- limitation/restriction 的无泄漏识别是否可以做得更好。
+- hybrid routing 是否需要输出 route reason，方便后续调试。
+- 是否应该把 selector route 记录进每条 answer-gap case，便于分析每个问题实际走了哪个 selector。
+- 是否应该进入 learned reranker，还是继续做 route-aware hard rules。
+
+### Next Step
+
+- 做 Stage 16：route trace and hybrid failure analysis。
+- 重点不是继续调 F1，而是让 hybrid 可解释：
+  1. 在每条结果里记录 question route。
+  2. 统计 route 分布。
+  3. 分析 hybrid 仍然输给 answer-aware 的 5 条样本。
+  4. 判断是否需要 route override 或 learned reranker。

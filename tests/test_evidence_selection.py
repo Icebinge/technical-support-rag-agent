@@ -1,8 +1,10 @@
 from ts_rag_agent.application.evidence_selection import (
     AnswerAwareBM25SentenceEvidenceSelector,
     BM25SentenceEvidenceSelector,
+    HybridRoutingEvidenceSelector,
     OverlapSentenceEvidenceSelector,
     SectionSpanBM25SentenceEvidenceSelector,
+    classify_question_route,
     create_sentence_evidence_selector,
 )
 from ts_rag_agent.domain.dataset import PrimeQADocument, PrimeQAQuestion
@@ -229,3 +231,92 @@ def test_section_span_selector_promotes_security_bulletin_cve_span():
         "CVEID: CVE-2015-0410" in candidates[0].sentence
         or "CVSS Base Score" in candidates[0].sentence
     )
+
+
+def test_hybrid_routing_selector_uses_section_span_for_security_bulletins():
+    question = PrimeQAQuestion(
+        id="q1",
+        title="Security Bulletin Java SDK CVE-2015-0410",
+        text="",
+        answer="CVEID: CVE-2015-0410 CVSS Base Score: 5.",
+        answerable=True,
+        answer_doc_id="gold",
+        doc_ids=["gold"],
+    )
+    document = PrimeQADocument(
+        id="gold",
+        title="Security Bulletin",
+        text=(
+            "SUMMARY There are multiple vulnerabilities in IBM SDK Java Technology "
+            "Edition used by the product. "
+            "CVEID: CVE-2015-0410 DESCRIPTION: An unspecified vulnerability could "
+            "allow a remote attacker to cause a denial of service. CVSS Base Score: 5."
+        ),
+    )
+    retrieval_results = [RetrievalResult(document=document, score=10.0, rank=1)]
+
+    candidates = HybridRoutingEvidenceSelector(
+        min_sentence_chars=8,
+        answer_aware_max_candidates_per_document=3,
+        section_span_max_candidates_per_document=1,
+    ).rank_sentence_candidates(question, retrieval_results)
+
+    assert "SUMMARY" not in candidates[0].sentence
+    assert (
+        "CVEID: CVE-2015-0410" in candidates[0].sentence
+        or "CVSS Base Score" in candidates[0].sentence
+    )
+
+
+def test_hybrid_routing_selector_uses_answer_aware_for_general_questions():
+    question = PrimeQAQuestion(
+        id="q1",
+        title="Unable to open profile on Redhat Linux",
+        text="Getting GPF and javacore dump.",
+        answer="Install the missing adwaita libraries.",
+        answerable=True,
+        answer_doc_id="gold",
+        doc_ids=["gold"],
+    )
+    document = PrimeQADocument(
+        id="gold",
+        title="Profile fails to open",
+        text=(
+            "PROBLEM(ABSTRACT) Unable to open profile on Redhat Linux with GPF "
+            "and javacore dump. RESOLVING THE PROBLEM Install the missing "
+            "adwaita libraries."
+        ),
+    )
+    retrieval_results = [RetrievalResult(document=document, score=10.0, rank=1)]
+
+    candidates = HybridRoutingEvidenceSelector(
+        min_sentence_chars=8,
+        answer_aware_max_candidates_per_document=3,
+        section_span_max_candidates_per_document=1,
+    ).rank_sentence_candidates(question, retrieval_results)
+
+    assert "RESOLVING THE PROBLEM" in candidates[0].sentence
+
+
+def test_hybrid_route_classification_does_not_use_gold_answer():
+    question = PrimeQAQuestion(
+        id="q1",
+        title="General product question",
+        text="",
+        answer="CVEID: CVE-2015-0410 CVSS Base Score: 5.",
+        answerable=True,
+        answer_doc_id="gold",
+        doc_ids=["gold"],
+    )
+
+    assert classify_question_route(question) == "other"
+
+
+def test_selector_factory_creates_hybrid_routing_selector():
+    selector = create_sentence_evidence_selector(
+        selector_name="hybrid-routing",
+        min_sentence_chars=8,
+        max_candidates_per_document=3,
+    )
+
+    assert selector.name == "hybrid_routing_answer_aware_mcpd3_section_span_mcpd1"

@@ -51,7 +51,10 @@ def main(
         str,
         typer.Option(
             "--evidence-selector",
-            help="Sentence selector: overlap, bm25-sentence, answer-aware, or section-span.",
+            help=(
+                "Sentence selector: overlap, bm25-sentence, answer-aware, "
+                "section-span, or hybrid-routing."
+            ),
         ),
     ] = "bm25-sentence",
     max_candidates_per_document: Annotated[

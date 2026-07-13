@@ -406,6 +406,59 @@ class SectionSpanBM25SentenceEvidenceSelector(AnswerAwareBM25SentenceEvidenceSel
         )
 
 
+class HybridRoutingEvidenceSelector:
+    """Route question types to the selector that currently handles them best."""
+
+    def __init__(
+        self,
+        min_sentence_chars: int = 24,
+        answer_aware_max_candidates_per_document: int = 3,
+        section_span_max_candidates_per_document: int = 1,
+    ) -> None:
+        if answer_aware_max_candidates_per_document <= 0:
+            raise ValueError("answer_aware_max_candidates_per_document must be positive")
+        if section_span_max_candidates_per_document <= 0:
+            raise ValueError("section_span_max_candidates_per_document must be positive")
+
+        self._name = (
+            "hybrid_routing_answer_aware_"
+            f"mcpd{answer_aware_max_candidates_per_document}_"
+            f"section_span_mcpd{section_span_max_candidates_per_document}"
+        )
+        self._answer_aware_selector = AnswerAwareBM25SentenceEvidenceSelector(
+            min_sentence_chars=min_sentence_chars,
+            max_candidates_per_document=answer_aware_max_candidates_per_document,
+        )
+        self._section_span_selector = SectionSpanBM25SentenceEvidenceSelector(
+            min_sentence_chars=min_sentence_chars,
+            max_candidates_per_document=section_span_max_candidates_per_document,
+        )
+
+    @property
+    def name(self) -> str:
+        """Stable selector name used in experiment reports."""
+
+        return self._name
+
+    def rank_sentence_candidates(
+        self,
+        question: PrimeQAQuestion,
+        retrieval_results: Sequence[RetrievalResult],
+    ) -> list[SentenceEvidenceCandidate]:
+        """Route one question to the best known non-LLM selector."""
+
+        question_type = classify_question_route(question)
+        if question_type in {"security_bulletin", "limitation_or_restriction"}:
+            return self._section_span_selector.rank_sentence_candidates(
+                question,
+                retrieval_results,
+            )
+        return self._answer_aware_selector.rank_sentence_candidates(
+            question,
+            retrieval_results,
+        )
+
+
 def create_sentence_evidence_selector(
     selector_name: str,
     min_sentence_chars: int = 24,
@@ -439,10 +492,22 @@ def create_sentence_evidence_selector(
             min_sentence_chars=min_sentence_chars,
             max_candidates_per_document=max_candidates_per_document,
         )
+    if normalized_name in {
+        "hybrid",
+        "hybrid_routing",
+        "hybrid_selector",
+        "routing",
+    }:
+        return HybridRoutingEvidenceSelector(
+            min_sentence_chars=min_sentence_chars,
+            answer_aware_max_candidates_per_document=max_candidates_per_document,
+            section_span_max_candidates_per_document=1,
+        )
 
     raise ValueError(
         "selector_name must be one of: overlap, overlap_sentence, bm25, "
-        "bm25_sentence, answer_aware, answer_aware_bm25_sentence, section_span"
+        "bm25_sentence, answer_aware, answer_aware_bm25_sentence, section_span, "
+        "hybrid_routing"
     )
 
 
@@ -741,3 +806,20 @@ def _section_span_length_penalty(text: str) -> float:
     if token_count > 120:
         return 0.8
     return 1.0
+
+
+def classify_question_route(question: PrimeQAQuestion) -> str:
+    """Classify a question for selector routing without using gold answers."""
+
+    combined = question.full_question.lower()
+    if any(token in combined for token in ("cve-", "cveid", "cvss", "security bulletin")):
+        return "security_bulletin"
+    if any(token in combined for token in ("limitation", "restriction", "not supported")):
+        return "limitation_or_restriction"
+    if any(token in combined for token in ("exception", "trace", "dump", "javacore", "error ")):
+        return "error_or_log"
+    if any(token in combined for token in ("install", "upgrade", "configure", "migration")):
+        return "install_upgrade_config"
+    if question.title.lower().startswith(("how ", "how do", "how can", "what is", "where ")):
+        return "how_to_or_lookup"
+    return "other"
