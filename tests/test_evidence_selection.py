@@ -1,7 +1,9 @@
 from ts_rag_agent.application.evidence_selection import (
     AnswerAwareBM25SentenceEvidenceSelector,
+    AnswerWindowBM25SentenceEvidenceSelector,
     BM25SentenceEvidenceSelector,
     HybridRoutingEvidenceSelector,
+    HybridWindowRoutingEvidenceSelector,
     OverlapSentenceEvidenceSelector,
     SectionSpanBM25SentenceEvidenceSelector,
     classify_question_route,
@@ -199,6 +201,49 @@ def test_selector_factory_creates_section_span_selector():
     assert selector.name == "section_span_bm25_sentence"
 
 
+def test_answer_window_selector_prefers_compact_answer_window():
+    question = PrimeQAQuestion(
+        id="q1",
+        title="Profile tool blank screen",
+        text="The tool opens to a blank panel after startup.",
+        answer="Install the missing adwaita libraries. Restart the profile tool.",
+        answerable=True,
+        answer_doc_id="gold",
+        doc_ids=["gold"],
+    )
+    document = PrimeQADocument(
+        id="gold",
+        title="Profile tool blank screen",
+        text=(
+            "PROBLEM(ABSTRACT) The profile tool opens to a blank panel after "
+            "startup on Linux. "
+            "RESOLUTION Install the missing adwaita libraries. "
+            "Restart the profile tool."
+        ),
+    )
+    retrieval_results = [RetrievalResult(document=document, score=10.0, rank=1)]
+
+    candidates = AnswerWindowBM25SentenceEvidenceSelector(
+        min_sentence_chars=8,
+        max_candidates_per_document=2,
+        max_window_sentences=2,
+    ).rank_sentence_candidates(question, retrieval_results)
+
+    assert "Install the missing adwaita libraries" in candidates[0].sentence
+    assert "Restart the profile tool" in candidates[0].sentence
+    assert "PROBLEM(ABSTRACT)" not in candidates[0].sentence
+
+
+def test_selector_factory_creates_answer_window_selector():
+    selector = create_sentence_evidence_selector(
+        selector_name="answer-window",
+        min_sentence_chars=8,
+        max_candidates_per_document=2,
+    )
+
+    assert selector.name == "answer_window_bm25_sentence"
+
+
 def test_section_span_selector_promotes_security_bulletin_cve_span():
     question = PrimeQAQuestion(
         id="q1",
@@ -366,6 +411,47 @@ def test_hybrid_routing_selector_uses_answer_aware_for_general_questions():
     assert "RESOLVING THE PROBLEM" in candidates[0].sentence
 
 
+def test_hybrid_window_routing_selector_uses_answer_window_for_other_route():
+    question = PrimeQAQuestion(
+        id="q1",
+        title="Profile tool blank screen",
+        text="The tool opens to a blank panel after startup.",
+        answer="Install the missing adwaita libraries. Restart the profile tool.",
+        answerable=True,
+        answer_doc_id="gold",
+        doc_ids=["gold"],
+    )
+    document = PrimeQADocument(
+        id="gold",
+        title="Profile tool blank screen",
+        text=(
+            "PROBLEM(ABSTRACT) The profile tool opens to a blank panel after "
+            "startup on Linux. "
+            "RESOLUTION Install the missing adwaita libraries. "
+            "Restart the profile tool."
+        ),
+    )
+    retrieval_results = [RetrievalResult(document=document, score=10.0, rank=1)]
+
+    candidates = HybridWindowRoutingEvidenceSelector(
+        min_sentence_chars=8,
+        answer_aware_max_candidates_per_document=3,
+        answer_window_max_candidates_per_document=2,
+        section_span_max_candidates_per_document=1,
+    ).rank_sentence_candidates(question, retrieval_results)
+    trace = trace_selector_route(
+        question,
+        "hybrid_window_routing_answer_aware_mcpd3_answer_window_mcpd2_"
+        "section_span_mcpd1",
+    )
+
+    assert trace.question_route == "other"
+    assert trace.selected_selector_name == "answer_window_bm25_sentence"
+    assert "answer-window" in trace.route_reason
+    assert "Install the missing adwaita libraries" in candidates[0].sentence
+    assert "Restart the profile tool" in candidates[0].sentence
+
+
 def test_hybrid_route_classification_does_not_use_gold_answer():
     question = PrimeQAQuestion(
         id="q1",
@@ -469,3 +555,17 @@ def test_selector_factory_creates_hybrid_routing_selector():
     )
 
     assert selector.name == "hybrid_routing_answer_aware_mcpd3_section_span_mcpd1"
+
+
+def test_selector_factory_creates_hybrid_window_routing_selector():
+    selector = create_sentence_evidence_selector(
+        selector_name="hybrid-window-routing",
+        min_sentence_chars=8,
+        max_candidates_per_document=3,
+    )
+
+    assert (
+        selector.name
+        == "hybrid_window_routing_answer_aware_mcpd3_answer_window_mcpd1_"
+        "section_span_mcpd1"
+    )

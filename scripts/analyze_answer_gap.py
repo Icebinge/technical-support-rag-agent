@@ -53,7 +53,8 @@ def main(
             "--evidence-selector",
             help=(
                 "Sentence selector: overlap, bm25-sentence, answer-aware, "
-                "section-span, or hybrid-routing."
+                "answer-window, section-span, hybrid-routing, or "
+                "hybrid-window-routing."
             ),
         ),
     ] = "bm25-sentence",

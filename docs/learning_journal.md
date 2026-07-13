@@ -5359,3 +5359,231 @@ pytest: 60 passed
   2. 对 selected gold document 内部做 second-pass window rerank；
   3. 用 `best_gold_window` 代表样本分析哪些非 gold 特征可以帮助 selector 找到答案窗口。
 - 不建议下一步继续调 route-aware composition。
+
+## Stage 27 - Answer-Window Selector Experiment
+
+### 目标
+
+- 针对 Stage 26 找出的最高优先级问题：`other::gold_window_beats_selected_answer`。
+- 验证一个不依赖 gold answer、不依赖 LLM judge 的 answer-window selector 是否能改善普通 `other` route 的选窗质量。
+- 保持 Stage 18/25 的 `hybrid-routing` baseline 不变，新 selector 只作为可选实验入口。
+- 使用 dev + train split 做跨 split 检查，避免只看单一 split 后误判。
+
+### 起始状态
+
+```text
+git: main...origin/main clean
+```
+
+Stage 26 结论：
+
+- 最大损失池不是 retrieval 缺失，而是 gold 文档已经在 context 内、甚至已经被引用，但 selected answer 没选中更贴近 gold answer 的连续句子窗口。
+- 下一步应优先尝试 answer-window / local window reranking，而不是继续微调 route-aware composition。
+
+### 本阶段新增内容
+
+- 新增 `AnswerWindowBM25SentenceEvidenceSelector`：
+  - 复用现有 BM25 + answer-aware scoring；
+  - 在文档 section 内构造连续句子窗口；
+  - 增加通用 action / resolution / procedure 特征；
+  - 增加 compact window multiplier 和长度惩罚。
+- 新增 `_collect_section_window_rows`：
+  - 抽出 section-span 和 answer-window 共用的 window candidate 收集逻辑；
+  - 避免 section-span 与 answer-window 重复维护同一套窗口枚举代码。
+- 新增 `HybridWindowRoutingEvidenceSelector`：
+  - `security_bulletin_vulnerability_detail` 和 `limitation_or_restriction` 仍走 section-span；
+  - `other` route 走 answer-window；
+  - 其他 route 保持 answer-aware；
+  - 默认不替换现有 `hybrid-routing`。
+- 更新 selector factory 和脚本 help：
+  - `answer-window`
+  - `hybrid-window-routing`
+- 新增测试：
+  - answer-window 可以选中 compact answer window；
+  - factory 可以创建 answer-window；
+  - hybrid-window-routing 会把 `other` route 解释为 answer-window；
+  - factory 可以创建 hybrid-window-routing。
+
+### 事实边界
+
+- 本阶段没有使用 gold answer 参与 runtime selector。
+- `best_gold_window` 只用于离线诊断和评估，不参与候选排序。
+- `hybrid-window-routing` 是可选实验参数，不是默认 runtime。
+- 当前结果不能被描述为成功晋升，因为 dev split 明显下降。
+
+### 命令
+
+正式 dev report：
+
+```powershell
+python scripts\analyze_answer_gap.py `
+  --split dev `
+  --evidence-selector hybrid-window-routing `
+  --max-candidates-per-document 3 `
+  --sample-limit 1000 `
+  --output artifacts\answer_gap_analysis_dev_hybrid_window_routing_mcpd3_stage27.json
+```
+
+dev selector comparison：
+
+```powershell
+python scripts\compare_selectors.py `
+  --baseline-report artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage18_cve_anchor.json `
+  --challenger-report artifacts\answer_gap_analysis_dev_hybrid_window_routing_mcpd3_stage27.json `
+  --baseline-label hybrid-stage18 `
+  --challenger-label hybrid-window-stage27 `
+  --sample-limit-per-bucket 50 `
+  --output artifacts\selector_comparison_hybrid_vs_hybrid_window_stage27_dev.json
+```
+
+正式 train report：
+
+```powershell
+python scripts\analyze_answer_gap.py `
+  --split train `
+  --evidence-selector hybrid-window-routing `
+  --max-candidates-per-document 3 `
+  --sample-limit 1000 `
+  --output artifacts\answer_gap_analysis_train_hybrid_window_routing_mcpd3_stage27.json
+```
+
+train selector comparison：
+
+```powershell
+python scripts\compare_selectors.py `
+  --baseline-report artifacts\answer_gap_analysis_train_hybrid_routing_mcpd3_stage24_cv_source.json `
+  --challenger-report artifacts\answer_gap_analysis_train_hybrid_window_routing_mcpd3_stage27.json `
+  --baseline-label hybrid-stage24-train `
+  --challenger-label hybrid-window-stage27-train `
+  --sample-limit-per-bucket 50 `
+  --output artifacts\selector_comparison_hybrid_vs_hybrid_window_stage27_train.json
+```
+
+### 结果
+
+Dev answer-gap：
+
+```text
+baseline F1: 0.2805
+hybrid-window F1: 0.2495
+F1 delta: -0.0310
+
+baseline gold citation: 95 / 160
+hybrid-window gold citation: 99 / 160
+citation delta: +4
+
+baseline gold_window_beats_selected_answer: 95
+hybrid-window gold_window_beats_selected_answer: 98
+```
+
+Dev selector comparison：
+
+```text
+baseline wins: 39
+hybrid-window wins: 14
+ties: 107
+avg F1 delta: -0.0310
+
+other route:
+  baseline wins: 39
+  hybrid-window wins: 14
+  ties: 18
+```
+
+Train answer-gap：
+
+```text
+baseline F1: 0.2596
+hybrid-window F1: 0.2668
+F1 delta: +0.0072
+
+baseline gold citation: 232 / 450
+hybrid-window gold citation: 240 / 450
+citation delta: +8
+
+baseline gold_window_beats_selected_answer: 231
+hybrid-window gold_window_beats_selected_answer: 238
+```
+
+Train selector comparison：
+
+```text
+baseline wins: 50
+hybrid-window wins: 71
+ties: 329
+avg F1 delta: +0.0072
+
+other route:
+  baseline wins: 50
+  hybrid-window wins: 71
+  ties: 49
+```
+
+### 解释
+
+- answer-window 在 train split 上有小幅提升，但在 dev split 上明显下降。
+- 这说明当前 answer-window 规则不是稳定泛化改进，更像对 train 分布有收益、对 dev 分布有伤害。
+- dev 下降的主要原因不是 citation 变差：
+  - dev citation 从 95 增加到 99；
+  - 但 selected answer F1 从 0.2805 降到 0.2495。
+- 这说明 answer-window 更常引用 gold 文档，但窗口文本更长或更偏上下文，导致 token F1 被稀释。
+- 负例样本显示，answer-window 会把相邻但不够 answer-like 的解释、检查项或重复窗口带进 top candidates。
+- 因此，不能把 `other` route 整体切到 answer-window。
+
+### 问题与原因
+
+- 问题 1：`other` route 太杂。
+  - 它包含 support guide、配置说明、限制说明、定义解释、排障步骤等多种答案形态。
+  - 单一 answer-window scoring 不能稳定覆盖这些形态。
+- 问题 2：窗口扩展增加 citation，但不一定增加答案质量。
+  - 更长的窗口更容易覆盖 gold 文档。
+  - 但也更容易混入非答案上下文，F1 反而下降。
+- 问题 3：当前 selector 只知道 query 和 document text，不知道“已选 gold document 内哪一小段最像最终答案”。
+  - 这意味着单纯 route-level 切换不够细。
+
+### 修正与处理
+
+- 保留 `answer-window` 和 `hybrid-window-routing` 作为可选实验入口。
+- 不把它们设为默认 runtime。
+- 不替换 Stage 18/25 的 `hybrid-routing` baseline。
+- 将 `hybrid-window-routing` 的 answer-window 每文档候选数设为 1，而不是 3：
+  - dev 探针显示 mcpd=1 比 mcpd=3 更少伤害 citation 和 F1；
+  - 但 mcpd=1 仍未达到晋升条件。
+
+### 测试
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 64 passed
+```
+
+### 结论
+
+- Stage 27 是一个负实验，不应晋升 runtime 默认策略。
+- answer-window 的方向有价值，但不能用 route-level 全量切换解决。
+- 当前更可靠的结论是：
+  - `other` route 需要进一步细分；
+  - 或者需要 second-pass local rerank，只在已选高置信文档内部做窗口替换；
+  - 不应把全部 `other` 问题直接交给 answer-window。
+
+### 我学到的
+
+- citation 增加不等于答案质量提高。
+- 连续窗口能提升召回，但会放大“答案稀释”问题。
+- dev/train 分歧非常重要：train 小涨不能掩盖 dev 明显下降。
+- 对 `other` route 的改进不能继续用粗路由，要进入更细的 question subtype 或 candidate-level rerank。
+
+### 下一步
+
+- 做 Stage 28：分析 Stage 27 的 other route 胜负样本，设计更细的 gating 或 second-pass rerank。
+- 优先比较两条路线：
+  1. `other` subtype classifier：只让少数 procedure/support-guide 型问题使用 answer-window。
+  2. local second-pass rerank：先沿用 hybrid-routing 选中候选，再在候选所在文档/section 内寻找更紧凑窗口。
+- Stage 28 开始前不应改默认 selector。

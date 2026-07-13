@@ -322,6 +322,69 @@ class AnswerAwareBM25SentenceEvidenceSelector(BM25SentenceEvidenceSelector):
         )
 
 
+class AnswerWindowBM25SentenceEvidenceSelector(AnswerAwareBM25SentenceEvidenceSelector):
+    """Answer-aware selector that scores compact contiguous sentence windows."""
+
+    name = "answer_window_bm25_sentence"
+
+    def __init__(
+        self,
+        min_sentence_chars: int = 24,
+        max_candidates_per_document: int = 1,
+        k1: float = 1.2,
+        b: float = 0.35,
+        score_scale: float = 2.5,
+        max_window_sentences: int = 3,
+    ) -> None:
+        if max_window_sentences <= 0:
+            raise ValueError("max_window_sentences must be positive")
+
+        super().__init__(
+            min_sentence_chars=min_sentence_chars,
+            max_candidates_per_document=max_candidates_per_document,
+            k1=k1,
+            b=b,
+            score_scale=score_scale,
+        )
+        self._max_window_sentences = max_window_sentences
+
+    def _collect_sentence_rows(
+        self,
+        query_terms: set[str],
+        retrieval_results: Sequence[RetrievalResult],
+    ) -> list[_SentenceRow]:
+        return _collect_section_window_rows(
+            query_terms=query_terms,
+            retrieval_results=retrieval_results,
+            min_sentence_chars=self._min_sentence_chars,
+            max_window_sentences=self._max_window_sentences,
+        )
+
+    def _score_sentence_row(
+        self,
+        row: _SentenceRow,
+        query_terms: set[str],
+        idf_by_term: dict[str, float],
+        avg_sentence_length: float,
+    ) -> SentenceEvidenceCandidate:
+        candidate = super()._score_sentence_row(
+            row=row,
+            query_terms=query_terms,
+            idf_by_term=idf_by_term,
+            avg_sentence_length=avg_sentence_length,
+        )
+        scoring_text = row.scoring_text or row.sentence
+        adjusted_score = candidate.score + _answer_window_action_pattern_bonus(scoring_text)
+        adjusted_score *= _answer_window_compact_context_multiplier(row.sentence, scoring_text)
+        adjusted_score *= _answer_window_length_penalty(row.sentence)
+        return SentenceEvidenceCandidate(
+            sentence=candidate.sentence,
+            retrieval_result=candidate.retrieval_result,
+            score=adjusted_score,
+            overlap_terms=candidate.overlap_terms,
+        )
+
+
 class SectionSpanBM25SentenceEvidenceSelector(AnswerAwareBM25SentenceEvidenceSelector):
     """Answer-aware selector that scores windows inside document sections."""
 
@@ -353,42 +416,12 @@ class SectionSpanBM25SentenceEvidenceSelector(AnswerAwareBM25SentenceEvidenceSel
         query_terms: set[str],
         retrieval_results: Sequence[RetrievalResult],
     ) -> list[_SentenceRow]:
-        rows = []
-        seen_spans = set()
-
-        for retrieval_result in retrieval_results:
-            sections = _split_document_sections(retrieval_result.document.text)
-            for section in sections:
-                sentences = [
-                    normalize_sentence(sentence)
-                    for sentence in split_sentences(section.text)
-                    if len(normalize_sentence(sentence)) >= self._min_sentence_chars
-                ]
-                for span in _build_sentence_windows(sentences, self._max_window_sentences):
-                    if span in seen_spans:
-                        continue
-
-                    scoring_text = _build_section_scoring_text(
-                        heading=section.heading,
-                        span=span,
-                    )
-                    terms = _content_terms(tokenize_text(span))
-                    overlap_terms = tuple(sorted(query_terms & terms))
-                    if not overlap_terms and not _has_answer_section_signal(scoring_text):
-                        continue
-
-                    seen_spans.add(span)
-                    rows.append(
-                        _SentenceRow(
-                            sentence=span,
-                            retrieval_result=retrieval_result,
-                            terms=terms,
-                            overlap_terms=overlap_terms,
-                            scoring_text=scoring_text,
-                        )
-                    )
-
-        return rows
+        return _collect_section_window_rows(
+            query_terms=query_terms,
+            retrieval_results=retrieval_results,
+            min_sentence_chars=self._min_sentence_chars,
+            max_window_sentences=self._max_window_sentences,
+        )
 
     def _score_sentence_row(
         self,
@@ -471,6 +504,72 @@ class HybridRoutingEvidenceSelector:
         )
 
 
+class HybridWindowRoutingEvidenceSelector:
+    """Route only the highest-priority general gap bucket to answer windows."""
+
+    def __init__(
+        self,
+        min_sentence_chars: int = 24,
+        answer_aware_max_candidates_per_document: int = 3,
+        answer_window_max_candidates_per_document: int = 1,
+        section_span_max_candidates_per_document: int = 1,
+    ) -> None:
+        if answer_aware_max_candidates_per_document <= 0:
+            raise ValueError("answer_aware_max_candidates_per_document must be positive")
+        if answer_window_max_candidates_per_document <= 0:
+            raise ValueError("answer_window_max_candidates_per_document must be positive")
+        if section_span_max_candidates_per_document <= 0:
+            raise ValueError("section_span_max_candidates_per_document must be positive")
+
+        self._name = (
+            "hybrid_window_routing_answer_aware_"
+            f"mcpd{answer_aware_max_candidates_per_document}_"
+            f"answer_window_mcpd{answer_window_max_candidates_per_document}_"
+            f"section_span_mcpd{section_span_max_candidates_per_document}"
+        )
+        self._answer_aware_selector = AnswerAwareBM25SentenceEvidenceSelector(
+            min_sentence_chars=min_sentence_chars,
+            max_candidates_per_document=answer_aware_max_candidates_per_document,
+        )
+        self._answer_window_selector = AnswerWindowBM25SentenceEvidenceSelector(
+            min_sentence_chars=min_sentence_chars,
+            max_candidates_per_document=answer_window_max_candidates_per_document,
+        )
+        self._section_span_selector = SectionSpanBM25SentenceEvidenceSelector(
+            min_sentence_chars=min_sentence_chars,
+            max_candidates_per_document=section_span_max_candidates_per_document,
+        )
+
+    @property
+    def name(self) -> str:
+        """Stable selector name used in experiment reports."""
+
+        return self._name
+
+    def rank_sentence_candidates(
+        self,
+        question: PrimeQAQuestion,
+        retrieval_results: Sequence[RetrievalResult],
+    ) -> list[SentenceEvidenceCandidate]:
+        """Route one question to a selector without using gold answers."""
+
+        route_trace = trace_selector_route(question, self.name)
+        if route_trace.selected_selector_name == self._section_span_selector.name:
+            return self._section_span_selector.rank_sentence_candidates(
+                question,
+                retrieval_results,
+            )
+        if route_trace.selected_selector_name == self._answer_window_selector.name:
+            return self._answer_window_selector.rank_sentence_candidates(
+                question,
+                retrieval_results,
+            )
+        return self._answer_aware_selector.rank_sentence_candidates(
+            question,
+            retrieval_results,
+        )
+
+
 def create_sentence_evidence_selector(
     selector_name: str,
     min_sentence_chars: int = 24,
@@ -496,6 +595,15 @@ def create_sentence_evidence_selector(
             max_candidates_per_document=max_candidates_per_document,
         )
     if normalized_name in {
+        "answer_window",
+        "answer_window_bm25",
+        "answer_window_bm25_sentence",
+    }:
+        return AnswerWindowBM25SentenceEvidenceSelector(
+            min_sentence_chars=min_sentence_chars,
+            max_candidates_per_document=max_candidates_per_document,
+        )
+    if normalized_name in {
         "section_span",
         "section_span_bm25",
         "section_span_bm25_sentence",
@@ -515,11 +623,22 @@ def create_sentence_evidence_selector(
             answer_aware_max_candidates_per_document=max_candidates_per_document,
             section_span_max_candidates_per_document=1,
         )
+    if normalized_name in {
+        "hybrid_window",
+        "hybrid_window_routing",
+        "hybrid_window_selector",
+    }:
+        return HybridWindowRoutingEvidenceSelector(
+            min_sentence_chars=min_sentence_chars,
+            answer_aware_max_candidates_per_document=max_candidates_per_document,
+            answer_window_max_candidates_per_document=1,
+            section_span_max_candidates_per_document=1,
+        )
 
     raise ValueError(
         "selector_name must be one of: overlap, overlap_sentence, bm25, "
-        "bm25_sentence, answer_aware, answer_aware_bm25_sentence, section_span, "
-        "hybrid_routing"
+        "bm25_sentence, answer_aware, answer_aware_bm25_sentence, answer_window, "
+        "section_span, hybrid_routing, hybrid_window_routing"
     )
 
 
@@ -536,6 +655,51 @@ class _SentenceRow:
 class _DocumentSection:
     heading: str
     text: str
+
+
+def _collect_section_window_rows(
+    query_terms: set[str],
+    retrieval_results: Sequence[RetrievalResult],
+    min_sentence_chars: int,
+    max_window_sentences: int,
+) -> list[_SentenceRow]:
+    rows = []
+    seen_spans = set()
+
+    for retrieval_result in retrieval_results:
+        sections = _split_document_sections(retrieval_result.document.text)
+        for section in sections:
+            sentences = []
+            for sentence in split_sentences(section.text):
+                normalized_sentence = normalize_sentence(sentence)
+                if len(normalized_sentence) >= min_sentence_chars:
+                    sentences.append(normalized_sentence)
+
+            for span in _build_sentence_windows(sentences, max_window_sentences):
+                if span in seen_spans:
+                    continue
+
+                scoring_text = _build_section_scoring_text(
+                    heading=section.heading,
+                    span=span,
+                )
+                terms = _content_terms(tokenize_text(span))
+                overlap_terms = tuple(sorted(query_terms & terms))
+                if not overlap_terms and not _has_answer_section_signal(scoring_text):
+                    continue
+
+                seen_spans.add(span)
+                rows.append(
+                    _SentenceRow(
+                        sentence=span,
+                        retrieval_result=retrieval_result,
+                        terms=terms,
+                        overlap_terms=overlap_terms,
+                        scoring_text=scoring_text,
+                    )
+                )
+
+    return rows
 
 
 STOPWORDS = {
@@ -784,6 +948,43 @@ def _build_section_scoring_text(heading: str, span: str) -> str:
     return f"{heading} {span}"
 
 
+def _answer_window_action_pattern_bonus(text: str) -> float:
+    normalized = text.lower()
+    bonus = 0.0
+    if re.search(r"\b(to resolve|resolve this|resolving the problem)\b", normalized):
+        bonus += 12.0
+    if re.search(r"\b(steps?|procedure|instructions?|complete the following)\b", normalized):
+        bonus += 8.0
+    if re.search(
+        r"\b(install|upgrade|configure|restart|set|enable|disable|apply|run|use)\b",
+        normalized,
+    ):
+        bonus += 5.0
+    if re.search(r"\b(required|must|should|recommended|supported)\b", normalized):
+        bonus += 3.0
+    return bonus
+
+
+def _answer_window_compact_context_multiplier(span: str, scoring_text: str) -> float:
+    sentence_count = len(split_sentences(span))
+    token_count = len(tokenize_text(span))
+    multiplier = 1.0
+    if 1 < sentence_count <= 3 and token_count <= 90:
+        multiplier *= 1.08
+    if _has_answer_section_signal(scoring_text) and 1 < sentence_count <= 3:
+        multiplier *= 1.08
+    return multiplier
+
+
+def _answer_window_length_penalty(text: str) -> float:
+    token_count = len(tokenize_text(text))
+    if token_count > 140:
+        return 0.65
+    if token_count > 95:
+        return 0.8
+    return 1.0
+
+
 def _section_span_answer_pattern_bonus(text: str) -> float:
     normalized = text.lower()
     bonus = 0.0
@@ -984,6 +1185,28 @@ def trace_selector_route(
     """Trace selector routing without using gold answers."""
 
     question_route = classify_question_route(question)
+    if selector_name.startswith("hybrid_window_routing"):
+        if question_route in {
+            "security_bulletin_vulnerability_detail",
+            "limitation_or_restriction",
+        }:
+            return SelectorRouteTrace(
+                question_route=question_route,
+                selected_selector_name="section_span_bm25_sentence",
+                route_reason=f"{question_route} routed to section-span",
+            )
+        if question_route == "other":
+            return SelectorRouteTrace(
+                question_route=question_route,
+                selected_selector_name="answer_window_bm25_sentence",
+                route_reason=f"{question_route} routed to answer-window",
+            )
+        return SelectorRouteTrace(
+            question_route=question_route,
+            selected_selector_name="answer_aware_bm25_sentence",
+            route_reason=f"{question_route} routed to answer-aware",
+        )
+
     if selector_name.startswith("hybrid_routing"):
         if question_route in {
             "security_bulletin_vulnerability_detail",
