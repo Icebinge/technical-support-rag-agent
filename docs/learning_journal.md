@@ -6281,3 +6281,239 @@ pytest: 76 passed
   - 用现有 answer-gap / best_gold_window 生成训练样本；
   - 先做离线 feature dataset，不训练模型；
   - 明确区分 runtime-visible features 和 gold-derived labels。
+
+## Stage 31 - Candidate Reranker Feature Dataset
+
+### 目标
+
+- 接着 Stage 30 的结论，收口手写 local-window 规则路线。
+- 转向 learned / feature-based candidate reranker 的离线数据集构建。
+- 本阶段只构建数据集，不训练模型。
+- 明确区分：
+  - runtime-visible features：未来 reranker 推理时可用；
+  - gold-derived labels：只用于离线训练/评估，不允许进入 runtime features；
+  - metadata：只用于人工检查，不作为模型数值特征。
+
+### 起始状态
+
+```text
+git: main...origin/main clean
+```
+
+Stage 30 结论：
+
+- `strict_answer_gain_no_heading` 是非降 gate，但几乎无收益。
+- 宽松 gate 会重新引入 dev 下降。
+- 继续调手写 gate 的收益很有限。
+- 下一步应该构建 candidate-level feature dataset，为后续 learned / feature-based reranker 做准备。
+
+### 本阶段新增内容
+
+- 新增 `src/ts_rag_agent/application/candidate_reranker_dataset.py`
+  - 新增 `CandidateRerankerDatasetRow`
+  - 新增 `CandidateRerankerQuestionSummary`
+  - 新增 `CandidateRerankerDatasetSummary`
+  - 新增 `CandidateRerankerDatasetBuild`
+  - 支持从 selector ranked candidates 构建候选级别数据集。
+- 新增 `scripts/build_candidate_reranker_dataset.py`
+  - 支持 `--splits`
+  - 支持 `--evidence-selector`
+  - 支持 `--max-candidates-per-document`
+  - 支持 `--candidate-limit`
+  - 支持 `--min-candidate-score`
+  - 输出 JSONL dataset 和 summary JSON。
+- 新增 `tests/test_candidate_reranker_dataset.py`
+  - 验证 runtime features 与 gold labels 分离。
+  - 验证 question-level oracle gain summary。
+  - 验证 min score 和 candidate limit 生效。
+
+### 数据结构边界
+
+每条 row 分为三块：
+
+```text
+runtime_features:
+  未来 runtime 可用。
+  不包含 gold answer、gold document、candidate token F1、best candidate label。
+
+gold_labels:
+  只用于离线训练/评估。
+  包含 candidate_token_f1、is_gold_document、is_best_candidate_for_question 等。
+
+metadata:
+  只用于人工检查。
+  包含 question title、document id/title、截断后的 candidate sentence。
+```
+
+本阶段 runtime features 包含：
+
+```text
+selector_name
+question_route
+retrieval_rank
+retrieval_score
+candidate_score
+candidate_token_count
+candidate_sentence_count
+question_token_count
+query_term_count
+query_overlap_count
+query_overlap_ratio
+candidate_query_coverage_ratio
+title_query_overlap_count
+title_query_overlap_ratio
+answer_signal_score
+problem_noise_score
+has_answer_heading
+has_problem_heading
+has_question_heading
+has_url
+has_trace_noise
+symbol_ratio
+```
+
+gold labels 包含：
+
+```text
+candidate_token_f1
+is_gold_document
+is_best_candidate_for_question
+best_candidate_token_f1_for_question
+f1_gap_to_best_candidate
+```
+
+### 命令
+
+```powershell
+python scripts\build_candidate_reranker_dataset.py `
+  --splits dev,train `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --candidate-limit 25 `
+  --min-candidate-score 2.0 `
+  --output artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --summary-output artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid_summary.json
+```
+
+### 结果
+
+```text
+selector: hybrid_routing_answer_aware_mcpd3_section_span_mcpd1
+answerable questions: 610
+dataset rows: 8060
+
+dev questions: 160
+train questions: 450
+
+dev rows: 2164
+train rows: 5896
+
+average rows per question: 13.2131
+average top candidate token F1: 0.2361
+average best candidate token F1: 0.4292
+average oracle gain vs top candidate: 0.1931
+
+questions with gold-document candidate: 378
+gold-document candidate rows: 963
+```
+
+Rows by route：
+
+```text
+other: 3562
+error_or_log: 1762
+install_upgrade_config: 1353
+how_to_or_lookup: 814
+security_bulletin_vulnerability_detail: 424
+limitation_or_restriction: 55
+security_bulletin_post_fix_behavior: 45
+security_bulletin_remediation: 30
+security_bulletin_affected_product: 15
+```
+
+Artifacts：
+
+```text
+artifacts/candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl
+  size: 12,092,764 bytes
+
+artifacts/candidate_reranker_dataset_stage31_dev_train_hybrid_summary.json
+  size: 217,743 bytes
+```
+
+### 解释
+
+- 当前 top candidate 平均 F1 是 `0.2361`。
+- 同一个 candidate pool 内的 oracle best 平均 F1 是 `0.4292`。
+- 平均 oracle gain 是 `+0.1931`。
+- 这说明 candidate pool 内确实经常已经存在更好的候选，问题是排序没有选中。
+- 这比继续扩写 local-window 规则更适合作为 learned / feature-based reranker 的输入。
+- 378 / 610 个 answerable question 的候选池中出现了 gold document candidate。
+- 这说明 candidate reranker 仍受 retrieval/candidate pool 上限约束：
+  - 如果 gold document 不在候选池，reranker 也无法凭空修复。
+
+### 事实边界
+
+- 本阶段没有训练模型。
+- 本阶段没有改默认 runtime。
+- 本阶段没有把 `gold_labels` 混入 `runtime_features`。
+- 输出 dataset artifacts 没有纳入 git。
+- `metadata` 里的文本是人工检查字段，不是当前 feature contract 的训练数值字段。
+
+### 问题与原因
+
+- 问题 1：候选池 oracle 很高，但 top candidate 明显偏低。
+  - 这证明 reranking 有空间。
+- 问题 2：仍有 232 个 answerable question 没有 gold-document candidate。
+  - 这部分不是 reranker 能单独解决的。
+- 问题 3：当前 feature set 仍是手写结构化特征。
+  - 下一步训练前需要先检查 label 分布和 feature 泄漏风险。
+
+### 修正与处理
+
+- 明确 dataset contract：
+  - `runtime_features` 可用于模型；
+  - `gold_labels` 只用于训练/评估；
+  - `metadata` 只用于检查。
+- 先输出 JSONL 和 summary，不把训练逻辑混进本阶段。
+- 后续训练模型之前，必须先做 dataset audit。
+
+### 测试
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 79 passed
+```
+
+### 结论
+
+- Stage 31 成功构建了 candidate-reranker 离线 feature dataset。
+- 数据显示 candidate pool 内存在明显 oracle gain：
+  `0.4292 - 0.2361 = +0.1931`
+- 这支持下一阶段继续走 feature-based reranker 路线。
+- 但还不能直接训练模型；需要先审计标签分布、split 差异和泄漏风险。
+
+### 我学到的
+
+- 继续手写窗口规则的收益有限，但候选池内部仍有很大排序空间。
+- “候选池里有好答案”和“当前 selector 选中好答案”是两个不同问题。
+- learned reranker 的第一步不是训练，而是把 feature/label 边界做干净。
+- 数据集 contract 本身就是工程资产，能防止后续把 gold label 不小心带进 runtime。
+
+### 下一步
+
+- 做 Stage 32：candidate-reranker dataset audit。
+- 审计内容：
+  1. label 分布；
+  2. best candidate rank 分布；
+  3. route-level oracle gain；
+  4. dev/train 差异；
+  5. runtime feature 是否含有 label leakage 风险。
+- 审计通过后，再考虑训练一个简单 baseline reranker。
