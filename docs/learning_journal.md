@@ -9724,3 +9724,331 @@ pytest: 105 passed
   4. 阻断 `gold_to_non_gold_leading_document` 和高风险 `new_non_gold_leading_document`；
   5. 单独观察 `DEV_Q119`、`DEV_Q201`、`DEV_Q261` 是否被正确处理；
   6. 继续只在 train/dev 范围内做离线设计，不使用 held-out test set，不改 runtime 默认策略。
+
+## Stage 42 - Citation/document-aware holdout guard design
+
+真实执行时间：2026-07-13
+
+### 目标
+
+- 基于 Stage 41 的 dev holdout changed-case evidence，设计 citation/document-aware guard 候选。
+- 比较：
+  - `stage36_main`
+  - `candidate_score_gte_60`
+  - `score60_or_new_gold`
+  - `citation_preserving_score60`
+  - `document_risk_v1`
+  - `citation_doc_risk_v1`
+- 单独跟踪：
+  - `DEV_Q119`
+  - `DEV_Q201`
+  - `DEV_Q261`
+- 继续保持边界：
+  - 不使用 held-out test set；
+  - 不改 runtime 默认策略；
+  - 使用 gold/citation/document-transition 的 guard 必须标注为 `diagnostic_offline_only`，不能说成 runtime 可用策略。
+
+### Guard 设计
+
+```text
+stage36_main:
+  Stage 36 main policy baseline.
+
+candidate_score_gte_60:
+  runtime-feature-only reference.
+  Reject selected candidate score < 60.
+
+score60_or_new_gold:
+  diagnostic_offline_only_gold_document_transition.
+  Reject score < 60 unless replacement moves leading document from non-gold to gold.
+
+citation_preserving_score60:
+  diagnostic_offline_only_gold_citation.
+  Keep citation-gaining replacements, reject citation-losing replacements, otherwise require score >= 60.
+
+document_risk_v1:
+  diagnostic_offline_only_gold_document_transition.
+  Keep new-gold replacements, block gold-to-non-gold replacements, require score >= 90 for rank>=4 new-non-gold replacements.
+
+citation_doc_risk_v1:
+  diagnostic_offline_only_gold_citation_and_document_transition.
+  Keep citation gains, block citation losses, and block rank>=4 new-non-gold replacements below score 90.
+```
+
+### 变更内容
+
+- 新增 `document_aware_guard_design.py`：
+  - 重建 train-to-dev holdout selections；
+  - 重算 Stage 41 main 与 `candidate_score_gte_60` 指标；
+  - 校验 Stage 41 JSON report 与重算结果一致；
+  - 对多种 guard 候选进行离线评估；
+  - 输出相对 main 与相对 `candidate_score_gte_60` 的 delta；
+  - 输出 probe case 的逐策略处理结果；
+  - 输出 SVG 可视化。
+- 新增脚本 `scripts/evaluate_document_aware_guards.py`。
+- 新增测试：
+  - guard labels 与 feature scope 正确；
+  - diagnostic-only guard 被明确标注；
+  - probe cases 可输出；
+  - Stage 41 report 不一致时会报错；
+  - SVG 可写出。
+
+### 实验命令
+
+```powershell
+python scripts\evaluate_document_aware_guards.py `
+  --dataset artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --stage41-report artifacts\candidate_reranker_stage41_candidate_score_holdout_changed_cases.json `
+  --model logistic_best_candidate `
+  --train-split train `
+  --evaluation-split dev `
+  --max-answer-candidates 3 `
+  --output artifacts\candidate_reranker_stage42_document_aware_guard_design.json `
+  --visualization-dir artifacts\candidate_reranker_stage42_document_aware_guard_visuals
+```
+
+### 结果
+
+```text
+stage36_main:
+  F1 0.2791
+  delta -0.0014
+  replacements 42
+  regressions 8
+  citation lost/gained 2/1
+  gold citation delta -1
+
+candidate_score_gte_60:
+  F1 0.2813
+  delta +0.0008
+  replacements 29
+  regressions 1
+  citation lost/gained 0/0
+  gold citation delta 0
+
+score60_or_new_gold:
+  F1 0.2818
+  delta +0.0013
+  replacements 32
+  regressions 1
+  citation lost/gained 0/1
+  gold citation delta +1
+
+citation_preserving_score60:
+  F1 0.2818
+  delta +0.0013
+  replacements 30
+  regressions 1
+  citation lost/gained 0/1
+  gold citation delta +1
+
+document_risk_v1:
+  F1 0.2811
+  delta +0.0006
+  replacements 28
+  regressions 0
+  citation lost/gained 0/1
+  gold citation delta +1
+
+citation_doc_risk_v1:
+  F1 0.2811
+  delta +0.0006
+  replacements 26
+  regressions 0
+  citation lost/gained 0/1
+  gold citation delta +1
+```
+
+相对 `candidate_score_gte_60`：
+
+```text
+score60_or_new_gold:
+  delta diff +0.0005
+  regressions diff 0
+  citation lost diff 0
+  gold citation delta diff +1
+  replacements diff +3
+
+citation_preserving_score60:
+  delta diff +0.0005
+  regressions diff 0
+  citation lost diff 0
+  gold citation delta diff +1
+  replacements diff +1
+
+document_risk_v1:
+  delta diff -0.0002
+  regressions diff -1
+  citation lost diff 0
+  gold citation delta diff +1
+  replacements diff -1
+
+citation_doc_risk_v1:
+  delta diff -0.0002
+  regressions diff -1
+  citation lost diff 0
+  gold citation delta diff +1
+  replacements diff -3
+```
+
+### Probe case 结果
+
+`DEV_Q119`：
+
+```text
+stage36_main:
+  replace, delta +0.0758, gold cited true, citation delta +1
+
+candidate_score_gte_60:
+  keep top candidate, delta +0.0000, gold cited false, citation delta 0
+
+score60_or_new_gold:
+  replace, delta +0.0758, gold cited true, citation delta +1
+
+document_risk_v1:
+  replace, delta +0.0758, gold cited true, citation delta +1
+```
+
+解释：`candidate_score_gte_60` 误杀了一个低分但 new-gold 的有效替换。
+
+`DEV_Q201`：
+
+```text
+stage36_main:
+  replace, delta +0.0028, gold cited false, citation delta 0
+
+candidate_score_gte_60:
+  keep top candidate, delta +0.0000, gold cited false, citation delta 0
+
+score60_or_new_gold:
+  keep top candidate, delta +0.0000, gold cited false, citation delta 0
+
+document_risk_v1:
+  keep top candidate, delta +0.0000, gold cited false, citation delta 0
+```
+
+解释：`DEV_Q201` 是低分 new-non-gold 小幅正收益，document-aware guard 仍会挡掉它。
+
+`DEV_Q261`：
+
+```text
+candidate_score_gte_60:
+  replace, delta -0.0573, gold cited false, citation delta 0
+
+score60_or_new_gold:
+  replace, delta -0.0573, gold cited false, citation delta 0
+
+document_risk_v1:
+  keep top candidate, delta +0.0000, gold cited false, citation delta 0
+
+citation_doc_risk_v1:
+  keep top candidate, delta +0.0000, gold cited false, citation delta 0
+```
+
+解释：`DEV_Q261` 的风险不是 score < 60，而是 `rank 4 + score 60-90 + new_non_gold_leading_document`。
+
+### 可视化结果
+
+本阶段新增 5 个 SVG：
+
+```text
+artifacts/candidate_reranker_stage42_document_aware_guard_visuals/stage42_guard_delta.svg
+artifacts/candidate_reranker_stage42_document_aware_guard_visuals/stage42_guard_regressions.svg
+artifacts/candidate_reranker_stage42_document_aware_guard_visuals/stage42_guard_citation_loss.svg
+artifacts/candidate_reranker_stage42_document_aware_guard_visuals/stage42_guard_changed_vs_score60.svg
+artifacts/candidate_reranker_stage42_document_aware_guard_visuals/stage42_probe_delta.svg
+```
+
+完整 JSON artifact：
+
+```text
+artifacts/candidate_reranker_stage42_document_aware_guard_design.json
+```
+
+说明：以上 artifact 均在本地 `artifacts/` 下，按 `.gitignore` 规则不纳入 git。
+
+### 问题与原因
+
+- 问题 1：最高 F1 delta 的 guard 仍是 offline diagnostic。
+  - `score60_or_new_gold` 达到 `+0.0013`，高于 `candidate_score_gte_60` 的 `+0.0008`；
+  - 但它依赖 gold-document transition，runtime 不可直接获得。
+- 问题 2：最低 regression 的 guard 牺牲了一点 delta。
+  - `document_risk_v1` 和 `citation_doc_risk_v1` 把 regression 降到 `0`；
+  - 但 delta 从 `candidate_score_gte_60` 的 `+0.0008` 降到 `+0.0006`。
+- 问题 3：`DEV_Q201` 说明过度阻断会损失小幅正收益。
+  - 它是 low-score new-non-gold，但 main 有 `+0.0028`；
+  - document-risk guard 会选择阻断，换来更少风险。
+- 问题 4：当前最佳方向还不能 runtime 化。
+  - 这些诊断型 guard 证明 document/citation signal 有用；
+  - 下一步需要寻找 runtime 可用 proxy，例如 document-score relation、rank、score bucket、query coverage、title overlap 等，而不是直接用 gold labels。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\document_aware_guard_design.py `
+  scripts\evaluate_document_aware_guards.py `
+  tests\test_document_aware_guard_design.py
+
+pytest -q tests\test_document_aware_guard_design.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 108 passed
+```
+
+### 结论
+
+- `candidate_score_gte_60` 仍是当前最好的 runtime-feature-only reference：
+  - delta `+0.0008`
+  - regressions `1`
+  - citation loss `0`
+  - gold citation delta `0`
+- `score60_or_new_gold` 是最佳离线诊断 guard：
+  - delta `+0.0013`
+  - regressions `1`
+  - gold citation delta `+1`
+  - 但它使用 gold-document transition，不能作为 runtime policy。
+- `document_risk_v1` 和 `citation_doc_risk_v1` 是最低风险诊断 guard：
+  - regressions `0`
+  - citation loss `0`
+  - gold citation delta `+1`
+  - 但 delta 低于 `candidate_score_gte_60`。
+- 下一步应把 diagnostic guard 转换成 runtime-available proxy search，而不是直接接入 runtime。
+
+### 我学到的
+
+- 离线 gold/citation signal 很适合解释方向，但必须和 runtime feature 分开，否则容易造成数据泄漏。
+- `DEV_Q119` 证明低 candidate score 也可能是有效 new-gold 替换；
+- `DEV_Q261` 证明 score >= 60 仍可能存在 rank 4 new-non-gold regression；
+- 选择 guard 时需要明确目标：更高 delta 和更低 regression 不一定同时最优。
+- Stage 42 的价值不是“找到可上线策略”，而是把下一步 runtime proxy 搜索的目标刻画清楚。
+
+### 下一步
+
+- 做 Stage 43：runtime-available document-risk proxy search。
+- 目标：
+  1. 不使用 gold/citation label 做决策；
+  2. 从 runtime features 中寻找 document-risk proxy；
+  3. 对比 `candidate_score_gte_60`、rank/score 联合 gate、coverage/title-overlap gate；
+  4. 重点观察是否能处理 `DEV_Q261`，同时不误杀太多类似 `DEV_Q119` 的有效替换；
+  5. 继续只在 train/dev 范围内做离线验证；
+  6. 不使用 held-out test set，不改 runtime 默认策略。
