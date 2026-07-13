@@ -3055,3 +3055,196 @@ Observed failure patterns:
   3. If it asks CVE/CVSS/vulnerability details -> section-span.
   4. If it mentions crash/post-fix behavior -> answer-aware.
 - Re-run verified RAG and comparison against Stage 15 hybrid.
+
+## Stage 17 - Security Bulletin Route Refinement
+
+### Goal
+
+- Refine the coarse Stage 15/16 route:
+  `security_bulletin -> section-span`.
+- Keep the routing no-leak: only use question title/text, never gold answer.
+- Split security bulletin questions into narrower sub-intents:
+  1. affected product/version
+  2. remediation/fix/update/apply
+  3. post-fix crash/error behavior
+  4. vulnerability detail
+
+### What I Studied
+
+- Stage 16 showed that all 5 hybrid losses came from security bulletin questions.
+- The losses were not the same kind of question:
+  - `DEV_Q307` asked affected versions.
+  - `DEV_Q260` asked crash/post-fix behavior.
+  - `DEV_Q089`, `DEV_Q019`, and `DEV_Q220` still looked like vulnerability-detail or mixed bulletin cases.
+- Therefore the next improvement should first make the route more precise instead of replacing hybrid globally.
+
+### What I Built Or Changed
+
+- Added `_is_security_bulletin_question`.
+- Added `_classify_security_bulletin_route`.
+- Added three explicit security-bulletin sub-intent checks:
+  - `_asks_security_post_fix_behavior`
+  - `_asks_security_affected_product_or_version`
+  - `_asks_security_remediation`
+- Replaced the old route:
+  `security_bulletin`
+  with these more specific routes:
+  - `security_bulletin_vulnerability_detail`
+  - `security_bulletin_affected_product`
+  - `security_bulletin_remediation`
+  - `security_bulletin_post_fix_behavior`
+- Updated hybrid routing:
+  - `security_bulletin_vulnerability_detail` -> section-span
+  - `limitation_or_restriction` -> section-span
+  - affected product/remediation/post-fix routes -> answer-aware
+- Added tests for all three answer-aware security sub-routes.
+
+### Commands And Evidence
+
+```powershell
+python -m pytest tests\test_evidence_selection.py -q
+python -m ruff check src\ts_rag_agent\application\evidence_selection.py tests\test_evidence_selection.py
+python -m pytest -q
+python -m ruff check .
+
+python scripts\analyze_answer_gap.py `
+  --evidence-selector answer-aware `
+  --max-candidates-per-document 3 `
+  --sample-limit 1000 `
+  --output artifacts\answer_gap_analysis_dev_answer_aware_mcpd3_stage17_route.json
+
+python scripts\analyze_answer_gap.py `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --sample-limit 1000 `
+  --output artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage17_refined_security_route.json
+
+python scripts\compare_selectors.py `
+  --baseline-report artifacts\answer_gap_analysis_dev_answer_aware_mcpd3_stage17_route.json `
+  --challenger-report artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage17_refined_security_route.json `
+  --baseline-label answer-aware `
+  --challenger-label hybrid-routing-stage17 `
+  --f1-win-margin 0.03 `
+  --sample-limit-per-bucket 30 `
+  --output artifacts\selector_comparison_answer_aware_vs_hybrid_routing_stage17_security_route.json
+```
+
+Verification:
+
+```text
+targeted evidence-selection tests: 15 passed
+full pytest: 46 passed
+ruff: passed
+```
+
+### Main Results
+
+Answer-aware baseline:
+
+```text
+average selected-answer F1: 0.2501
+gold citation: 90 / 160
+```
+
+Stage 17 hybrid:
+
+```text
+average selected-answer F1: 0.2768
+gold citation: 93 / 160
+selected selectors:
+  answer_aware_bm25_sentence: 138
+  section_span_bm25_sentence: 22
+```
+
+Route distribution:
+
+```text
+install_upgrade_config: 24
+limitation_or_restriction: 5
+other: 71
+how_to_or_lookup: 14
+error_or_log: 26
+security_bulletin_vulnerability_detail: 17
+security_bulletin_remediation: 1
+security_bulletin_post_fix_behavior: 1
+security_bulletin_affected_product: 1
+```
+
+Answer-aware vs Stage 17 hybrid:
+
+```text
+total_compared: 160
+answer-aware wins: 3
+hybrid wins: 15
+ties: 142
+avg_f1_delta: +0.0267
+baseline gold citation: 90
+challenger gold citation: 93
+```
+
+Compared with Stage 16:
+
+```text
+Stage 16 answer-aware wins: 5
+Stage 17 answer-aware wins: 3
+Stage 16 hybrid wins: 16
+Stage 17 hybrid wins: 15
+Stage 16 ties: 139
+Stage 17 ties: 142
+```
+
+### Problems Encountered
+
+- The first affected-version rule did not catch `DEV_Q307`.
+- Root cause: the real question text contains dirty whitespace:
+  `what  versions`
+  with two spaces.
+- The original regex expected a single normal space.
+- Fix: change affected product/version patterns to use `\s+`, for example:
+  `what\s+versions?`.
+
+### Remaining Loss Cases
+
+Stage 17 still loses to answer-aware on 3 questions:
+
+```text
+DEV_Q089
+DEV_Q019
+DEV_Q220
+```
+
+All 3 are still routed as:
+
+```text
+security_bulletin_vulnerability_detail -> section-span
+```
+
+Observed pattern:
+
+- They are no longer simple route-refinement cases.
+- The issue is more about section-span selecting the wrong local window:
+  - wrong adjacent CVE
+  - translated/reference-link sections
+  - remediation snippets near the vulnerability section
+
+### Why This Choice
+
+- Stage 17 improved the failure distribution without using gold answers.
+- It reduced answer-aware wins from 5 to 3.
+- It slightly improved average selected-answer F1 and gold citation.
+- The gain is real but small, so continuing to add route rules would likely become brittle.
+
+### What I Still Do Not Understand
+
+- Whether `DEV_Q019` can be routed correctly from question text alone without adding an overfit rule.
+- Whether `DEV_Q089` and `DEV_Q220` should be solved by exact-CVE anchoring inside section-span.
+- Whether translated/reference-link sections need an explicit section penalty.
+
+### Next Step
+
+- Do Stage 18: improve section-span precision for security bulletin detail routes.
+- Focus on no-leak document-side scoring:
+  1. extract CVE IDs from the question,
+  2. reward spans containing the requested CVE,
+  3. penalize spans dominated by non-requested CVEs,
+  4. penalize translated/reference-link sections when they are not the only relevant span.

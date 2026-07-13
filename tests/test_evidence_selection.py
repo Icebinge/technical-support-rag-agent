@@ -234,7 +234,7 @@ def test_section_span_selector_promotes_security_bulletin_cve_span():
     )
 
 
-def test_hybrid_routing_selector_uses_section_span_for_security_bulletins():
+def test_hybrid_routing_selector_uses_section_span_for_security_bulletin_details():
     question = PrimeQAQuestion(
         id="q1",
         title="Security Bulletin Java SDK CVE-2015-0410",
@@ -313,6 +313,66 @@ def test_hybrid_route_classification_does_not_use_gold_answer():
     assert classify_question_route(question) == "other"
 
 
+def test_security_bulletin_affected_product_route_uses_answer_aware():
+    question = PrimeQAQuestion(
+        id="q1",
+        title="Security Bulletin OpenSSL CVE-2017-3735",
+        text="What  versions of the product are affected?",
+        answer="",
+        answerable=True,
+        answer_doc_id="gold",
+        doc_ids=["gold"],
+    )
+
+    trace = trace_selector_route(
+        question,
+        "hybrid_routing_answer_aware_mcpd3_section_span_mcpd1",
+    )
+
+    assert trace.question_route == "security_bulletin_affected_product"
+    assert trace.selected_selector_name == "answer_aware_bm25_sentence"
+
+
+def test_security_bulletin_remediation_route_uses_answer_aware():
+    question = PrimeQAQuestion(
+        id="q1",
+        title="Security Bulletin TLS padding vulnerability CVE-2014-8730",
+        text="Which fix should I apply?",
+        answer="",
+        answerable=True,
+        answer_doc_id="gold",
+        doc_ids=["gold"],
+    )
+
+    trace = trace_selector_route(
+        question,
+        "hybrid_routing_answer_aware_mcpd3_section_span_mcpd1",
+    )
+
+    assert trace.question_route == "security_bulletin_remediation"
+    assert trace.selected_selector_name == "answer_aware_bm25_sentence"
+
+
+def test_security_bulletin_post_fix_behavior_route_uses_answer_aware():
+    question = PrimeQAQuestion(
+        id="q1",
+        title="Crash after applying security bulletin CVE-2012-6153",
+        text="A VerifyError appears after installing the fix.",
+        answer="",
+        answerable=True,
+        answer_doc_id="gold",
+        doc_ids=["gold"],
+    )
+
+    trace = trace_selector_route(
+        question,
+        "hybrid_routing_answer_aware_mcpd3_section_span_mcpd1",
+    )
+
+    assert trace.question_route == "security_bulletin_post_fix_behavior"
+    assert trace.selected_selector_name == "answer_aware_bm25_sentence"
+
+
 def test_trace_selector_route_explains_hybrid_decision():
     question = PrimeQAQuestion(
         id="q1",
@@ -329,7 +389,7 @@ def test_trace_selector_route_explains_hybrid_decision():
         "hybrid_routing_answer_aware_mcpd3_section_span_mcpd1",
     )
 
-    assert trace.question_route == "security_bulletin"
+    assert trace.question_route == "security_bulletin_vulnerability_detail"
     assert trace.selected_selector_name == "section_span_bm25_sentence"
     assert "section-span" in trace.route_reason
 

@@ -821,8 +821,8 @@ def classify_question_route(question: PrimeQAQuestion) -> str:
     """Classify a question for selector routing without using gold answers."""
 
     combined = question.full_question.lower()
-    if any(token in combined for token in ("cve-", "cveid", "cvss", "security bulletin")):
-        return "security_bulletin"
+    if _is_security_bulletin_question(combined):
+        return _classify_security_bulletin_route(combined)
     if any(token in combined for token in ("limitation", "restriction", "not supported")):
         return "limitation_or_restriction"
     if any(token in combined for token in ("exception", "trace", "dump", "javacore", "error ")):
@@ -834,6 +834,65 @@ def classify_question_route(question: PrimeQAQuestion) -> str:
     return "other"
 
 
+def _is_security_bulletin_question(combined_question: str) -> bool:
+    return any(
+        token in combined_question
+        for token in ("cve-", "cveid", "cvss", "security bulletin")
+    )
+
+
+def _classify_security_bulletin_route(combined_question: str) -> str:
+    if _asks_security_post_fix_behavior(combined_question):
+        return "security_bulletin_post_fix_behavior"
+    if _asks_security_affected_product_or_version(combined_question):
+        return "security_bulletin_affected_product"
+    if _asks_security_remediation(combined_question):
+        return "security_bulletin_remediation"
+    return "security_bulletin_vulnerability_detail"
+
+
+def _asks_security_post_fix_behavior(combined_question: str) -> bool:
+    return bool(
+        re.search(
+            r"\b("
+            r"after applying|after apply|after installing|after install|"
+            r"crash|gpf|verifyerror|noclassdeffounderror|exception|error"
+            r")\b",
+            combined_question,
+        )
+    )
+
+
+def _asks_security_affected_product_or_version(combined_question: str) -> bool:
+    return bool(
+        re.search(
+            r"\b("
+            r"affected products? and versions?|"
+            r"affected versions?|"
+            r"what\s+versions?|"
+            r"which\s+versions?|"
+            r"what\s+products?|"
+            r"which\s+products?|"
+            r"what\s+releases?|"
+            r"which\s+releases?"
+            r")\b",
+            combined_question,
+        )
+    )
+
+
+def _asks_security_remediation(combined_question: str) -> bool:
+    return bool(
+        re.search(
+            r"\b("
+            r"remediation|fixes|first fix|workarounds?|mitigations?|"
+            r"patch|patches|apply|upgrade|update|download"
+            r")\b",
+            combined_question,
+        )
+    )
+
+
 def trace_selector_route(
     question: PrimeQAQuestion,
     selector_name: str,
@@ -842,7 +901,10 @@ def trace_selector_route(
 
     question_route = classify_question_route(question)
     if selector_name.startswith("hybrid_routing"):
-        if question_route in {"security_bulletin", "limitation_or_restriction"}:
+        if question_route in {
+            "security_bulletin_vulnerability_detail",
+            "limitation_or_restriction",
+        }:
             return SelectorRouteTrace(
                 question_route=question_route,
                 selected_selector_name="section_span_bm25_sentence",
