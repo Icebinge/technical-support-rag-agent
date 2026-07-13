@@ -11602,3 +11602,276 @@ pytest: 124 passed
   4. 分析 train changed-answer risk；
   5. 仍然不使用 held-out test set；
   6. train 也稳定后，再考虑是否进入默认化评审。
+
+## Stage 49 - Train Split Stability Check For Rank-Contained Guard
+
+日期：2026-07-14
+
+### 目标
+
+- 在 train split 上验证 Stage 48 的 rank-contained guarded reranker 是否稳定。
+- 同参数跑：
+  - train top-k baseline；
+  - train rank-contained guarded reranker。
+- 对比 F1、gold citation、answerable/unanswerable refusal、changed answers。
+- 分析 train changed-answer risk。
+- 继续不使用 held-out test set，不改变默认 runtime。
+
+### 重要边界
+
+- 本阶段的 rank-contained reranker 仍使用 `candidate_reranker_train_split=train` 训练。
+- 因此 train split 评估是“训练集上的稳定性/风险检查”，不是 held-out 泛化验证。
+- 本阶段不能被解释成测试集通过，也不能直接支持默认化。
+
+### 实验命令
+
+train top-k baseline：
+
+```powershell
+python scripts\evaluate_verified_rag.py `
+  --split train `
+  --retrieval-top-k 5 `
+  --max-sentences 3 `
+  --min-sentence-score 2.0 `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --composition-policy top-k `
+  --min-evidence-score 15.0 `
+  --max-citation-rank 3 `
+  --min-citations 1 `
+  --sample-limit 1000 `
+  --output artifacts\verified_rag_train_hybrid_routing_mcpd3_stage49_topk_report.json
+```
+
+train rank-contained guarded reranker：
+
+```powershell
+python scripts\evaluate_verified_rag.py `
+  --split train `
+  --retrieval-top-k 5 `
+  --max-sentences 3 `
+  --min-sentence-score 2.0 `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --composition-policy candidate-score-rank-contained-reranker `
+  --candidate-reranker-dataset artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --candidate-reranker-model logistic_best_candidate `
+  --candidate-reranker-train-split train `
+  --min-evidence-score 15.0 `
+  --max-citation-rank 3 `
+  --min-citations 1 `
+  --sample-limit 1000 `
+  --output artifacts\verified_rag_train_hybrid_routing_mcpd3_stage49_rank_contained_reranker_report.json
+```
+
+comparison：
+
+```powershell
+python scripts\compare_verified_rag_reports.py `
+  --baseline-report artifacts\verified_rag_train_hybrid_routing_mcpd3_stage49_topk_report.json `
+  --candidate-report artifacts\verified_rag_train_hybrid_routing_mcpd3_stage49_rank_contained_reranker_report.json `
+  --output artifacts\verified_rag_stage49_train_rank_contained_vs_topk_comparison.json `
+  --visualization-dir artifacts\verified_rag_stage49_train_rank_contained_vs_topk_visuals
+```
+
+changed-answer risk：
+
+```powershell
+python scripts\analyze_verified_rag_changed_answer_risk.py `
+  --baseline-report artifacts\verified_rag_train_hybrid_routing_mcpd3_stage49_topk_report.json `
+  --candidate-report artifacts\verified_rag_train_hybrid_routing_mcpd3_stage49_rank_contained_reranker_report.json `
+  --output artifacts\verified_rag_stage49_train_rank_contained_changed_answer_risk_analysis.json `
+  --visualization-dir artifacts\verified_rag_stage49_train_rank_contained_changed_answer_risk_visuals
+```
+
+### 实验结果
+
+train top-k baseline：
+
+```text
+verified F1: 0.2557
+verified gold citation: 232 / 442
+verified gold citation rate: 0.5249
+verified answerable refusals: 8
+verified unanswerable refusals: 5
+newly refused: 13
+```
+
+train rank-contained guarded reranker：
+
+```text
+verified F1: 0.2565
+verified gold citation: 231 / 442
+verified gold citation rate: 0.5226
+verified answerable refusals: 8
+verified unanswerable refusals: 5
+newly refused: 13
+```
+
+delta：
+
+```text
+verified F1 delta: +0.0008
+verified gold citation delta: -1
+verified gold citation rate delta: -0.0023
+verified generated answerable delta: 0
+verified answerable refusal delta: 0
+verified unanswerable refusal delta: 0
+newly refused delta: 0
+```
+
+changed-answer summary：
+
+```text
+changed verified answers: 39 / 600
+changed answerable: 29 / 450
+changed unanswerable: 10 / 150
+unanswerable refusal regressions: 0
+answerable improved: 6
+answerable regressed: 2
+answerable tied changed: 21
+candidate has out-of-rank citation: 0
+```
+
+route distribution：
+
+```text
+error_or_log: 12
+install_upgrade_config: 11
+other: 11
+security_bulletin_vulnerability_detail: 5
+```
+
+answerable F1 improved cases：
+
+```text
+TRAIN_Q517: +0.204784
+TRAIN_Q353: +0.107261
+TRAIN_Q027: +0.074552
+TRAIN_Q515: +0.029583
+TRAIN_Q124: +0.026721
+TRAIN_Q219: +0.017297
+```
+
+answerable F1 regressed cases：
+
+```text
+TRAIN_Q310: -0.079820
+TRAIN_Q496: -0.011322
+```
+
+gold citation loss：
+
+```text
+verified citation gained: none
+verified citation lost: TRAIN_Q496
+```
+
+`TRAIN_Q496` detail：
+
+```text
+question:
+Why am I getting an SSL Key Exception (RSA premaster secret error) when trying to create a syndication pair?
+
+gold doc:
+swg21663373
+
+baseline citations:
+swg21587102 rank 1
+swg21587102 rank 1
+swg21663373 rank 4
+
+rank-contained candidate citations:
+swg21971637 rank 2
+swg21587102 rank 1
+swg21587102 rank 1
+```
+
+说明：Stage 48 的 rank-contained guard 解决了 out-of-rank citation 风险，但 `TRAIN_Q496` 暴露了另一类风险：同主题、rank 更高的非 gold 文档替换掉了原本的 gold doc。
+
+### 可视化结果
+
+本阶段新增可视化目录：
+
+```text
+artifacts/verified_rag_stage49_train_rank_contained_vs_topk_visuals
+artifacts/verified_rag_stage49_train_rank_contained_changed_answer_risk_visuals
+```
+
+完整 JSON artifacts：
+
+```text
+artifacts/verified_rag_train_hybrid_routing_mcpd3_stage49_topk_report.json
+artifacts/verified_rag_train_hybrid_routing_mcpd3_stage49_rank_contained_reranker_report.json
+artifacts/verified_rag_stage49_train_rank_contained_vs_topk_comparison.json
+artifacts/verified_rag_stage49_train_rank_contained_changed_answer_risk_analysis.json
+```
+
+说明：以上 artifact 均在本地 `artifacts/` 下，按 `.gitignore` 规则不纳入 git。
+
+### 问题与原因
+
+- 问题 1：train split 上仍有 F1 收益，但 gold citation 不稳定。
+  - verified F1 提升 `+0.0008`；
+  - verified gold citation 损失 `1` 个。
+- 问题 2：rank-contained guard 只约束 retrieval rank，不保证 gold document preservation。
+  - `TRAIN_Q496` 中 baseline 虽然引用了 rank4 gold doc；
+  - rank-contained candidate 为了满足 rank<=3，选择了 rank2 的相似 SSLKeyException 文档；
+  - 结果 candidate answer 不再引用 gold doc。
+- 问题 3：没有 unanswerable refusal regression，但仍存在 answerable regression。
+  - unanswerable refusal regressions 为 `0`；
+  - answerable F1 regressed 为 `2`；
+  - 其中 `TRAIN_Q496` 同时是 F1 regression 和 citation loss。
+
+### 修正与处理
+
+- 没有改变默认 runtime。
+- 没有使用 held-out test set。
+- 没有把 rank-contained guarded reranker 默认化。
+- 将 Stage 49 结论定为：rank-contained guard 通过 unanswerable-risk 检查，但未通过 gold-citation stability 检查。
+
+### 测试
+
+本阶段没有修改代码，只新增本地 ignored artifacts 并更新学习日志。
+
+沿用当前代码状态的全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 124 passed
+```
+
+### 结论
+
+- Stage 49 在 train split 上确认：
+  - rank-contained guard 继续带来 F1 小幅收益；
+  - 没有新增 answerable/unanswerable refusal；
+  - 没有 out-of-rank citation；
+  - 没有 unanswerable refusal regression；
+  - 但损失了 1 个 verified gold citation。
+- 因此 rank-contained guarded reranker 不能进入默认化评审。
+- 下一步应围绕 `TRAIN_Q496` 这种“gold doc 被 rank<=3 相似文档替换”的风险设计 preservation guard。
+
+### 我学到的
+
+- rank-contained guard 解决的是 citation rank 风险，不解决 document identity / gold citation preservation 风险。
+- train split 暴露了 dev 没暴露的问题：candidate 可以用 rank 更高的相似非 gold 文档替代原 gold 文档。
+- F1 小幅收益不足以覆盖 gold citation loss；默认化门槛必须同时看 citation stability。
+- 训练集检查仍有价值，因为它能揭示 policy 的风险模式，但不能替代 held-out test。
+
+### 下一步
+
+- 做 Stage 50：分析并设计 gold-citation preservation guard。
+- 目标：
+  1. 聚焦 `TRAIN_Q496` 和两个 answerable F1 regression；
+  2. 判断是否能用 runtime-only 信号识别“相似非 gold 文档替换 gold doc”的风险；
+  3. 评估候选 guard 是否能保持 Stage 48 dev 收益；
+  4. 继续不使用 held-out test set；
+  5. 在 gold citation 稳定前，不进入默认化评审。
