@@ -4522,3 +4522,304 @@ pytest: 55 passed
   1. 在 train split 上跑同参数 verified RAG；
   2. 或者先做 dev 的 route-level quality report，分析 unanswerable changed cases 是否有隐性风险。
 - 在 Stage 24 完成前，不把 `route-aware` 设为默认 runtime 策略。
+
+## Stage 24 - Cross-Validated Route-Aware Robustness Check
+
+### 目标
+
+- 按用户要求引入交叉验证，而不是继续只看单次 dev 全量结果。
+- 验证 Stage 23 的 `install_upgrade_score_margin_min=45.0` 是否稳定。
+- 判断 strict route-aware policy 是否已经足够稳，可以进入默认化讨论。
+
+### 交叉验证口径
+
+- 使用 answer-gap report 做离线 k-fold CV。
+- Runtime policy 仍然不使用 gold label。
+- CV 层使用 gold answer / gold document 来评估候选 threshold 的 F1 和 citation。
+- 每折流程：
+  1. 将 answerable cases 按 `question_id` 排序后 deterministic round-robin 分成 5 折。
+  2. 用 4 折训练候选 install margin。
+  3. 训练折要求 `citation_delta >= 0`。
+  4. 在满足 citation 约束的候选中优先最大化 F1。
+  5. 用剩余 1 折验证被选 threshold。
+
+事实边界：
+
+- 这是阈值稳健性分析，不是模型训练。
+- CV 分析可以使用 gold label；runtime policy 不能使用 gold label。
+- 目前 CV 只调 `install_upgrade_score_margin_min`，没有同时调 how-to gate。
+
+### 本阶段新增内容
+
+- 新增 `src/ts_rag_agent/application/route_aware_composition_cv.py`
+  - `cross_validate_route_aware_composition_policy`
+  - `route_aware_cv_result_to_dict`
+  - deterministic k-fold 切分
+  - train-fold threshold selection
+  - aggregate validation summary
+- 新增 `scripts/cross_validate_route_aware_composition.py`
+  - 支持 `--fold-count`
+  - 支持 `--install-upgrade-score-margin-grid`
+  - 输出 JSON CV report
+- 新增 `tests/test_route_aware_composition_cv.py`
+  - 覆盖 citation-preserving threshold selection
+  - 覆盖非法 fold count
+
+### Dev CV
+
+自动选 threshold CV：
+
+```powershell
+python scripts\cross_validate_route_aware_composition.py `
+  --answer-gap-report artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage18_cve_anchor.json `
+  --fold-count 5 `
+  --output artifacts\route_aware_composition_cv_stage24_dev_hybrid_stage18.json
+```
+
+结果：
+
+```text
+total_validation_cases: 160
+average_baseline_f1: 0.2808
+average_policy_f1: 0.2849
+average_f1_delta: +0.0041
+baseline gold citation: 95
+policy gold citation: 95
+citation_delta: 0
+selected_margin_counts:
+  45.0: 4
+  50.0: 1
+```
+
+固定 `45.0` CV：
+
+```powershell
+python scripts\cross_validate_route_aware_composition.py `
+  --answer-gap-report artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage18_cve_anchor.json `
+  --fold-count 5 `
+  --install-upgrade-score-margin-grid 45 `
+  --output artifacts\route_aware_composition_cv_stage24_dev_fixed45_hybrid_stage18.json
+```
+
+结果：
+
+```text
+total_validation_cases: 160
+average_baseline_f1: 0.2808
+average_policy_f1: 0.2869
+average_f1_delta: +0.0061
+baseline gold citation: 95
+policy gold citation: 95
+citation_delta: 0
+selected_margin_counts:
+  45.0: 5
+```
+
+Dev 结论：
+
+- `45.0` 在 dev 上通过 fixed-threshold CV。
+- 自动选 threshold CV 有一折因为训练折并列选择了 `50.0`，导致少拿一个验证收益。
+- 这说明自动调参流程本身还不够成熟，但 dev 数据仍支持 `45.0`。
+
+### Train Answer-Gap Source
+
+为了避免只在 dev 上循环确认，本阶段生成 train split 的 answer-gap source：
+
+```powershell
+python scripts\analyze_answer_gap.py `
+  --split train `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --sample-limit 1000 `
+  --output artifacts\answer_gap_analysis_train_hybrid_routing_mcpd3_stage24_cv_source.json
+```
+
+结果：
+
+```text
+total_answerable_questions: 450
+gold_in_context: 271
+selected_gold_citation: 232
+average_selected_answer_token_f1: 0.2596
+
+route counts:
+install_upgrade_config: 67
+how_to_or_lookup: 41
+security_bulletin_vulnerability_detail: 70
+error_or_log: 93
+other: 170
+```
+
+### Train CV
+
+自动选 threshold CV：
+
+```powershell
+python scripts\cross_validate_route_aware_composition.py `
+  --answer-gap-report artifacts\answer_gap_analysis_train_hybrid_routing_mcpd3_stage24_cv_source.json `
+  --fold-count 5 `
+  --output artifacts\route_aware_composition_cv_stage24_train_auto_hybrid.json
+```
+
+结果：
+
+```text
+total_validation_cases: 450
+average_baseline_f1: 0.2609
+average_policy_f1: 0.2600
+average_f1_delta: -0.0009
+baseline gold citation: 232
+policy gold citation: 228
+citation_delta: -4
+citation_lost_count: 4
+selected_margin_counts:
+  60.0: 5
+```
+
+固定 `45.0` CV：
+
+```powershell
+python scripts\cross_validate_route_aware_composition.py `
+  --answer-gap-report artifacts\answer_gap_analysis_train_hybrid_routing_mcpd3_stage24_cv_source.json `
+  --fold-count 5 `
+  --install-upgrade-score-margin-grid 45 `
+  --output artifacts\route_aware_composition_cv_stage24_train_fixed45_hybrid.json
+```
+
+结果：
+
+```text
+total_validation_cases: 450
+average_baseline_f1: 0.2609
+average_policy_f1: 0.2590
+average_f1_delta: -0.0019
+baseline gold citation: 232
+policy gold citation: 225
+citation_delta: -7
+citation_lost_count: 7
+selected_margin_counts:
+  45.0: 5
+```
+
+额外 margin 检查：
+
+```text
+margin 60.0:  F1 delta -0.0009, citation_delta -4
+margin 70.0:  F1 delta -0.0012, citation_delta -4
+margin 80.0:  F1 delta -0.0012, citation_delta -4
+margin 100.0: F1 delta -0.0013, citation_delta -4
+margin 999.0: F1 delta -0.0013, citation_delta -4
+```
+
+解释：
+
+- 即使把 install top1 几乎关掉，train 仍有 `-4` citation。
+- 所以 train 上的主要新风险不是 install，而是 `how_to_or_lookup`。
+
+How-to citation loss cases：
+
+```text
+TRAIN_Q188 how_to_or_lookup F1 delta -0.5224
+TRAIN_Q467 how_to_or_lookup F1 delta -0.3469
+TRAIN_Q384 how_to_or_lookup F1 delta -0.2217
+TRAIN_Q075 how_to_or_lookup F1 delta +0.2074
+```
+
+Route-level train no-install-top1 report：
+
+```text
+how_to_or_lookup:
+  cases: 41
+  baseline F1: 0.3007
+  policy F1: 0.2851
+  F1 delta: -0.0156
+  baseline gold citation: 25
+  policy gold citation: 21
+  citation_delta: -4
+```
+
+### Train End-To-End Verified RAG
+
+Top-k baseline：
+
+```powershell
+python scripts\evaluate_verified_rag.py `
+  --split train `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --min-evidence-score 15 `
+  --composition-policy top-k `
+  --sample-limit 1000 `
+  --output artifacts\verified_rag_train_hybrid_routing_m15_stage24_topk_report.json
+```
+
+Strict route-aware：
+
+```powershell
+python scripts\evaluate_verified_rag.py `
+  --split train `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --min-evidence-score 15 `
+  --composition-policy route-aware `
+  --sample-limit 1000 `
+  --output artifacts\verified_rag_train_hybrid_routing_m15_stage24_route_aware_report.json
+```
+
+结果：
+
+```text
+top-k verified average_token_f1: 0.2557
+top-k verified gold_doc_citation_rate: 0.5249
+top-k verified gold citation count: about 232 / 442 generated answerable
+
+route-aware verified average_token_f1: 0.2539
+route-aware verified gold_doc_citation_rate: 0.5090
+route-aware verified gold citation count: about 225 / 442 generated answerable
+
+verified F1 delta: -0.0018
+verified gold citation count delta: -7
+answerable_refusal_rate delta: 0
+unanswerable_refusal_rate delta: 0
+newly_refused delta: 0
+```
+
+### 测试
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 57 passed
+```
+
+### 结论
+
+- Stage 24 的交叉验证没有支持 route-aware 默认化。
+- Dev 上 `45.0` 看起来稳定，但 train CV 和 train verified RAG 都显示回退。
+- Stage 23 的 strict install gate 修复了 dev 上的 `DEV_Q202`，但没有解决 train 上的 how-to top1 风险。
+- 当前正确决策是：
+  - 保留 `route-aware` 作为实验参数；
+  - 默认 runtime 继续使用 `top-k`；
+  - 不把 Stage 23 的 dev 成功外推成全局策略成功。
+
+### 我学到的
+
+- 交叉验证很必要：它直接推翻了“dev 上 +0.0060 且 citation 不降，所以可以默认化”的诱惑。
+- `how_to_or_lookup` 不是天然安全的 direct-answer route；在 train 上，强 top1 也可能丢掉 gold citation。
+- 只调 `install_upgrade_config` 会把风险转移到未处理的 how-to route。
+- 自动阈值选择本身也需要被验证；CV fold 内的并列选择可能影响验证收益。
+
+### 下一步
+
+- 做 Stage 25：重新设计 how-to route gate。
+- 候选方向：
+  1. 暂时关闭 `how_to_or_lookup` top1，只保留 strict install top1；
+  2. 对 how-to 增加独立 CV 网格，而不是沿用全局 ratio/margin；
+  3. 引入非 gold 的文档一致性信号，例如 top1 文档是否和 top2/top3 文档同主题、标题是否强匹配问题。
+- 在 Stage 25 前，`route-aware` 不能进入默认 runtime。
