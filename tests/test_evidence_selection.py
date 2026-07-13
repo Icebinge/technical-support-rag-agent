@@ -6,6 +6,7 @@ from ts_rag_agent.application.evidence_selection import (
     SectionSpanBM25SentenceEvidenceSelector,
     classify_question_route,
     create_sentence_evidence_selector,
+    trace_selector_route,
 )
 from ts_rag_agent.domain.dataset import PrimeQADocument, PrimeQAQuestion
 from ts_rag_agent.domain.retrieval import RetrievalResult
@@ -310,6 +311,27 @@ def test_hybrid_route_classification_does_not_use_gold_answer():
     )
 
     assert classify_question_route(question) == "other"
+
+
+def test_trace_selector_route_explains_hybrid_decision():
+    question = PrimeQAQuestion(
+        id="q1",
+        title="Security Bulletin Java SDK CVE-2015-0410",
+        text="",
+        answer="",
+        answerable=True,
+        answer_doc_id="gold",
+        doc_ids=["gold"],
+    )
+
+    trace = trace_selector_route(
+        question,
+        "hybrid_routing_answer_aware_mcpd3_section_span_mcpd1",
+    )
+
+    assert trace.question_route == "security_bulletin"
+    assert trace.selected_selector_name == "section_span_bm25_sentence"
+    assert "section-span" in trace.route_reason
 
 
 def test_selector_factory_creates_hybrid_routing_selector():

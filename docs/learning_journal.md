@@ -2858,3 +2858,200 @@ hybrid-routing gold citations: 92
   2. 统计 route 分布。
   3. 分析 hybrid 仍然输给 answer-aware 的 5 条样本。
   4. 判断是否需要 route override 或 learned reranker。
+
+## 2026-07-13 - Stage 16: Route Trace And Hybrid Failure Analysis
+
+### Goal
+
+- 给 hybrid-routing 增加可解释 trace。
+- 在 answer-gap 报告中记录每条问题实际走了哪个 route 和 selector。
+- 分析 hybrid-routing 仍然输给 answer-aware 的 5 条样本。
+- 判断下一步是否应该做 route override、继续硬规则，还是进入 learned reranker。
+
+### What I Studied
+
+- hybrid 的整体指标提升不等于每个 route 都可靠。
+- 如果没有 route trace，很难解释某条样本为什么走了 section-span 或 answer-aware。
+- route trace 必须无泄漏：只能依赖 question title/text 和 selector name，不能依赖 gold answer。
+
+### What I Built Or Changed
+
+- 新增 `SelectorRouteTrace`。
+- 新增 `trace_selector_route`。
+- `HybridRoutingEvidenceSelector` 内部改为复用统一 trace 逻辑。
+- `AnswerGapCase` 新增：
+  - `question_route`
+  - `selected_selector_name`
+  - `route_reason`
+- `AnswerGapSummary` 新增：
+  - `question_route_counts`
+  - `selected_selector_counts`
+- `selector_comparison_analysis` 新增：
+  - baseline/challenger route 字段
+  - challenger route 分布
+  - challenger selected selector 分布
+  - challenger route win counts
+- 新增和更新 route trace 相关测试。
+
+### Commands And Evidence
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+
+python scripts\analyze_answer_gap.py `
+  --evidence-selector answer-aware `
+  --max-candidates-per-document 3 `
+  --sample-limit 1000 `
+  --output artifacts\answer_gap_analysis_dev_answer_aware_mcpd3_route_full.json
+
+python scripts\analyze_answer_gap.py `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --sample-limit 1000 `
+  --output artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_route_full.json
+
+python scripts\compare_selectors.py `
+  --baseline-report artifacts\answer_gap_analysis_dev_answer_aware_mcpd3_route_full.json `
+  --challenger-report artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_route_full.json `
+  --baseline-label answer-aware `
+  --challenger-label hybrid-routing `
+  --f1-win-margin 0.03 `
+  --sample-limit-per-bucket 30 `
+  --output artifacts\selector_comparison_answer_aware_vs_hybrid_routing_route.json
+```
+
+验证命令结果：
+
+```text
+ruff: passed
+pytest: 43 passed
+```
+
+### Main Results
+
+Hybrid answer-gap route distribution:
+
+```text
+question_route_counts:
+install_upgrade_config: 24
+limitation_or_restriction: 5
+other: 71
+how_to_or_lookup: 14
+error_or_log: 26
+security_bulletin: 20
+
+selected_selector_counts:
+answer_aware_bm25_sentence: 135
+section_span_bm25_sentence: 25
+```
+
+Answer-aware vs hybrid-routing comparison:
+
+```text
+total_compared: 160
+answer-aware wins: 5
+hybrid-routing wins: 16
+ties: 139
+avg_f1_delta: +0.0263
+```
+
+Route-level win counts:
+
+```text
+security_bulletin:
+answer-aware wins: 5
+hybrid-routing wins: 15
+ties: 0
+
+limitation_or_restriction:
+answer-aware wins: 0
+hybrid-routing wins: 1
+ties: 4
+
+all other no-leak routes:
+ties only
+```
+
+### Hybrid Loss Cases
+
+Hybrid still loses to answer-aware on 5 cases, all routed as:
+
+```text
+question_route: security_bulletin
+selected_selector_name: section_span_bm25_sentence
+```
+
+The 5 cases are:
+
+```text
+DEV_Q307
+DEV_Q089
+DEV_Q019
+DEV_Q220
+DEV_Q260
+```
+
+Observed failure patterns:
+
+- Some security bulletin questions ask about affected product/version, but section-span over-prioritizes CVE detail windows.
+- Some documents contain translated or reference-link sections; section-span can pick those instead of the actual answer.
+- Some questions are security-related but their gold answer is a remediation or post-fix behavior explanation, where answer-aware is better.
+- The current route treats all security bulletin questions the same, which is too coarse.
+
+### Problems Encountered
+
+- Stage 15 showed hybrid wins overall, but without route trace it was not clear where wins/losses came from.
+- `security_bulletin` is not a single homogeneous type:
+  1. vulnerability detail questions
+  2. affected product/version questions
+  3. remediation/fix questions
+  4. post-fix behavior questions
+  5. translated/reference bulletin pages
+- section-span is good at CVE/CVSS detail extraction but not always good at affected product/remediation answers.
+
+### Root Cause
+
+- The first hybrid route is too coarse:
+  `security_bulletin -> section-span`
+- It ignores the sub-intent inside security bulletin questions.
+- The route classifier sees the question, but it does not yet decide whether the user is asking for vulnerability details, affected products, remediation, or crash/fix behavior.
+
+### Solution
+
+- Keep hybrid-routing as the current best non-LLM baseline.
+- Do not replace section-span globally.
+- Do not blindly route all security bulletin questions to section-span in the final design.
+- Use Stage 16 trace to define narrower route override rules.
+
+### Why This Choice
+
+- Hybrid still has a strong net win: 16 wins vs 5 losses.
+- All 5 losses are explainable and localized to one route.
+- This means the next improvement should target route refinement, not a full architecture change.
+
+### Verification
+
+- `python -m ruff check .` passed.
+- `python -m pytest -q` passed, current test count is 43.
+- `artifacts/answer_gap_analysis_dev_answer_aware_mcpd3_route_full.json` generated.
+- `artifacts/answer_gap_analysis_dev_hybrid_routing_mcpd3_route_full.json` generated.
+- `artifacts/selector_comparison_answer_aware_vs_hybrid_routing_route.json` generated.
+- Experiment artifacts are under `artifacts/` and ignored by git.
+
+### What I Still Do Not Understand
+
+- Which security-bulletin sub-intents should stay on section-span.
+- Whether affected-products/remediation questions can be detected reliably from title/text alone.
+- Whether route override rules will overfit the current dev set.
+- Whether a learned reranker should replace route-specific hand rules soon.
+
+### Next Step
+
+- Do Stage 17: security bulletin route refinement.
+- First version should stay rule-based and no-leak:
+  1. If a security bulletin question asks affected product/version -> answer-aware.
+  2. If it asks remediation/fix/update/apply -> answer-aware or a remediation-specific selector.
+  3. If it asks CVE/CVSS/vulnerability details -> section-span.
+  4. If it mentions crash/post-fix behavior -> answer-aware.
+- Re-run verified RAG and comparison against Stage 15 hybrid.

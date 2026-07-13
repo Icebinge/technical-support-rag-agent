@@ -78,7 +78,12 @@ def test_compare_selector_reports_counts_winners_and_types():
     assert result.summary.challenger_wins == 2
     assert result.summary.baseline_wins == 1
     assert result.summary.question_type_counts["security_bulletin"] == 1
+    assert result.summary.challenger_question_route_counts["security_bulletin"] == 1
+    assert result.summary.challenger_selected_selector_counts[
+        "section_span_bm25_sentence"
+    ] == 1
     assert result.challenger_win_cases[0].question_id == "q1"
+    assert result.challenger_win_cases[0].challenger_question_route == "security_bulletin"
 
 
 def _case(
@@ -96,9 +101,23 @@ def _case(
         "bucket": "gold_window_beats_selected_answer",
         "selected_answer_token_f1": f1,
         "selected_gold_candidate_count": 1 if gold_cited else 0,
+        "question_route": classify_route_from_title(title),
+        "selected_selector_name": (
+            "section_span_bm25_sentence"
+            if "Security Bulletin" in title
+            else "answer_aware_bm25_sentence"
+        ),
         "selected_candidates": [
             {
                 "sentence": answer,
             }
         ],
     }
+
+
+def classify_route_from_title(title: str) -> str:
+    if "Security Bulletin" in title:
+        return "security_bulletin"
+    if "limitation" in title:
+        return "limitation_or_restriction"
+    return "other"

@@ -17,6 +17,10 @@ class SelectorComparisonCase:
     f1_delta: float
     baseline_gold_cited: bool
     challenger_gold_cited: bool
+    baseline_question_route: str
+    challenger_question_route: str
+    baseline_selected_selector_name: str
+    challenger_selected_selector_name: str
     baseline_bucket: str
     challenger_bucket: str
     question_title: str
@@ -41,6 +45,9 @@ class SelectorComparisonSummary:
     winner_counts: dict[str, int]
     question_type_counts: dict[str, int]
     question_type_win_counts: dict[str, dict[str, int]]
+    challenger_question_route_counts: dict[str, int]
+    challenger_route_win_counts: dict[str, dict[str, int]]
+    challenger_selected_selector_counts: dict[str, int]
 
 
 @dataclass(frozen=True)
@@ -166,16 +173,25 @@ def _compare_case(
     question_title = str(baseline_case.get("question_title", ""))
     question_text = str(baseline_case.get("question_text", ""))
     gold_answer = str(baseline_case.get("gold_answer", ""))
+    question_type = classify_question_type(question_title, question_text, gold_answer)
 
     return SelectorComparisonCase(
         question_id=str(baseline_case.get("question_id", "")),
-        question_type=classify_question_type(question_title, question_text, gold_answer),
+        question_type=question_type,
         winner=winner,
         baseline_f1=baseline_f1,
         challenger_f1=challenger_f1,
         f1_delta=f1_delta,
         baseline_gold_cited=baseline_gold_cited,
         challenger_gold_cited=challenger_gold_cited,
+        baseline_question_route=str(baseline_case.get("question_route", question_type)),
+        challenger_question_route=str(challenger_case.get("question_route", question_type)),
+        baseline_selected_selector_name=str(
+            baseline_case.get("selected_selector_name", "")
+        ),
+        challenger_selected_selector_name=str(
+            challenger_case.get("selected_selector_name", "")
+        ),
         baseline_bucket=str(baseline_case.get("bucket", "")),
         challenger_bucket=str(challenger_case.get("bucket", "")),
         question_title=question_title,
@@ -210,8 +226,10 @@ def _build_summary(
     winner_counts = Counter(case.winner for case in comparisons)
     question_type_counts = Counter(case.question_type for case in comparisons)
     question_type_win_counts: dict[str, Counter[str]] = defaultdict(Counter)
+    challenger_route_win_counts: dict[str, Counter[str]] = defaultdict(Counter)
     for case in comparisons:
         question_type_win_counts[case.question_type][case.winner] += 1
+        challenger_route_win_counts[case.challenger_question_route][case.winner] += 1
 
     avg_f1_delta = (
         round(sum(case.f1_delta for case in comparisons) / len(comparisons), 4)
@@ -237,6 +255,16 @@ def _build_summary(
             question_type: dict(counts)
             for question_type, counts in sorted(question_type_win_counts.items())
         },
+        challenger_question_route_counts=dict(
+            Counter(case.challenger_question_route for case in comparisons)
+        ),
+        challenger_route_win_counts={
+            question_route: dict(counts)
+            for question_route, counts in sorted(challenger_route_win_counts.items())
+        },
+        challenger_selected_selector_counts=dict(
+            Counter(case.challenger_selected_selector_name for case in comparisons)
+        ),
     )
 
 

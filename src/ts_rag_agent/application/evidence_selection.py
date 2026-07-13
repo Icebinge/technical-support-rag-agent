@@ -21,6 +21,15 @@ class SentenceEvidenceCandidate:
     overlap_terms: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class SelectorRouteTrace:
+    """Explain which selector was used for one question."""
+
+    question_route: str
+    selected_selector_name: str
+    route_reason: str
+
+
 class SentenceEvidenceSelector(Protocol):
     """Ranks sentence evidence candidates for an extractive RAG answerer."""
 
@@ -447,8 +456,8 @@ class HybridRoutingEvidenceSelector:
     ) -> list[SentenceEvidenceCandidate]:
         """Route one question to the best known non-LLM selector."""
 
-        question_type = classify_question_route(question)
-        if question_type in {"security_bulletin", "limitation_or_restriction"}:
+        route_trace = trace_selector_route(question, self.name)
+        if route_trace.selected_selector_name == self._section_span_selector.name:
             return self._section_span_selector.rank_sentence_candidates(
                 question,
                 retrieval_results,
@@ -823,3 +832,30 @@ def classify_question_route(question: PrimeQAQuestion) -> str:
     if question.title.lower().startswith(("how ", "how do", "how can", "what is", "where ")):
         return "how_to_or_lookup"
     return "other"
+
+
+def trace_selector_route(
+    question: PrimeQAQuestion,
+    selector_name: str,
+) -> SelectorRouteTrace:
+    """Trace selector routing without using gold answers."""
+
+    question_route = classify_question_route(question)
+    if selector_name.startswith("hybrid_routing"):
+        if question_route in {"security_bulletin", "limitation_or_restriction"}:
+            return SelectorRouteTrace(
+                question_route=question_route,
+                selected_selector_name="section_span_bm25_sentence",
+                route_reason=f"{question_route} routed to section-span",
+            )
+        return SelectorRouteTrace(
+            question_route=question_route,
+            selected_selector_name="answer_aware_bm25_sentence",
+            route_reason=f"{question_route} routed to answer-aware",
+        )
+
+    return SelectorRouteTrace(
+        question_route=question_route,
+        selected_selector_name=selector_name,
+        route_reason="selector does not use routing",
+    )

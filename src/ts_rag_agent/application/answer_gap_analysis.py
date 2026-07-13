@@ -8,6 +8,7 @@ from statistics import mean
 from ts_rag_agent.application.evidence_selection import (
     SentenceEvidenceCandidate,
     split_sentences,
+    trace_selector_route,
 )
 from ts_rag_agent.application.rag_answering import ExtractiveAnswerGenerator
 from ts_rag_agent.application.retrieval_evaluation import Retriever
@@ -60,6 +61,9 @@ class AnswerGapCase:
     selected_answer_text: str
     selected_answer_token_f1: float
     selected_gold_candidate_count: int
+    question_route: str
+    selected_selector_name: str
+    route_reason: str
     best_gold_sentence: GoldEvidenceSpan | None
     best_gold_window: GoldEvidenceSpan | None
     best_selected_gold_candidate_token_f1: float | None
@@ -81,6 +85,8 @@ class AnswerGapSummary:
     selected_answer_low_overlap: int
     gold_sentence_beats_selected_answer: int
     gold_window_beats_selected_answer: int
+    question_route_counts: dict[str, int]
+    selected_selector_counts: dict[str, int]
 
 
 @dataclass(frozen=True)
@@ -150,6 +156,10 @@ class AnswerGapAnalyzer:
         retrieval_top_k: int,
     ) -> AnswerGapCase:
         retrieval_results = self._retriever.search(question.full_question, top_k=retrieval_top_k)
+        route_trace = trace_selector_route(
+            question,
+            self._answer_generator.evidence_selector_name,
+        )
         selected_candidates = self._select_answer_candidates(question, retrieval_results)
         selected_answer_text = " ".join(candidate.sentence for candidate in selected_candidates)
         selected_answer_token_f1 = token_f1(selected_answer_text, question.answer)
@@ -200,6 +210,9 @@ class AnswerGapAnalyzer:
             selected_answer_text=selected_answer_text,
             selected_answer_token_f1=round(selected_answer_token_f1, 4),
             selected_gold_candidate_count=len(selected_gold_candidates),
+            question_route=route_trace.question_route,
+            selected_selector_name=route_trace.selected_selector_name,
+            route_reason=route_trace.route_reason,
             best_gold_sentence=best_gold_sentence,
             best_gold_window=best_gold_window,
             best_selected_gold_candidate_token_f1=round(max(selected_gold_candidate_f1_values), 4)
@@ -309,6 +322,8 @@ def _build_summary(cases: list[AnswerGapCase]) -> AnswerGapSummary:
         for case in cases
         if case.best_gold_window is not None
     ]
+    question_route_counts = Counter(case.question_route for case in cases)
+    selected_selector_counts = Counter(case.selected_selector_name for case in cases)
 
     return AnswerGapSummary(
         total_answerable_questions=len(cases),
@@ -335,6 +350,8 @@ def _build_summary(cases: list[AnswerGapCase]) -> AnswerGapSummary:
             "gold_window_beats_selected_answer",
             0,
         ),
+        question_route_counts=dict(question_route_counts),
+        selected_selector_counts=dict(selected_selector_counts),
     )
 
 
@@ -410,6 +427,9 @@ def case_to_dict(case: AnswerGapCase) -> dict:
         "bucket": case.bucket,
         "selected_answer_token_f1": case.selected_answer_token_f1,
         "selected_gold_candidate_count": case.selected_gold_candidate_count,
+        "question_route": case.question_route,
+        "selected_selector_name": case.selected_selector_name,
+        "route_reason": case.route_reason,
         "best_selected_gold_candidate_token_f1": case.best_selected_gold_candidate_token_f1,
         "selected_doc_ids": [
             candidate.retrieval_result.document.id for candidate in case.selected_candidates

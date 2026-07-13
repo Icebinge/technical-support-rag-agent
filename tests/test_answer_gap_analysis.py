@@ -67,8 +67,12 @@ def test_answer_gap_detects_gold_window_that_beats_selected_sentence():
     assert result.summary.gold_in_context == 1
     assert result.summary.selected_gold_citation == 1
     assert result.summary.gold_window_beats_selected_answer == 1
+    assert result.summary.question_route_counts["install_upgrade_config"] == 1
+    assert result.summary.selected_selector_counts["bm25_sentence"] == 1
     assert result.cases[0].best_gold_window is not None
     assert result.cases[0].best_gold_window.sentence_count == 2
+    assert result.cases[0].question_route == "install_upgrade_config"
+    assert result.cases[0].selected_selector_name == "bm25_sentence"
 
 
 def test_answer_gap_detects_gold_in_context_not_selected():
