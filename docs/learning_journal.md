@@ -8393,3 +8393,274 @@ block security_bulletin_affected_product
   4. 比较 baseline top candidate answer 与 guarded reranker answer；
   5. 重点看 average answer token F1、citation/gold-document、regression count。
 - Stage 37 仍先做可选离线实验，不改默认 runtime。
+
+## Stage 37 - Guarded Candidate Reranker Answer-Level Proxy Experiment
+
+### 目标
+
+- 接着 Stage 36，把 guarded candidate reranker 放到 answer-level proxy 上看效果。
+- 本阶段仍然是离线实验，不接入默认 runtime，也不修改 verified RAG 默认策略。
+- 主策略使用 Stage 36 结论中更稳妥的配置：
+
+```text
+rank <= 5
+score margin >= 0.05
+block how_to_or_lookup
+```
+
+- sensitivity 对照继续保留 Stage 35 best policy：
+
+```text
+rank <= 5
+score margin >= 0.05
+block how_to_or_lookup
+block security_bulletin_affected_product
+```
+
+### 边界说明
+
+- 本阶段不是完整 runtime end-to-end verified RAG 实验。
+- 本阶段有两个 answer-level proxy mode：
+  1. `single_candidate_answer`
+     - 使用 Stage 31 candidate dataset 中已经计算好的 `candidate_token_f1` 标签；
+     - 对比原 top candidate answer 和 guarded reranker 选出的 single candidate answer。
+  2. `top3_leading_candidate_rewrite`
+     - 使用本地 PrimeQA gold answer；
+     - 用 candidate dataset metadata 中保存的候选句文本重算 top3 answer token F1；
+     - 做法是把 guarded reranker 选中的候选放到 top3 首位，再补原 top candidates；
+     - 这是 metadata sentence proxy，不等同于真实 verified RAG runtime 结果。
+
+### 起始状态
+
+```text
+git: main...origin/main clean
+latest committed stage: Stage 36
+Stage 36 main candidate:
+rank <= 5
+score margin >= 0.05
+block how_to_or_lookup
+```
+
+Stage 36 结论是：
+
+- Stage 35 best policy 多出来的收益来自 `security_bulletin_affected_product` 这个 1-sample route；
+- 因此 Stage 37 主策略不把这个 route 写死为 block；
+- 它只作为 sensitivity 对照保留。
+
+### 本阶段新增内容
+
+- 新增 `src/ts_rag_agent/application/guarded_candidate_reranker_answer_experiment.py`
+  - 复用 grouped-CV candidate reranker selections；
+  - 复用 constrained policy decision；
+  - 新增 single-candidate answer proxy；
+  - 新增 top-k leading-candidate rewrite proxy；
+  - 输出 aggregate、route、split、sample cases；
+  - 输出 SVG 可视化。
+- 新增 `scripts/evaluate_guarded_candidate_reranker_answers.py`
+  - 读取 Stage 31 JSONL candidate dataset；
+  - 读取本地 PrimeQA dev/train gold answers；
+  - 输出 Stage 37 JSON artifact；
+  - 输出 Stage 37 SVG visualization directory。
+- 新增 `tests/test_guarded_candidate_reranker_answer_experiment.py`
+  - 验证两个 proxy mode；
+  - 验证结果可序列化；
+  - 验证 SVG 可视化真实写出。
+
+### 命令
+
+```powershell
+python scripts\evaluate_guarded_candidate_reranker_answers.py `
+  --dataset artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --model logistic_best_candidate `
+  --fold-count 5 `
+  --splits dev,train `
+  --max-answer-candidates 3 `
+  --sample-limit 20 `
+  --output artifacts\candidate_reranker_stage37_answer_experiment.json `
+  --visualization-dir artifacts\candidate_reranker_stage37_answer_visuals
+```
+
+### 结果
+
+Main policy, `single_candidate_answer`：
+
+```text
+baseline average answer token F1: 0.2361
+policy average answer token F1:   0.2699
+delta:                            +0.0338
+oracle gap closed:                17.51%
+replacement count:                189 / 610
+regressed count:                  56 / 610
+gold-document citation count:      192 -> 248
+citation delta:                   +56
+```
+
+Main policy, `top3_leading_candidate_rewrite`：
+
+```text
+baseline average answer token F1: 0.2655
+policy average answer token F1:   0.2665
+delta:                            +0.0010
+oracle gap closed:                1.80%
+replacement count:                189 / 610
+improved count:                   26 / 610
+regressed count:                  22 / 610
+gold-document citation count:      327 -> 327
+citation delta:                   0
+citation lost / gained:           4 / 4
+```
+
+Sensitivity policy, `single_candidate_answer`：
+
+```text
+policy average answer token F1:   0.2708
+delta:                            +0.0347
+replacement count:                188 / 610
+regressed count:                  55 / 610
+gold-document citation count:      192 -> 248
+citation delta:                   +56
+```
+
+Sensitivity policy, `top3_leading_candidate_rewrite`：
+
+```text
+policy average answer token F1:   0.2667
+delta:                            +0.0012
+replacement count:                188 / 610
+regressed count:                  21 / 610
+gold-document citation count:      327 -> 327
+citation delta:                   0
+citation lost / gained:           4 / 4
+```
+
+Main vs sensitivity：
+
+```text
+single_candidate_answer:
+  policy_average_f1_difference: -0.0009
+  average_delta_difference:     -0.0009
+  regressed_count_difference:   +1
+  gold_citation_count_difference: 0
+
+top3_leading_candidate_rewrite:
+  policy_average_f1_difference: -0.0002
+  average_delta_difference:     -0.0002
+  regressed_count_difference:   +1
+  gold_citation_count_difference: 0
+```
+
+Top3 route-level 现象：
+
+```text
+other:                                  +0.0018
+error_or_log:                            +0.0012
+install_upgrade_config:                  +0.0010
+security_bulletin_vulnerability_detail:  +0.0007
+how_to_or_lookup:                        +0.0000
+security_bulletin_affected_product:      -0.0941, n = 1
+```
+
+Sensitivity policy 在 `security_bulletin_affected_product` 上保持 baseline：
+
+```text
+security_bulletin_affected_product:
+  question_count: 1
+  average_delta_vs_baseline: +0.0000
+  replacement_count: 0
+  regressed_count: 0
+```
+
+### 可视化结果
+
+本阶段新增 SVG 可视化：
+
+```text
+artifacts/candidate_reranker_stage37_answer_visuals/guarded_answer_policy_delta.svg
+artifacts/candidate_reranker_stage37_answer_visuals/guarded_answer_main_route_delta.svg
+artifacts/candidate_reranker_stage37_answer_visuals/guarded_answer_main_citation_delta.svg
+```
+
+Stage 37 主 JSON artifact：
+
+```text
+artifacts/candidate_reranker_stage37_answer_experiment.json
+```
+
+说明：以上 artifact 都在本地 `artifacts/` 下，按 `.gitignore` 规则不纳入 git。
+
+### 问题与原因
+
+- 问题 1：single-candidate proxy 看起来提升明显，但 top3 proxy 提升很小。
+  - 原因：当答案由 top3 多句组成时，替换或前置一个候选只影响一部分 answer text；
+  - 原 top3 已经包含不少有效证据，因此 reranker 的 single-candidate 收益被组合答案稀释。
+- 问题 2：top3 proxy 仍有 regression。
+  - main policy top3 regression 是 22 个；
+  - sensitivity top3 regression 是 21 个；
+  - regression 没有被当前 rank/margin/route gate 完全消除。
+- 问题 3：`security_bulletin_affected_product` 仍然是 1-sample 敏感点。
+  - main policy 在该 route 上 top3 delta 是 `-0.0941`；
+  - sensitivity 通过 block 它避免了这个 regression；
+  - 但 n=1 仍不足以证明应该把它写死进主策略。
+- 问题 4：top3 citation count 总量没变，但有 citation exchange。
+  - citation lost 是 4；
+  - citation gained 是 4；
+  - 总量为 0 不代表没有个案风险。
+
+### 修正与处理
+
+- 不接入 runtime。
+- 不把 sensitivity policy 设为默认。
+- 不把 `security_bulletin_affected_product` 的 1 个样本作为稳定主策略依据。
+- 保留 Stage 36 main policy 作为继续分析对象。
+- 下一步重点从 aggregate 指标转向 changed case 级别：
+  - 分析 22 个 top3 regression；
+  - 分析 4 个 citation lost；
+  - 分析 4 个 citation gained；
+  - 判断是否存在可解释、可泛化的 stricter gate。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\guarded_candidate_reranker_answer_experiment.py `
+  scripts\evaluate_guarded_candidate_reranker_answers.py `
+  tests\test_guarded_candidate_reranker_answer_experiment.py
+
+pytest -q tests\test_guarded_candidate_reranker_answer_experiment.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+### 结论
+
+- Stage 37 说明：
+  - guarded reranker 在 single-candidate answer proxy 上仍有明显提升；
+  - 但放到 top3 answer proxy 后，主策略只提升 `+0.0010`；
+  - sensitivity 只比 main 多 `+0.0002` top3 delta，仍然主要受 1-sample route 影响；
+  - 当前证据不足以接入 runtime；
+  - 下一步应该做 top3 changed-case error analysis，而不是继续直接推进 runtime。
+
+### 我学到的
+
+- 候选级 F1 提升不能直接等价为多句答案级提升。
+- answer composition 会稀释 single-candidate reranking 的收益。
+- citation 总量不变时，仍然要检查 citation lost 和 citation gained 的交换。
+- 1-sample route 即使能改善 headline metric，也不能作为稳定策略依据。
+- 可视化能更快暴露“整体有小收益，但 route 级别很薄”的事实。
+
+### 下一步
+
+- 做 Stage 38：top3 guarded answer changed-case error analysis。
+- 目标：
+  1. 读取 Stage 37 artifact；
+  2. 专门分析 main policy 的 22 个 top3 regression；
+  3. 专门分析 4 个 citation lost 和 4 个 citation gained；
+  4. 按 route、selected rank、score margin、candidate score、document transition 做归因；
+  5. 判断是否存在可泛化的 stricter gate；
+  6. 继续不改 runtime，除非后续端到端证据足够。
