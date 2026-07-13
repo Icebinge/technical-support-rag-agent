@@ -232,6 +232,19 @@ def guarded_candidate_answer_experiment_to_dict(
     return asdict(result)
 
 
+def build_single_candidate_answer_cases_from_decisions(
+    decisions: Sequence[CandidateRerankerPolicyDecision],
+    rows: Sequence[Mapping[str, Any]],
+) -> list[GuardedCandidateAnswerCase]:
+    """Build full single-candidate answer proxy cases from policy decisions."""
+
+    row_index = _build_row_index(rows)
+    return [
+        _single_candidate_case(decision=decision, row_index=row_index)
+        for decision in decisions
+    ]
+
+
 def build_topk_leading_candidate_answer_cases_from_decisions(
     decisions: Sequence[CandidateRerankerPolicyDecision],
     rows: Sequence[Mapping[str, Any]],
@@ -254,6 +267,23 @@ def build_topk_leading_candidate_answer_cases_from_decisions(
         )
         for decision in decisions
     ]
+
+
+def summarize_guarded_candidate_answer_cases(
+    cases: Sequence[GuardedCandidateAnswerCase],
+) -> GuardedCandidateAnswerMetrics:
+    """Summarize guarded candidate answer proxy cases."""
+
+    return _metrics(cases)
+
+
+def segment_guarded_candidate_answer_cases(
+    cases: Sequence[GuardedCandidateAnswerCase],
+    segment_fn,
+) -> list[GuardedCandidateAnswerMetricsBySegment]:
+    """Summarize guarded candidate answer proxy cases by a caller-defined segment."""
+
+    return _segment_metrics(cases, segment_fn)
 
 
 def write_guarded_candidate_answer_visualizations(
@@ -319,16 +349,15 @@ def _evaluate_policy(
     max_answer_candidates: int,
     sample_limit: int,
 ) -> GuardedCandidateAnswerPolicyEvaluation:
-    row_index = _build_row_index(rows)
     decisions = candidate_reranker_policy_decisions_from_selections(
         config=config,
         selections=selections,
         rows=rows,
     )
-    single_cases = [
-        _single_candidate_case(decision=decision, row_index=row_index)
-        for decision in decisions
-    ]
+    single_cases = build_single_candidate_answer_cases_from_decisions(
+        decisions=decisions,
+        rows=rows,
+    )
     mode_evaluations = [_mode_evaluation(SINGLE_CANDIDATE_MODE, single_cases, sample_limit)]
 
     if gold_answers_by_question_key is not None:

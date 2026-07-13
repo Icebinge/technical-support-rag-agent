@@ -21,6 +21,23 @@ class CandidateRerankerPolicyConfig:
     blocked_routes: tuple[str, ...]
     min_score_margin_vs_top_candidate: float
     protect_top1_candidate_score_min: float | None
+    min_selected_candidate_score: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.max_selected_rank <= 0:
+            raise ValueError("max_selected_rank must be positive")
+        if self.min_score_margin_vs_top_candidate < 0:
+            raise ValueError("min_score_margin_vs_top_candidate must be non-negative")
+        if (
+            self.protect_top1_candidate_score_min is not None
+            and self.protect_top1_candidate_score_min < 0
+        ):
+            raise ValueError("protect_top1_candidate_score_min must be non-negative")
+        if (
+            self.min_selected_candidate_score is not None
+            and self.min_selected_candidate_score < 0
+        ):
+            raise ValueError("min_selected_candidate_score must be non-negative")
 
 
 @dataclass(frozen=True)
@@ -342,6 +359,7 @@ def _policy_decision(
         config=config,
         selection=selection,
         baseline_row=_row_by_candidate_id(question_rows, selection.baseline_candidate_id),
+        selected_row=_row_by_candidate_id(question_rows, selection.selected_candidate_id),
     )
     replace_candidate = not decision_reasons
     final_candidate_id = (
@@ -408,6 +426,7 @@ def _decision_reasons(
     config: CandidateRerankerPolicyConfig,
     selection: CandidateRerankerSelection,
     baseline_row: Mapping[str, Any],
+    selected_row: Mapping[str, Any],
 ) -> list[str]:
     if selection.selected_candidate_id == selection.baseline_candidate_id:
         return ["model_selected_top_candidate"]
@@ -425,6 +444,12 @@ def _decision_reasons(
         >= config.protect_top1_candidate_score_min
     ):
         reasons.append("top1_candidate_score_protected")
+    if (
+        config.min_selected_candidate_score is not None
+        and _runtime_feature_float(selected_row, "candidate_score")
+        < config.min_selected_candidate_score
+    ):
+        reasons.append("selected_runtime_candidate_score_below_min")
     return reasons
 
 

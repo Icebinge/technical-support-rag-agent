@@ -1,5 +1,11 @@
+from ts_rag_agent.application.candidate_reranker_cv import (
+    cross_validated_candidate_reranker_selections,
+)
 from ts_rag_agent.application.candidate_reranker_policy_search import (
+    CandidateRerankerPolicyConfig,
+    candidate_reranker_policy_decisions_from_selections,
     candidate_reranker_policy_search_to_dict,
+    evaluate_candidate_reranker_policy_from_selections,
     search_candidate_reranker_policies,
 )
 
@@ -51,6 +57,45 @@ def test_candidate_reranker_policy_search_rejects_invalid_grid():
         assert "max_selected_rank_grid must not be empty" in str(exc)
     else:
         raise AssertionError("empty rank grid should fail")
+
+
+def test_candidate_reranker_policy_blocks_low_selected_runtime_candidate_score():
+    rows = [
+        candidate
+        for question_index in range(1, 7)
+        for candidate in _question_rows(question_index)
+    ]
+    selections = cross_validated_candidate_reranker_selections(
+        rows=rows,
+        model_name="logistic_best_candidate",
+        fold_count=3,
+    )
+    config = CandidateRerankerPolicyConfig(
+        name="test_selected_score_gate",
+        max_selected_rank=2,
+        blocked_routes=(),
+        min_score_margin_vs_top_candidate=0.0,
+        protect_top1_candidate_score_min=None,
+        min_selected_candidate_score=19.0,
+    )
+
+    evaluation = evaluate_candidate_reranker_policy_from_selections(
+        config=config,
+        selections=selections,
+        rows=rows,
+    )
+    decisions = candidate_reranker_policy_decisions_from_selections(
+        config=config,
+        selections=selections,
+        rows=rows,
+    )
+
+    assert evaluation.metrics.replacement_count == 0
+    assert evaluation.metrics.policy_average_token_f1 == 0.1
+    assert all(
+        "selected_runtime_candidate_score_below_min" in decision.decision_reasons
+        for decision in decisions
+    )
 
 
 def _question_rows(question_index: int) -> list[dict]:

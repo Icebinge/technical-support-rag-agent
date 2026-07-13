@@ -8965,3 +8965,205 @@ pytest: 94 passed
   4. 重点看 delta、regression count、citation lost/gained、gold citation delta；
   5. 如果候选 gate 稳定，再考虑进入 verified RAG dev split runtime-style 实验；
   6. 继续不改默认 runtime。
+
+## Stage 39 - Candidate-score guarded policy evaluation
+
+真实执行时间：2026-07-13
+
+### 目标
+
+- 把 Stage 38 发现的 `candidate_score_gte_60` 从 post-hoc audit 变成正式离线 policy constraint。
+- 对比以下固定策略：
+  - `stage36_main`
+  - `model_margin_gte_0.10`
+  - `candidate_score_gte_60`
+  - `candidate_score_gte_90`
+- 同时评估：
+  - `single_candidate_answer`
+  - `top3_leading_candidate_rewrite`
+- 继续保持边界：
+  - 不改 runtime 默认策略；
+  - 不使用 held-out test set；
+  - 本阶段仍是 `dev,train` grouped-CV 离线评估，不是最终测试集结论。
+
+### 变更内容
+
+- 扩展 `CandidateRerankerPolicyConfig`：
+  - 新增 `min_selected_candidate_score`；
+  - 新增配置合法性校验；
+  - 当 selected candidate 的 runtime `candidate_score` 低于门槛时，记录 `selected_runtime_candidate_score_below_min`。
+- 从 guarded answer experiment 中抽出可复用的 case builder 和 summarizer，供 Stage 39 复用。
+- 新增 `candidate_score_guarded_policy_evaluation.py`：
+  - 固定策略集合；
+  - grouped-CV selection 复用；
+  - single/top-k 两种 answer proxy；
+  - policy vs main delta；
+  - route 和 selected-rank 分组指标；
+  - SVG 可视化输出。
+- 新增脚本 `scripts/evaluate_candidate_score_guarded_policies.py`。
+- 新增测试：
+  - candidate-score gate 会阻止低 runtime candidate score 的 replacement；
+  - Stage 39 固定策略结果可序列化；
+  - SVG 可视化可写出。
+
+### 实验命令
+
+```powershell
+python scripts\evaluate_candidate_score_guarded_policies.py `
+  --dataset artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --model logistic_best_candidate `
+  --fold-count 5 `
+  --splits dev,train `
+  --max-answer-candidates 3 `
+  --output artifacts\candidate_reranker_stage39_candidate_score_policy_evaluation.json `
+  --visualization-dir artifacts\candidate_reranker_stage39_policy_visuals
+```
+
+### 结果
+
+`single_candidate_answer`：
+
+```text
+stage36_main:
+  F1 0.2699, delta +0.0338, replacements 189, regressions 56, citation lost/gained 11/67, gold citation delta +56
+
+model_margin_gte_0.10:
+  F1 0.2647, delta +0.0286, replacements 148, regressions 42, citation lost/gained 7/56, gold citation delta +49
+
+candidate_score_gte_60:
+  F1 0.2679, delta +0.0318, replacements 141, regressions 40, citation lost/gained 4/60, gold citation delta +56
+
+candidate_score_gte_90:
+  F1 0.2529, delta +0.0168, replacements 64, regressions 15, citation lost/gained 2/23, gold citation delta +21
+```
+
+`top3_leading_candidate_rewrite`：
+
+```text
+stage36_main:
+  F1 0.2665, delta +0.0010, replacements 189, regressions 22, citation lost/gained 4/4, gold citation delta 0
+
+model_margin_gte_0.10:
+  F1 0.2666, delta +0.0012, replacements 148, regressions 16, citation lost/gained 3/3, gold citation delta 0
+
+candidate_score_gte_60:
+  F1 0.2667, delta +0.0012, replacements 141, regressions 9, citation lost/gained 2/4, gold citation delta +2
+
+candidate_score_gte_90:
+  F1 0.2660, delta +0.0005, replacements 64, regressions 2, citation lost/gained 0/0, gold citation delta 0
+```
+
+相对 Stage 36 main policy 的关键差异：
+
+```text
+candidate_score_gte_60 / single:
+  delta diff -0.0020, regressions -16, gold citation delta diff 0
+
+candidate_score_gte_60 / top3:
+  delta diff +0.0002, regressions -13, gold citation delta diff +2
+
+candidate_score_gte_90 / top3:
+  delta diff -0.0005, regressions -20, gold citation delta diff 0
+```
+
+### 可视化结果
+
+本阶段新增 4 个 SVG：
+
+```text
+artifacts/candidate_reranker_stage39_policy_visuals/stage39_single_candidate_policy_delta.svg
+artifacts/candidate_reranker_stage39_policy_visuals/stage39_top3_policy_delta.svg
+artifacts/candidate_reranker_stage39_policy_visuals/stage39_top3_policy_regressions.svg
+artifacts/candidate_reranker_stage39_policy_visuals/stage39_top3_policy_citation_exchange.svg
+```
+
+完整 JSON artifact：
+
+```text
+artifacts/candidate_reranker_stage39_candidate_score_policy_evaluation.json
+```
+
+说明：以上 artifact 均在本地 `artifacts/` 下，按 `.gitignore` 规则不纳入 git。
+
+### 问题与原因
+
+- 问题 1：Stage 38 的 `candidate_score_gte_60` 只是 post-hoc audit。
+  - 原因：Stage 38 是 changed-case 分析，不是统一 policy evaluation。
+  - 处理：Stage 39 把它放回 `CandidateRerankerPolicyConfig`，作为正式离线策略约束重跑。
+- 问题 2：单看 top3 proxy 容易过度乐观。
+  - 原因：top3 rewrite 中候选替换经常只改变 leading sentence，不一定改变答案整体 token F1。
+  - 处理：同时报告 single-candidate proxy；`candidate_score_gte_60` 在 top3 更好，但 single delta 比 main 低 `0.0020`。
+- 问题 3：`candidate_score_gte_90` 看起来 regression 最低，但收益也被压低。
+  - 原因：门槛太高会过度阻止 replacement。
+  - 处理：不把最低 regression 当成唯一目标，同时观察 delta 和 citation。
+- 问题 4：可视化函数最初写死 `top3` 显示名。
+  - 原因：Stage 39 当前固定跑 top3，但模块参数支持不同 top-k。
+  - 处理：改为从 mode name 动态生成显示名，避免以后 `top1/top5` 实验时标题不真实。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\candidate_score_guarded_policy_evaluation.py `
+  scripts\evaluate_candidate_score_guarded_policies.py `
+  tests\test_candidate_score_guarded_policy_evaluation.py
+
+pytest -q tests\test_candidate_score_guarded_policy_evaluation.py `
+  tests\test_candidate_reranker_policy_search.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 5 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 97 passed
+```
+
+### 结论
+
+- `candidate_score_gte_60` 是当前最均衡的候选策略：
+  - top3 proxy delta 从 `+0.0010` 提到 `+0.0012`；
+  - top3 regression 从 `22` 降到 `9`；
+  - top3 gold citation delta 从 `0` 提到 `+2`；
+  - single-candidate gold citation delta 仍保持 `+56`；
+  - 但 single-candidate delta 比 main 少 `0.0020`。
+- `candidate_score_gte_90` 不适合作为下一步主候选：
+  - top3 regression 最低，为 `2`；
+  - 但 top3 delta 降到 `+0.0005`；
+  - single delta 也降到 `+0.0168`，说明过度保守。
+- 这仍不是测试集结论，也不是 runtime 结论。
+- 不能把 `candidate_score_gte_60` 直接设为默认策略；它只能进入下一阶段更严格的 split-respecting 验证。
+
+### 我学到的
+
+- 一个 gate 是否好，不能只看 regression count；过度保守会把有效 replacement 一起挡掉。
+- `candidate_score_gte_60` 的价值在于同时减少 regression、保持 citation 收益，并且不牺牲 single gold citation delta。
+- top3 proxy 是更接近答案组合行为的指标，但 single-candidate proxy 能提醒我们不要忽略候选本身质量的损失。
+- 每次把 post-hoc 发现升级为 policy，都必须重跑固定策略评估，而不是沿用 audit 结果。
+- “还没用测试集”必须明确记录；否则后面容易把 dev/train CV 结果误读成最终泛化结果。
+
+### 下一步
+
+- 做 Stage 40：split-respecting train-to-dev candidate-score policy validation。
+- 目标：
+  1. 只在 train split 上训练/选择候选策略；
+  2. 在 dev split 上评估固定策略；
+  3. 对比 `stage36_main` 和 `candidate_score_gte_60`；
+  4. 继续同时报告 single-candidate proxy 和 top3 proxy；
+  5. 明确保持 held-out test set 不使用；
+  6. 只有 train-to-dev 边界验证也稳定后，才讨论是否进入最终 test set 一次性评估或 runtime dev-style end-to-end。
