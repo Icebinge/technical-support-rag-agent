@@ -204,24 +204,13 @@ def search_runtime_document_risk_proxies(
         score60_metrics=score60_metrics,
     )
 
-    row_index = _build_row_index(evaluation_rows)
-    main_cases_by_key = _cases_by_key(main_cases)
-    score60_cases_by_key = _cases_by_key(score60_cases)
-    guard_evaluations = [
-        _evaluate_guard(
-            spec=spec,
-            main_decisions=main_decisions,
-            main_cases=main_cases,
-            main_cases_by_key=main_cases_by_key,
-            score60_cases_by_key=score60_cases_by_key,
-            rows=evaluation_rows,
-            row_index=row_index,
-            gold_answers_by_question_key=gold_answers_by_question_key,
-            max_answer_candidates=max_answer_candidates,
-            probe_question_ids=probe_question_ids,
-        )
-        for spec in _default_guard_specs()
-    ]
+    guard_evaluations = evaluate_runtime_document_risk_guards_from_main_decisions(
+        main_decisions=main_decisions,
+        rows=evaluation_rows,
+        gold_answers_by_question_key=gold_answers_by_question_key,
+        max_answer_candidates=max_answer_candidates,
+        probe_question_ids=probe_question_ids,
+    )
     main_evaluation = _evaluation_by_label(guard_evaluations, STAGE39_MAIN_POLICY_LABEL)
     score60_evaluation = _evaluation_by_label(guard_evaluations, CANDIDATE_SCORE_GTE_60_LABEL)
     deltas_vs_main = [
@@ -256,6 +245,73 @@ def runtime_document_risk_proxy_search_to_dict(
     """Convert a Stage 43 proxy-search result to a JSON-safe dictionary."""
 
     return asdict(result)
+
+
+def default_runtime_document_risk_guard_specs() -> tuple[
+    RuntimeDocumentRiskGuardSpec,
+    ...,
+]:
+    """Return the fixed runtime-only document-risk proxy guard family."""
+
+    return _default_guard_specs()
+
+
+def evaluate_runtime_document_risk_guards_from_main_decisions(
+    main_decisions: Sequence[CandidateRerankerPolicyDecision],
+    rows: Sequence[Mapping[str, Any]],
+    gold_answers_by_question_key: Mapping[str, str],
+    max_answer_candidates: int,
+    guard_specs: Sequence[RuntimeDocumentRiskGuardSpec] | None = None,
+    probe_question_ids: Sequence[str] = (),
+) -> list[RuntimeDocumentRiskGuardEvaluation]:
+    """Evaluate runtime-only proxy guards from precomputed main-policy decisions."""
+
+    specs = tuple(_default_guard_specs() if guard_specs is None else guard_specs)
+    if not specs:
+        raise ValueError("guard_specs must not be empty")
+    if not any(spec.label == CANDIDATE_SCORE_GTE_60_LABEL for spec in specs):
+        raise ValueError("guard_specs must include candidate_score_gte_60")
+
+    main_cases = build_topk_leading_candidate_answer_cases_from_decisions(
+        decisions=main_decisions,
+        rows=rows,
+        gold_answers_by_question_key=gold_answers_by_question_key,
+        max_answer_candidates=max_answer_candidates,
+    )
+    row_index = _build_row_index(rows)
+    main_cases_by_key = _cases_by_key(main_cases)
+    score60_spec = _guard_spec_by_label(specs, CANDIDATE_SCORE_GTE_60_LABEL)
+    score60_decisions = [
+        _guarded_decision(
+            spec=score60_spec,
+            decision=decision,
+            row_index=row_index,
+        )
+        for decision in main_decisions
+    ]
+    score60_cases = build_topk_leading_candidate_answer_cases_from_decisions(
+        decisions=score60_decisions,
+        rows=rows,
+        gold_answers_by_question_key=gold_answers_by_question_key,
+        max_answer_candidates=max_answer_candidates,
+    )
+    score60_cases_by_key = _cases_by_key(score60_cases)
+
+    return [
+        _evaluate_guard(
+            spec=spec,
+            main_decisions=main_decisions,
+            main_cases=main_cases,
+            main_cases_by_key=main_cases_by_key,
+            score60_cases_by_key=score60_cases_by_key,
+            rows=rows,
+            row_index=row_index,
+            gold_answers_by_question_key=gold_answers_by_question_key,
+            max_answer_candidates=max_answer_candidates,
+            probe_question_ids=probe_question_ids,
+        )
+        for spec in specs
+    ]
 
 
 def write_runtime_document_risk_proxy_visualizations(
@@ -791,6 +847,16 @@ def _evaluation_by_label(
         if evaluation.label == label:
             return evaluation
     raise ValueError(f"Missing guard evaluation: {label}")
+
+
+def _guard_spec_by_label(
+    specs: Sequence[RuntimeDocumentRiskGuardSpec],
+    label: str,
+) -> RuntimeDocumentRiskGuardSpec:
+    for spec in specs:
+        if spec.label == label:
+            return spec
+    raise ValueError(f"Missing guard spec: {label}")
 
 
 def _rows_for_split(
