@@ -9427,3 +9427,300 @@ pytest: 102 passed
   4. 输出 JSON 与 SVG 可视化；
   5. 判断 holdout 收益是否集中在少数偶然 case，还是有稳定模式；
   6. 继续不使用 held-out test set，不改 runtime 默认策略。
+
+## Stage 41 - Dev holdout changed-case audit for candidate_score_gte_60
+
+真实执行时间：2026-07-13
+
+### 目标
+
+- 只审计 Stage 40 train-to-dev holdout 的 dev 结果。
+- 对比：
+  - `stage36_main`
+  - `candidate_score_gte_60`
+- changed case 定义：
+  - 在同一批 train-to-dev holdout selections 上，两种 policy 生成的 top-k candidate list 不同。
+- 重点回答：
+  1. `candidate_score_gte_60` 为什么能把 top3 regression 从 `8` 降到 `1`；
+  2. 它相对 main 变差的 case 是哪些；
+  3. 剩下的 1 个 top3 regression 是什么；
+  4. 是否可以进入 runtime 实验前的更细 gate 设计。
+- 边界：
+  - 不使用 held-out test set；
+  - 不改 runtime 默认策略；
+  - 不把 dev holdout changed-case 审计当成最终测试结论。
+
+### 变更内容
+
+- 新增 `candidate_score_holdout_changed_case_audit.py`：
+  - 重建 train-to-dev holdout selections；
+  - 重算 `stage36_main` 与 `candidate_score_gte_60` 的 top-k cases；
+  - 校验重算指标与 Stage 40 JSON report 一致；
+  - 输出 policy 间 changed cases；
+  - 输出 `candidate_score_gte_60` 的 residual regression cases；
+  - 拆分 route、rank、blocked candidate score bucket、document transition。
+- 新增脚本 `scripts/analyze_candidate_score_holdout_changed_cases.py`：
+  - 输入 Stage 31 candidate dataset；
+  - 输入 Stage 40 split-validation JSON；
+  - 输出 Stage 41 JSON 与 SVG。
+- 新增测试：
+  - 能找到 changed cases；
+  - 能找到 residual regression cases；
+  - 能写出 SVG；
+  - Stage 40 report 与重算结果不一致时会报错。
+
+### 实验命令
+
+```powershell
+python scripts\analyze_candidate_score_holdout_changed_cases.py `
+  --dataset artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --stage40-report artifacts\candidate_reranker_stage40_candidate_score_split_validation.json `
+  --model logistic_best_candidate `
+  --train-split train `
+  --evaluation-split dev `
+  --max-answer-candidates 3 `
+  --sample-limit 50 `
+  --output artifacts\candidate_reranker_stage41_candidate_score_holdout_changed_cases.json `
+  --visualization-dir artifacts\candidate_reranker_stage41_holdout_changed_case_visuals
+```
+
+### 总体结果
+
+```text
+question count: 160
+changed cases vs stage36_main: 13
+changed case rate: 0.0813
+
+stage36_main top3:
+  delta -0.0014
+  regressions 8
+  citation lost 2
+  gold citation delta -1
+
+candidate_score_gte_60 top3:
+  delta +0.0008
+  regressions 1
+  citation lost 0
+  gold citation delta 0
+
+candidate_score_gte_60 average delta vs main:
+  +0.0022
+```
+
+Changed cases 中，`candidate_score_gte_60` 相对 main：
+
+```text
+better: 7
+tied:   3
+worse:  3
+```
+
+### 分组结果
+
+Route：
+
+```text
+other:
+  cases 7, avg delta vs main +0.0273, better 3, worse 2
+
+install_upgrade_config:
+  cases 3, avg delta vs main +0.0231, better 2, worse 1
+
+error_or_log:
+  cases 2, avg delta vs main +0.0018, better 1, worse 0
+
+security_bulletin_affected_product:
+  cases 1, avg delta vs main +0.0941, better 1, worse 0
+```
+
+Blocked candidate score bucket：
+
+```text
+score_lt_60:
+  cases 13, avg delta vs main +0.0275, better 7, worse 3
+```
+
+Rank bucket：
+
+```text
+rank_4:
+  cases 6, avg delta vs main +0.0434, better 4, worse 2
+
+rank_5:
+  cases 4, avg delta vs main +0.0244, better 3, worse 1
+
+rank_3:
+  cases 3, avg delta vs main +0.0000, better 0, worse 0
+```
+
+Document transition：
+
+```text
+new_non_gold_leading_document:
+  cases 4, avg delta vs main +0.0120, better 3, worse 1
+
+new_gold_leading_document:
+  cases 3, avg delta vs main +0.0994, better 3, worse 0
+
+same_leading_document:
+  cases 3, avg delta vs main +0.0292, better 1, worse 1
+
+gold_to_non_gold_leading_document:
+  cases 3, avg delta vs main -0.0253, better 0, worse 1
+```
+
+### 关键 case
+
+`candidate_score_gte_60` 相对 main 变差的 3 个 changed cases：
+
+```text
+DEV_Q119:
+  route: other
+  candidate delta vs main: -0.0758
+  main delta vs baseline: +0.0758
+  candidate_score_gte_60 delta vs baseline: +0.0000
+  blocked candidate rank: 4
+  blocked candidate score: 13.0000
+  transition: gold_to_non_gold_leading_document
+  main_gold_cited: True
+  candidate_gold_cited: False
+
+DEV_Q282:
+  route: other
+  candidate delta vs main: -0.0065
+  main delta vs baseline: +0.0065
+  candidate_score_gte_60 delta vs baseline: +0.0000
+  blocked candidate rank: 4
+  blocked candidate score: 25.8044
+  transition: same_leading_document
+  main_gold_cited: False
+  candidate_gold_cited: True
+
+DEV_Q201:
+  route: install_upgrade_config
+  candidate delta vs main: -0.0028
+  main delta vs baseline: +0.0028
+  candidate_score_gte_60 delta vs baseline: +0.0000
+  blocked candidate rank: 5
+  blocked candidate score: 56.8104
+  transition: new_non_gold_leading_document
+  main_gold_cited: False
+  candidate_gold_cited: False
+```
+
+`candidate_score_gte_60` 剩下的 1 个 residual top3 regression：
+
+```text
+DEV_Q261:
+  route: other
+  delta vs baseline: -0.0573
+  leading rank: 4
+  leading candidate score: 63.6936
+  score bucket: score_60_90
+  document transition: new_non_gold_leading_document
+  citation delta: 0
+```
+
+### 可视化结果
+
+本阶段新增 5 个 SVG：
+
+```text
+artifacts/candidate_reranker_stage41_holdout_changed_case_visuals/stage41_candidate_vs_main_outcomes.svg
+artifacts/candidate_reranker_stage41_holdout_changed_case_visuals/stage41_changed_cases_by_route.svg
+artifacts/candidate_reranker_stage41_holdout_changed_case_visuals/stage41_changed_cases_by_blocked_score.svg
+artifacts/candidate_reranker_stage41_holdout_changed_case_visuals/stage41_changed_cases_by_document_transition.svg
+artifacts/candidate_reranker_stage41_holdout_changed_case_visuals/stage41_residual_regression_routes.svg
+```
+
+完整 JSON artifact：
+
+```text
+artifacts/candidate_reranker_stage41_candidate_score_holdout_changed_cases.json
+```
+
+说明：以上 artifact 均在本地 `artifacts/` 下，按 `.gitignore` 规则不纳入 git。
+
+### 问题与原因
+
+- 问题 1：只看 Stage 40 aggregate 会误以为 `candidate_score_gte_60` 没有明显副作用。
+  - 原因：它确实把 regression 和 citation loss 压下来了；
+  - 但 changed-case 审计显示仍有 3 个 case 比 main 差，其中 `DEV_Q119` 还涉及 main gold citation 被挡掉。
+- 问题 2：`score_lt_60` 不是绝对坏信号。
+  - 13 个 blocked cases 中有 7 个变好、3 个持平、3 个变差；
+  - 说明低 score 是风险信号，不是充分拒绝条件。
+- 问题 3：残留 regression 已经不属于 score < 60。
+  - `DEV_Q261` 的 candidate score 是 `63.6936`；
+  - 说明简单把门槛从 60 提到更高可能会挡住更多风险，但也会继续牺牲有效 replacement。
+- 问题 4：document transition 方向很关键。
+  - `new_gold_leading_document` 全部为正；
+  - `gold_to_non_gold_leading_document` 平均为负；
+  - 这提示下一步应该引入 document/citation-aware gate，而不是单独调 candidate_score 阈值。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\candidate_score_holdout_changed_case_audit.py `
+  scripts\analyze_candidate_score_holdout_changed_cases.py `
+  tests\test_candidate_score_holdout_changed_case_audit.py
+
+pytest -q tests\test_candidate_score_holdout_changed_case_audit.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 105 passed
+```
+
+### 结论
+
+- `candidate_score_gte_60` 的 holdout 收益不是单个偶然 case：
+  - 13 个 changed cases 中 7 个更好；
+  - regression 从 `8` 降到 `1`；
+  - citation loss 从 `2` 降到 `0`。
+- 但它不是可直接 runtime 化的最终策略：
+  - 3 个 changed cases 比 main 差；
+  - `DEV_Q119` 显示低 score 候选仍可能是 gold-leading improvement；
+  - residual regression `DEV_Q261` 显示 score >= 60 仍可能选错。
+- 下一步不应该继续单调提高 candidate_score 阈值。
+- 更合理的方向是做一个 citation/document-aware guard：
+  - 保留 `candidate_score_gte_60` 的风险控制；
+  - 对 `new_gold_leading_document` 低 score 候选更谨慎地放行；
+  - 对 `gold_to_non_gold_leading_document` 和 `new_non_gold_leading_document` 加强阻断。
+
+### 我学到的
+
+- changed-case audit 能把 aggregate 的“看起来很好”拆成可解释的收益和副作用。
+- 低 candidate score 是强风险信号，但不是绝对坏信号；它需要和 document transition、gold citation proxy 一起看。
+- runtime gate 不能只做单阈值调参，否则会在 `DEV_Q119` 这类 case 上误杀。
+- residual regression 的定位比总体 regression count 更重要；`DEV_Q261` 已经说明下一步风险不是 `score_lt_60`，而是 rank 4 + score 60-90 + new non-gold leading document。
+- 继续保留测试集不使用是必要的，否则会把探索性阈值设计污染成测试集调参。
+
+### 下一步
+
+- 做 Stage 42：citation/document-aware holdout guard design。
+- 目标：
+  1. 基于 Stage 41 changed-case evidence 设计候选 guard，不接 runtime；
+  2. 比较 `candidate_score_gte_60` 与 document-transition-aware variants；
+  3. 特别保护 `new_gold_leading_document` 的有效低分替换；
+  4. 阻断 `gold_to_non_gold_leading_document` 和高风险 `new_non_gold_leading_document`；
+  5. 单独观察 `DEV_Q119`、`DEV_Q201`、`DEV_Q261` 是否被正确处理；
+  6. 继续只在 train/dev 范围内做离线设计，不使用 held-out test set，不改 runtime 默认策略。
