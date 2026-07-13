@@ -4248,3 +4248,277 @@ newly_refused delta: 0
 - 如果仍然是 install/config 路线导致 citation 损失，再评估是否需要一个更严格的
   route-specific top1 gate。
 - 在确认之前，继续保持默认 `--composition-policy top-k`。
+
+## Stage 23 - Strict Install Route Gate For Route-Aware Composition
+
+### 目标
+
+- 精确定位 Stage 22 route-aware runtime 少掉的那个 gold citation。
+- 判断 citation loss 是否仍然来自 Stage 21 已知风险样本 `DEV_Q202`。
+- 如果风险集中在 `install_upgrade_config`，设计一个不使用 gold label 的更严格
+  route-specific top1 gate。
+- 继续保持默认 runtime 为 `top-k`，只优化显式 `route-aware` 参数。
+
+### 我先确认了什么
+
+- 仓库起始状态：
+
+```text
+git: main...origin/main clean
+```
+
+- Stage 22 默认 report 只保存部分 sample，不足以逐题定位 citation regression。
+- 因此本阶段先重跑 full-sample report，而不是直接引用旧 report 的聚合数。
+
+### 全量重跑命令
+
+Top-k baseline：
+
+```powershell
+python scripts\evaluate_verified_rag.py `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --min-evidence-score 15 `
+  --composition-policy top-k `
+  --sample-limit 1000 `
+  --output artifacts\verified_rag_dev_hybrid_routing_m15_stage23_topk_full_report.json
+```
+
+Stage 22 route-aware：
+
+```powershell
+python scripts\evaluate_verified_rag.py `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --min-evidence-score 15 `
+  --composition-policy route-aware `
+  --sample-limit 1000 `
+  --output artifacts\verified_rag_dev_hybrid_routing_m15_stage23_route_aware_full_report.json
+```
+
+重跑结果复现了 Stage 22：
+
+```text
+top-k verified average_token_f1: 0.2755
+top-k verified gold citation count: 95 / 158 generated answerable
+
+route-aware verified average_token_f1: 0.2795
+route-aware verified gold citation count: 94 / 158 generated answerable
+```
+
+### Citation Regression 定位结果
+
+逐题比对后，citation loss 只来自一个问题，且 original 和 verified 都一样：
+
+```text
+question_id: DEV_Q202
+route: install_upgrade_config
+question: Why is installation manager cores when try to install netcool using GUI mode in AIX 7.1?
+gold_doc: swg21631478
+
+top-k docs: swg21661861, swg21631478, swg27043142
+route-aware docs: swg21661861
+
+top-k F1: 0.3091
+route-aware F1: 0.1429
+```
+
+这和 Stage 21 的已知风险样本一致。
+
+### 反事实分析
+
+本阶段比较了几个只使用 runtime 可见特征的候选策略：
+
+```text
+current route-aware:
+  verified average_token_f1: 0.2795
+  verified gold citation count: 94
+
+how_to_only:
+  verified average_token_f1: 0.2785
+  verified gold citation count: 95
+
+install stricter margin gate:
+  verified average_token_f1: 0.2815
+  verified gold citation count: 95
+```
+
+关键观察：
+
+- `how_to_or_lookup` 的 top1 保留了最大的 F1 收益。
+- `install_upgrade_config` 不能继续只用原来的 ratio/margin OR 条件。
+- 坏例子 `DEV_Q202` 的 first-vs-second margin 只有约 `20.7`。
+- 另一个明显 F1 回退样本 `DEV_Q016` 的 margin 约 `35.8`。
+- dev 上带来正收益的 install 样本 margin 都在约 `47.4` 以上。
+
+因此采用：
+
+```text
+install_upgrade_score_margin_min: 45.0
+```
+
+事实边界：
+
+- `45.0` 是基于当前 dev split 和当前 selector score scale 的实验门槛。
+- 它不是外部业务规则，也不能直接迁移到不同 selector 或不同 score scale。
+- 它不使用 gold answer 或 gold document id；只看候选句分数、rank、route 和答案信号。
+
+### 本阶段代码改动
+
+- 更新 `RouteAwareCompositionPolicy`：
+  - policy name 改为
+    `route_aware_top1_direct_strict_install_otherwise_top3`；
+  - `how_to_or_lookup` 仍使用原始强 top1 gate；
+  - `install_upgrade_config` 改用更严格的
+    `install_upgrade_score_margin_min=45.0`；
+  - citation-sensitive routes 仍保持 top3。
+- 更新 `scripts/analyze_route_aware_composition.py`：
+  - 新增 `--install-upgrade-score-margin-min`；
+  - JSON report 记录该参数。
+- 更新 `create_answer_composition_policy`：
+  - `route-aware` 仍指向当前 route-aware policy；
+  - 保留旧 policy name alias，避免旧命令名无法创建策略。
+- 更新测试：
+  - 增加 install/config stricter margin gate 测试。
+
+### 离线验证
+
+命令：
+
+```powershell
+python scripts\analyze_route_aware_composition.py `
+  --answer-gap-report artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage18_cve_anchor.json `
+  --output artifacts\route_aware_composition_policy_stage23_strict_install_hybrid_stage18.json
+```
+
+结果：
+
+```text
+baseline F1: 0.2808
+policy F1: 0.2869
+F1 delta: +0.0061
+
+baseline gold citation: 95 / 160
+policy gold citation: 95 / 160
+citation delta: 0
+
+changed_answer_count: 6
+f1_improved_count: 5
+f1_regressed_count: 1
+citation_lost_count: 0
+```
+
+Route-level result：
+
+```text
+how_to_or_lookup:
+  F1 delta: +0.0346
+  citation delta: 0
+  top1_direct_strong_signal: 2
+
+install_upgrade_config:
+  F1 delta: +0.0202
+  citation delta: 0
+  top1_direct_strong_signal: 4
+```
+
+### End-To-End Verified RAG 验证
+
+命令：
+
+```powershell
+python scripts\evaluate_verified_rag.py `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --min-evidence-score 15 `
+  --composition-policy route-aware `
+  --sample-limit 1000 `
+  --output artifacts\verified_rag_dev_hybrid_routing_m15_stage23_strict_install_report.json
+```
+
+结果：
+
+```text
+composition_policy: route_aware_top1_direct_strict_install_otherwise_top3
+
+original average_token_f1: 0.2789
+original gold_doc_citation_rate: 0.5938
+original gold citation count: 95 / 160
+
+verified average_token_f1: 0.2815
+verified gold_doc_citation_rate: 0.6013
+verified gold citation count: 95 / 158 generated answerable
+
+answerable_refusal_rate: 0.0125
+unanswerable_refusal_rate: 0.0267
+newly_refused: 6
+```
+
+Against top-k baseline：
+
+```text
+verified average_token_f1 delta: +0.0060
+verified gold citation count delta: 0
+answerable_refusal_rate delta: 0
+unanswerable_refusal_rate delta: 0
+newly_refused delta: 0
+```
+
+逐题检查：
+
+```text
+citation losses: 0
+citation gains: 0
+changed verified answers: 16 total
+changed answerable answers: 6
+```
+
+Answerable changed cases：
+
+```text
+DEV_Q008 how_to_or_lookup          F1 delta +0.5518
+DEV_Q022 install_upgrade_config   F1 delta +0.0326
+DEV_Q204 install_upgrade_config   F1 delta +0.0553
+DEV_Q257 install_upgrade_config   F1 delta +0.0764
+DEV_Q296 install_upgrade_config   F1 delta +0.3203
+DEV_Q302 how_to_or_lookup          F1 delta -0.0793
+```
+
+### 测试
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 55 passed
+```
+
+### 结论
+
+- `DEV_Q202` 的 citation loss 被 strict install gate 修复。
+- 新 route-aware policy 在 dev verified RAG 上同时满足：
+  - F1 提升；
+  - gold citation 不下降；
+  - verifier refusal 行为不变。
+- 默认 runtime 仍然不改，继续是 `top-k`。
+- `route-aware` 现在是更强的实验参数，但是否提升为默认策略需要下一阶段跨 split 或更多数据复验。
+
+### 我学到的
+
+- route-aware 不是简单地按 route 开关 top1；同一个 direct-answer route 内部也有不同风险。
+- `install_upgrade_config` 的问题更容易出现“第一句看起来强，但第二/第三句保留 gold citation”的情况。
+- 离线 answer-gap、full-sample report 和 verified RAG 三层都要对齐，否则容易把局部收益误判成可默认化策略。
+- 引入 route-specific threshold 时必须记录 score scale 和数据边界；否则后面换 selector 会误用旧门槛。
+
+### 下一步
+
+- 做 Stage 24：对 strict route-aware policy 做更强的稳健性验证。
+- 优先选项：
+  1. 在 train split 上跑同参数 verified RAG；
+  2. 或者先做 dev 的 route-level quality report，分析 unanswerable changed cases 是否有隐性风险。
+- 在 Stage 24 完成前，不把 `route-aware` 设为默认 runtime 策略。

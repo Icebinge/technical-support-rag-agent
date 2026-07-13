@@ -40,6 +40,16 @@ def main(
             help="Minimum first-minus-second score margin for top1 routing.",
         ),
     ] = 20.0,
+    install_upgrade_score_margin_min: Annotated[
+        float,
+        typer.Option(
+            "--install-upgrade-score-margin-min",
+            help=(
+                "Minimum first-minus-second score margin for install/upgrade/config "
+                "top1 routing."
+            ),
+        ),
+    ] = 45.0,
     max_top1_retrieval_rank: Annotated[
         int,
         typer.Option("--max-top1-retrieval-rank", help="Worst retrieval rank allowed for top1."),
@@ -72,6 +82,7 @@ def main(
         strong_first_score_min=strong_first_score_min,
         strong_first_score_ratio_min=strong_first_score_ratio_min,
         strong_first_score_margin_min=strong_first_score_margin_min,
+        install_upgrade_score_margin_min=install_upgrade_score_margin_min,
         max_top1_retrieval_rank=max_top1_retrieval_rank,
         duplicate_threshold=duplicate_threshold,
         min_average_f1_gain=min_average_f1_gain,
@@ -89,6 +100,7 @@ def main(
         strong_first_score_min=strong_first_score_min,
         strong_first_score_ratio_min=strong_first_score_ratio_min,
         strong_first_score_margin_min=strong_first_score_margin_min,
+        install_upgrade_score_margin_min=install_upgrade_score_margin_min,
         max_top1_retrieval_rank=max_top1_retrieval_rank,
         duplicate_threshold=duplicate_threshold,
     )
@@ -104,6 +116,7 @@ def main(
         "strong_first_score_min": strong_first_score_min,
         "strong_first_score_ratio_min": strong_first_score_ratio_min,
         "strong_first_score_margin_min": strong_first_score_margin_min,
+        "install_upgrade_score_margin_min": install_upgrade_score_margin_min,
         "max_top1_retrieval_rank": max_top1_retrieval_rank,
         "duplicate_threshold": duplicate_threshold,
         "min_average_f1_gain": min_average_f1_gain,
@@ -127,6 +140,7 @@ def _validate_options(
     strong_first_score_min: float,
     strong_first_score_ratio_min: float,
     strong_first_score_margin_min: float,
+    install_upgrade_score_margin_min: float,
     max_top1_retrieval_rank: int,
     duplicate_threshold: float,
     min_average_f1_gain: float,
@@ -141,6 +155,8 @@ def _validate_options(
         raise typer.BadParameter("--strong-first-score-ratio-min must be at least 1.")
     if strong_first_score_margin_min < 0:
         raise typer.BadParameter("--strong-first-score-margin-min must be non-negative.")
+    if install_upgrade_score_margin_min < 0:
+        raise typer.BadParameter("--install-upgrade-score-margin-min must be non-negative.")
     if max_top1_retrieval_rank <= 0:
         raise typer.BadParameter("--max-top1-retrieval-rank must be positive.")
     if not 0 <= duplicate_threshold <= 1:

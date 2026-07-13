@@ -118,7 +118,11 @@ def create_answer_composition_policy(policy_name: str) -> AnswerCompositionPolic
     normalized_name = policy_name.strip().lower().replace("-", "_")
     if normalized_name in {"top_k", "top3", "default"}:
         return TopKAnswerCompositionPolicy()
-    if normalized_name in {"route_aware", RouteAwareCompositionPolicy.name}:
+    if normalized_name in {
+        "route_aware",
+        "route_aware_top1_direct_otherwise_top3",
+        RouteAwareCompositionPolicy.name,
+    }:
         return RouteAwareAnswerCompositionPolicy()
 
     raise ValueError(

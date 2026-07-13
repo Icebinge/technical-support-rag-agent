@@ -114,13 +114,14 @@ class RouteAwareCompositionResult:
 class RouteAwareCompositionPolicy:
     """Conservative route-aware policy for choosing answer evidence sentences."""
 
-    name = "route_aware_top1_direct_otherwise_top3"
+    name = "route_aware_top1_direct_strict_install_otherwise_top3"
 
     def __init__(
         self,
         strong_first_score_min: float = 100.0,
         strong_first_score_ratio_min: float = 1.15,
         strong_first_score_margin_min: float = 20.0,
+        install_upgrade_score_margin_min: float = 45.0,
         max_top1_retrieval_rank: int = 3,
         duplicate_threshold: float = 0.96,
     ) -> None:
@@ -130,6 +131,8 @@ class RouteAwareCompositionPolicy:
             raise ValueError("strong_first_score_ratio_min must be at least 1")
         if strong_first_score_margin_min < 0:
             raise ValueError("strong_first_score_margin_min must be non-negative")
+        if install_upgrade_score_margin_min < 0:
+            raise ValueError("install_upgrade_score_margin_min must be non-negative")
         if max_top1_retrieval_rank <= 0:
             raise ValueError("max_top1_retrieval_rank must be positive")
         if not 0 <= duplicate_threshold <= 1:
@@ -138,6 +141,7 @@ class RouteAwareCompositionPolicy:
         self.strong_first_score_min = strong_first_score_min
         self.strong_first_score_ratio_min = strong_first_score_ratio_min
         self.strong_first_score_margin_min = strong_first_score_margin_min
+        self.install_upgrade_score_margin_min = install_upgrade_score_margin_min
         self.max_top1_retrieval_rank = max_top1_retrieval_rank
         self.duplicate_threshold = duplicate_threshold
 
@@ -159,10 +163,7 @@ class RouteAwareCompositionPolicy:
                 f"{question_route} keeps top3 to protect citation coverage",
             )
 
-        if (
-            question_route in DIRECT_ANSWER_ROUTES
-            and self._has_strong_first_candidate(baseline_candidates)
-        ):
+        if self._allows_top1_direct_answer(question_route, baseline_candidates):
             return (
                 baseline_candidates[:1],
                 "top1_direct_strong_signal",
@@ -182,9 +183,32 @@ class RouteAwareCompositionPolicy:
 
         return baseline_candidates, "keep_top3_default", "default keeps top3"
 
+    def _allows_top1_direct_answer(
+        self,
+        question_route: str,
+        candidates: list[CompositionPolicyCandidate],
+    ) -> bool:
+        if question_route not in DIRECT_ANSWER_ROUTES:
+            return False
+
+        if question_route == "install_upgrade_config":
+            return self._has_strong_first_candidate(
+                candidates,
+                score_ratio_min=None,
+                score_margin_min=self.install_upgrade_score_margin_min,
+            )
+
+        return self._has_strong_first_candidate(
+            candidates,
+            score_ratio_min=self.strong_first_score_ratio_min,
+            score_margin_min=self.strong_first_score_margin_min,
+        )
+
     def _has_strong_first_candidate(
         self,
         candidates: list[CompositionPolicyCandidate],
+        score_ratio_min: float | None,
+        score_margin_min: float,
     ) -> bool:
         first = candidates[0]
         if first.candidate_score < self.strong_first_score_min:
@@ -201,10 +225,8 @@ class RouteAwareCompositionPolicy:
             return True
         score_ratio = first.candidate_score / second_score
         score_margin = first.candidate_score - second_score
-        return (
-            score_ratio >= self.strong_first_score_ratio_min
-            or score_margin >= self.strong_first_score_margin_min
-        )
+        ratio_passed = score_ratio_min is not None and score_ratio >= score_ratio_min
+        return ratio_passed or score_margin >= score_margin_min
 
 
 def analyze_route_aware_composition_policy(
