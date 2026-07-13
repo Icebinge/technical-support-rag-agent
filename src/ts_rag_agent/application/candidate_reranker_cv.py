@@ -44,11 +44,15 @@ class CandidateRerankerSelection:
     baseline_candidate_id: str
     baseline_candidate_rank: int
     baseline_candidate_token_f1: float
+    baseline_model_score: float
     selected_candidate_id: str
     selected_candidate_rank: int
     selected_candidate_token_f1: float
     selected_candidate_score: float
+    score_margin_vs_top_candidate: float
+    baseline_is_gold_document: bool
     selected_is_gold_document: bool
+    baseline_is_oracle_best_f1: bool
     selected_is_oracle_best_f1: bool
     oracle_candidate_id: str
     oracle_candidate_rank: int
@@ -521,6 +525,10 @@ def _select_validation_candidates(
                 baseline_candidate_id=baseline.candidate_id,
                 baseline_candidate_rank=baseline.candidate_rank,
                 baseline_candidate_token_f1=baseline.candidate_token_f1,
+                baseline_model_score=round(
+                    scores_by_candidate_id[baseline.candidate_id],
+                    6,
+                ),
                 selected_candidate_id=selected.candidate_id,
                 selected_candidate_rank=selected.candidate_rank,
                 selected_candidate_token_f1=selected.candidate_token_f1,
@@ -528,7 +536,16 @@ def _select_validation_candidates(
                     scores_by_candidate_id[selected.candidate_id],
                     6,
                 ),
+                score_margin_vs_top_candidate=round(
+                    scores_by_candidate_id[selected.candidate_id]
+                    - scores_by_candidate_id[baseline.candidate_id],
+                    6,
+                ),
+                baseline_is_gold_document=baseline.is_gold_document,
                 selected_is_gold_document=selected.is_gold_document,
+                baseline_is_oracle_best_f1=(
+                    baseline.candidate_token_f1 == oracle.candidate_token_f1
+                ),
                 selected_is_oracle_best_f1=(
                     selected.candidate_token_f1 == oracle.candidate_token_f1
                 ),

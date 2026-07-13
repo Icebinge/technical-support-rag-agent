@@ -7674,3 +7674,431 @@ pytest: 87 passed
   4. score margin gate，例如模型分数必须明显高于 top1 才替换；
   5. gold-document miss / regression-aware summary。
 - Stage 35 仍然只做离线分析，不改 runtime。
+
+## Stage 35 - Constrained Candidate Reranker Policy Search
+
+### 目标
+
+- 接着 Stage 34 的 regression/error analysis，搜索一个离线 constrained policy。
+- 本阶段只做分析，不改 runtime。
+- 核心问题：
+  - Stage 33 的 unconstrained `logistic_best_candidate` 平均 F1 有提升；
+  - 但 Stage 34 发现它会产生 147 个 regression，并且 deep-rank selection 风险高。
+- 本阶段要验证：
+  1. 限制 selected rank 是否能减少 regression；
+  2. route gate 是否能缓解 `how_to_or_lookup` 的负收益；
+  3. model score margin 是否能过滤低把握替换；
+  4. top1 candidate score protection 是否有帮助；
+  5. 是否存在“比 unconstrained 更高收益、更低 regression”的离线策略。
+
+### 起始状态
+
+```text
+git: main...origin/main clean
+
+Stage 33 unconstrained model:
+logistic_best_candidate
+
+Stage 34 key risk:
+improved / regressed / tied: 213 / 147 / 250
+average delta: +0.0229
+selected deep rank: 117 / 610 = 19.18%
+how_to_or_lookup average delta: -0.0092
+```
+
+### 本阶段新增内容
+
+- 更新 `src/ts_rag_agent/application/candidate_reranker_cv.py`
+  - `CandidateRerankerSelection` 增加：
+    - `baseline_model_score`
+    - `score_margin_vs_top_candidate`
+    - `baseline_is_gold_document`
+    - `baseline_is_oracle_best_f1`
+- 新增 `src/ts_rag_agent/application/candidate_reranker_policy_search.py`
+  - `CandidateRerankerPolicyConfig`
+  - `CandidateRerankerPolicyDecision`
+  - `CandidateRerankerPolicyMetrics`
+  - `CandidateRerankerPolicyMetricsBySegment`
+  - `CandidateRerankerPolicyEvaluation`
+  - `CandidateRerankerPolicySearchResult`
+  - 支持 rank / route / score margin / top1 score protection 的离线搜索。
+- 新增 `scripts/search_candidate_reranker_policy.py`
+  - 读取 Stage 31 JSONL。
+  - 重新跑 Stage 33 grouped CV selections。
+  - 搜索 constrained policy grid。
+  - 输出 JSON report。
+- 新增 `tests/test_candidate_reranker_policy_search.py`
+  - 验证 rank constraint 能找到正收益 policy。
+  - 验证非法搜索 grid 会明确失败。
+
+### 搜索空间
+
+```text
+model: logistic_best_candidate
+fold_count: 5
+policy_count: 500
+
+max_selected_rank_grid:
+  2, 3, 5, 10, 25
+
+min_score_margin_grid:
+  0.0, 0.05, 0.1, 0.2, 0.3
+
+protect_top1_candidate_score_min_grid:
+  none, 90.0, 110.0, 140.0, 170.0
+
+blocked_route_sets:
+  []
+  [how_to_or_lookup]
+  [how_to_or_lookup, limitation_or_restriction]
+  [how_to_or_lookup, security_bulletin_affected_product]
+```
+
+说明：
+
+- `protect_top1_candidate_score_min_grid` 使用 Stage 31 top1 candidate score 的真实分位附近值：
+  - P25 约 `88.67`
+  - P50 约 `110.28`
+  - P75 约 `136.54`
+  - P90 约 `170.15`
+- `min_score_margin_grid` 使用 Stage 33 replacement candidates 的真实 model score margin 分布附近值：
+  - P25 约 `0.064`
+  - P50 约 `0.139`
+  - P75 约 `0.227`
+  - P90 约 `0.309`
+
+### 命令
+
+```powershell
+python scripts\search_candidate_reranker_policy.py `
+  --dataset artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --model logistic_best_candidate `
+  --fold-count 5 `
+  --output artifacts\candidate_reranker_stage35_policy_search.json
+```
+
+### 结果
+
+Unconstrained model：
+
+```text
+policy_average_token_f1: 0.2590
+average_delta_vs_top_candidate: +0.0229
+oracle_gap_closed_rate: 11.85%
+replacement_count: 369
+replacement_rate: 60.49%
+improved / regressed / tied: 213 / 147 / 250
+regressed_rate: 24.10%
+final_missed_gold_document_count: 130
+final_deep_rank_count: 117
+```
+
+Best average-delta policy：
+
+```text
+name:
+rank_lte_5__margin_gte_0.05__top1_score_protect_none__blocked_how_to_or_lookup+security_bulletin_affected_product
+
+constraints:
+  max_selected_rank: 5
+  min_score_margin_vs_top_candidate: 0.05
+  blocked_routes:
+    - how_to_or_lookup
+    - security_bulletin_affected_product
+  protect_top1_candidate_score_min: none
+
+policy_average_token_f1: 0.2708
+average_delta_vs_top_candidate: +0.0347
+oracle_gap_closed_rate: 17.97%
+replacement_count: 188
+replacement_rate: 30.82%
+improved / regressed / tied: 126 / 55 / 429
+regressed_rate: 9.02%
+regression_reduction_vs_unconstrained: 92
+final_missed_gold_document_count: 130
+final_deep_rank_count: 0
+final_oracle_best_count: 138
+```
+
+对比 unconstrained：
+
+```text
+average F1:
+  unconstrained: 0.2590
+  constrained:   0.2708
+  delta:         +0.0118
+
+delta vs top candidate:
+  unconstrained: +0.0229
+  constrained:   +0.0347
+
+regressed_count:
+  unconstrained: 147
+  constrained:   55
+  reduction:      92
+
+deep-rank selections:
+  unconstrained: 117
+  constrained:   0
+```
+
+Decision reason counts for best policy：
+
+```text
+accepted: 188
+model_selected_top_candidate: 241
+route_blocked: 32
+score_margin_below_min: 74
+selected_rank_exceeds_limit: 117
+```
+
+Best policy route metrics：
+
+```text
+error_or_log:
+  n: 119
+  replacements: 47
+  average_delta: +0.0708
+  regressed_count: 10
+  regressed_rate: 8.40%
+
+install_upgrade_config:
+  n: 91
+  replacements: 33
+  average_delta: +0.0404
+  regressed_count: 8
+  regressed_rate: 8.79%
+
+security_bulletin_vulnerability_detail:
+  n: 87
+  replacements: 17
+  average_delta: +0.0290
+  regressed_count: 5
+  regressed_rate: 5.75%
+
+other:
+  n: 241
+  replacements: 88
+  average_delta: +0.0268
+  regressed_count: 31
+  regressed_rate: 12.86%
+
+limitation_or_restriction:
+  n: 11
+  replacements: 3
+  average_delta: +0.0068
+  regressed_count: 1
+  regressed_rate: 9.09%
+
+how_to_or_lookup:
+  n: 55
+  replacements: 0
+  average_delta: +0.0000
+  regressed_count: 0
+
+security_bulletin_affected_product:
+  n: 1
+  replacements: 0
+  average_delta: +0.0000
+  regressed_count: 0
+```
+
+Best policy selected-rank metrics：
+
+```text
+rank_2:
+  n: 80
+  average_delta: +0.1317
+  regressed_count: 26
+  regressed_rate: 32.50%
+
+rank_3:
+  n: 58
+  average_delta: +0.1465
+  regressed_count: 14
+  regressed_rate: 24.14%
+
+rank_4_5:
+  n: 50
+  average_delta: +0.0425
+  regressed_count: 15
+  regressed_rate: 30.00%
+
+rank_1:
+  n: 422
+  replacements: 0
+  average_delta: +0.0000
+```
+
+Best regression-reduction policy：
+
+```text
+name:
+rank_lte_2__margin_gte_0.3__top1_score_protect_140__blocked_how_to_or_lookup
+
+policy_average_token_f1: 0.2388
+average_delta_vs_top_candidate: +0.0027
+oracle_gap_closed_rate: 1.40%
+replacement_count: 5
+regressed_count: 0
+regression_reduction_vs_unconstrained: 147
+final_missed_gold_document_count: 183
+```
+
+解释：
+
+- 这个 policy 虽然 0 regression，但只替换 5 个 question。
+- 平均收益只有 `+0.0027`。
+- final missed gold-document count 从 130 增加到 183。
+- 因此它是“过度保守”的诊断点，不适合作为主要方向。
+
+Top policies 摘要：
+
+```text
+rank<=5, margin>=0.05, block how_to + affected_product:
+  delta: +0.0347, replacements: 188, regressions: 55
+
+rank<=5, margin>=0.05, block how_to:
+  delta: +0.0338, replacements: 189, regressions: 56
+
+rank<=5, margin>=0.05, block how_to + limitation:
+  delta: +0.0337, replacements: 186, regressions: 55
+
+rank<=5, margin>=0.05, block none:
+  delta: +0.0331, replacements: 206, regressions: 67
+
+rank<=3, margin>=0.05, block how_to:
+  delta: +0.0312, replacements: 138, regressions: 40
+```
+
+Artifact：
+
+```text
+artifacts/candidate_reranker_stage35_policy_search.json
+size: 186,808 bytes
+```
+
+该 artifact 是本地生成结果，没有纳入 git。
+
+### 解释
+
+- Stage 35 找到了比 unconstrained reranker 更好的 constrained policy。
+- 最优平均收益 policy 同时做到：
+  - 平均 F1 更高；
+  - regression 更少；
+  - deep-rank selection 清零。
+- 关键有效约束是：
+  1. `max_selected_rank <= 5`
+  2. `score_margin >= 0.05`
+  3. block `how_to_or_lookup`
+  4. block `security_bulletin_affected_product`
+- `top1_candidate_score_protect` 没有进入最优平均收益 policy。
+- 这说明 Stage 34 的风险主要不是“top1 score 高就保护”，而是：
+  - 深 rank 替换风险高；
+  - `how_to_or_lookup` route 对当前 reranker 不友好；
+  - 低 score margin 的替换把噪声带进来了。
+- 但这个 policy 仍然不能直接 runtime 化：
+  - 它仍有 55 个 regression；
+  - final missed gold-document count 没有下降；
+  - 还没有 end-to-end RAG 评估；
+  - 当前只是 candidate-level F1。
+
+### 问题与原因
+
+- 问题 1：约束后仍有 55 个 regression。
+  - rank 2-5 的替换仍有风险。
+- 问题 2：gold-document miss 没有改善。
+  - constrained policy 的 final missed gold-document count 仍是 130。
+  - 说明当前约束主要减少坏替换，不是更会找 gold document。
+- 问题 3：`security_bulletin_affected_product` 只有 1 个样本。
+  - 它进入最优 policy 可能带有样本偶然性。
+  - `block how_to` 的 policy 与最佳 policy 只差 `0.0009` average delta。
+- 问题 4：过度保守 policy 没有工程价值。
+  - 0 regression policy 只替换 5 个 case，平均收益太小。
+
+### 修正与处理
+
+- 不接入 runtime。
+- 不把 Stage 35 best policy 改成默认策略。
+- 保留 constrained policy search 作为离线工具。
+- 后续需要做更稳健的验证：
+  - 对最佳 policy 做 fold-level / route-level stability 分析；
+  - 对是否 block `security_bulletin_affected_product` 做样本量敏感性检查；
+  - 再考虑 end-to-end answer 级实验。
+
+### 测试
+
+```powershell
+ruff check src\ts_rag_agent\application\candidate_reranker_cv.py `
+  src\ts_rag_agent\application\candidate_reranker_policy_search.py `
+  scripts\search_candidate_reranker_policy.py `
+  tests\test_candidate_reranker_policy_search.py
+
+pytest -q tests\test_candidate_reranker_policy_search.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 89 passed
+```
+
+### 结论
+
+- Stage 35 成功找到一个离线 constrained policy：
+
+```text
+rank <= 5
+score margin >= 0.05
+block how_to_or_lookup
+block security_bulletin_affected_product
+```
+
+- 它比 unconstrained baseline 更好：
+
+```text
+unconstrained F1: 0.2590
+constrained F1:   0.2708
+
+unconstrained delta: +0.0229
+constrained delta:   +0.0347
+
+unconstrained regressions: 147
+constrained regressions:   55
+```
+
+- 这个结果支持继续向 “guarded reranker” 方向推进。
+- 但它仍然只是 candidate-level 离线结果，不是 runtime 或 end-to-end 结论。
+
+### 我学到的
+
+- 一个弱 reranker 不一定要直接丢掉；加约束后可能更有价值。
+- rank 上限和 margin gate 比单纯 top1 score protection 更有效。
+- route gate 要谨慎：大样本负收益 route 可以先 block，小样本 route 需要做敏感性检查。
+- 0 regression 不等于最好，太保守会让收益几乎消失。
+
+### 下一步
+
+- 做 Stage 36：constrained policy stability analysis。
+- 重点：
+  1. 比较最佳 policy 与 `block how_to only` policy 的差异；
+  2. 看 fold-level stability；
+  3. 看 route-level regression 是否稳定下降；
+  4. 检查 `security_bulletin_affected_product` 这种 1-sample route 是否应从策略中移除；
+  5. 决定是否进入 end-to-end answer-level 实验。
+- Stage 36 仍然只做离线分析，不改 runtime。
