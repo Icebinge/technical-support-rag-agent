@@ -5587,3 +5587,225 @@ pytest: 64 passed
   1. `other` subtype classifier：只让少数 procedure/support-guide 型问题使用 answer-window。
   2. local second-pass rerank：先沿用 hybrid-routing 选中候选，再在候选所在文档/section 内寻找更紧凑窗口。
 - Stage 28 开始前不应改默认 selector。
+
+## Stage 28 - Other-Route Window Outcome Analysis
+
+### 目标
+
+- 接着 Stage 27 的负实验，分析 `other` route 中 answer-window 的胜负样本。
+- 判断是否存在稳定的 `other` subtype，可以安全地做 subtype gating。
+- 如果 subtype gating 不稳定，就把下一步转向 candidate-level / local second-pass rerank。
+- 继续使用 dev + train split 做跨 split 检查，不只看整体平均值。
+
+### 起始状态
+
+```text
+git: main...origin/main clean
+```
+
+Stage 27 结论：
+
+- `hybrid-window-routing` 在 train 上小涨，但在 dev 上明显下降。
+- 直接把全部 `other` route 交给 answer-window 不稳定。
+- 需要更细的 gating 或 second-pass rerank。
+
+### 本阶段新增内容
+
+- 新增 `src/ts_rag_agent/application/other_route_window_outcome_analysis.py`
+  - 读取 baseline/challenger 的 answer-gap reports。
+  - 只分析 challenger route 为 `other` 的样本。
+  - 用 runtime 可见字段 `question_title` / `question_text` 做 subtype 分类。
+  - 统计每个 subtype 的：
+    - total cases
+    - baseline wins
+    - challenger wins
+    - ties
+    - average F1 delta
+    - gold citation delta
+    - recommendation
+    - representative cases
+  - 同时生成 overall summary 和 source-level summary。
+- 新增 `scripts/analyze_other_route_window_outcomes.py`
+  - 支持多个 baseline/challenger report pair。
+  - 支持 `--source-labels`、`--min-cases`、`--sample-limit-per-subtype`。
+- 新增 `tests/test_other_route_window_outcome_analysis.py`
+  - 验证 subtype 分类只用 runtime-visible text。
+  - 验证 dev/train 分歧不会被误判为 stable candidate。
+  - 验证真正跨 source 都正向的 subtype 才会进入 `stable_answer_window_subtypes`。
+
+### 事实边界
+
+- 本阶段没有修改默认 runtime selector。
+- 本阶段没有新增 fallback 策略。
+- subtype classifier 没有使用 gold answer、selected answer 或离线 best_gold_window。
+- 该分析是 heuristic diagnostic，不是模型指标，也不是最终 gating policy。
+
+### 命令
+
+```powershell
+python scripts\analyze_other_route_window_outcomes.py `
+  --baseline-reports artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage18_cve_anchor.json,artifacts\answer_gap_analysis_train_hybrid_routing_mcpd3_stage24_cv_source.json `
+  --challenger-reports artifacts\answer_gap_analysis_dev_hybrid_window_routing_mcpd3_stage27.json,artifacts\answer_gap_analysis_train_hybrid_window_routing_mcpd3_stage27.json `
+  --source-labels dev,train `
+  --min-cases 3 `
+  --sample-limit-per-subtype 5 `
+  --output artifacts\other_route_window_outcome_stage28_dev_train.json
+```
+
+### 结果
+
+总体：
+
+```text
+total other-route cases: 241
+dev cases: 71
+train cases: 170
+stable_answer_window_subtypes: []
+```
+
+Overall subtype summary：
+
+```text
+support_or_download:
+  cases: 16
+  baseline wins: 3
+  answer-window wins: 6
+  ties: 7
+  avg F1 delta: +0.0198
+  recommendation: candidate_answer_window
+
+capability_or_support:
+  cases: 49
+  baseline wins: 18
+  answer-window wins: 18
+  ties: 13
+  avg F1 delta: +0.0100
+  recommendation: mixed_or_insufficient
+
+configuration_or_property:
+  cases: 18
+  baseline wins: 9
+  answer-window wins: 7
+  ties: 2
+  avg F1 delta: +0.0077
+  recommendation: mixed_or_insufficient
+
+procedure_or_change:
+  cases: 60
+  baseline wins: 25
+  answer-window wins: 25
+  ties: 10
+  avg F1 delta: +0.0056
+  recommendation: mixed_or_insufficient
+
+general_other:
+  cases: 53
+  baseline wins: 23
+  answer-window wins: 13
+  ties: 17
+  avg F1 delta: -0.0266
+  recommendation: keep_baseline
+
+failure_or_behavior:
+  cases: 43
+  baseline wins: 9
+  answer-window wins: 16
+  ties: 18
+  avg F1 delta: -0.0269
+  recommendation: mixed_or_insufficient
+```
+
+Source-level split：
+
+```text
+support_or_download:
+  dev:   avg F1 delta -0.0067, keep_baseline
+  train: avg F1 delta +0.0319, candidate_answer_window
+
+capability_or_support:
+  dev:   avg F1 delta -0.0715, keep_baseline
+  train: avg F1 delta +0.0365, candidate_answer_window
+
+configuration_or_property:
+  dev:   avg F1 delta -0.0358, keep_baseline
+  train: avg F1 delta +0.0425, candidate_answer_window
+
+procedure_or_change:
+  dev:   avg F1 delta -0.0535, keep_baseline
+  train: avg F1 delta +0.0290, candidate_answer_window
+
+failure_or_behavior:
+  dev:   avg F1 delta -0.0762, keep_baseline
+  train: avg F1 delta +0.0023, candidate_answer_window
+
+general_other:
+  dev:   avg F1 delta -0.1153, keep_baseline
+  train: avg F1 delta -0.0006, keep_baseline
+```
+
+### 解释
+
+- 没有任何 subtype 同时在 dev 和 train 上稳定支持 answer-window。
+- `support_or_download` 是 overall 最好的 subtype，但它仍然是：
+  - dev 负向；
+  - train 正向；
+  - 因此不能作为可靠 gating 规则。
+- 多个 subtype 出现相同形态：
+  - dev 上 keep baseline；
+  - train 上 candidate answer-window。
+- 这说明 Stage 27 的 train 小涨很可能来自 train 分布，而不是稳定可迁移的 subtype 规则。
+- `general_other` 在 dev/train 都不支持 answer-window，应该明确保留 baseline。
+
+### 问题与原因
+
+- 问题 1：只靠 question subtype 仍然太粗。
+  - 同一个 subtype 内部既有 answer-window 大赢样本，也有 answer-window 大输样本。
+- 问题 2：subtype gating 无法判断候选窗口是否混入了相邻噪声。
+  - 它只能判断问题形态，不能判断候选证据质量。
+- 问题 3：Stage 26 暴露的是“已选文档内部选窗差”，不是“某类问题一定该换 selector”。
+  - 因此 candidate-level / local rerank 比 route-level / subtype-level gating 更贴近问题根因。
+
+### 修正与处理
+
+- 不做 subtype gating runtime 改动。
+- 保留 Stage 28 分析工具，作为以后评估 gating 规则的离线工具。
+- 将下一步方向从 subtype classifier 转向 local second-pass rerank。
+
+### 测试
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 67 passed
+```
+
+### 结论
+
+- Stage 28 否定了“直接做 other subtype gating”的路线。
+- 当前证据不支持让任何 `other` subtype 稳定切到 answer-window。
+- 下一步应该做更细粒度的 candidate-level local rerank：
+  - 先沿用当前 `hybrid-routing` 产生候选；
+  - 再只在候选所在的高置信文档或 section 内寻找更紧凑、更 answer-like 的窗口；
+  - 用 dev/train 验证是否能减少 `gold_window_beats_selected_answer`，且不牺牲 selected F1。
+
+### 我学到的
+
+- overall 小幅正收益仍可能被 split-level 分歧否定。
+- “问题类型看起来像步骤/下载/支持”不等于 answer-window 一定更好。
+- 这个项目当前更需要候选质量判断，而不是继续加粗粒度路由。
+- 数据分析工具本身也要防止 sample-limited comparison report 带来的偏差，所以 Stage 28 改为直接读完整 answer-gap reports。
+
+### 下一步
+
+- 做 Stage 29：实现 local second-pass window rerank 的离线原型。
+- 约束：
+  - 不改变默认 runtime；
+  - 不使用 gold answer；
+  - 只在 baseline 已选候选的 document / section 范围内 rerank；
+  - dev 不能下降，train 不能只靠单 split 偶然上涨。
