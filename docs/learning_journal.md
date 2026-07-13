@@ -4073,3 +4073,178 @@ This single case explains the current citation loss.
   1. F1 improves,
   2. gold citation loss stays bounded,
   3. verification behavior does not regress.
+
+## Stage 22 - Route-Aware Composition Runtime Experiment
+
+### 目标
+
+- 把 Stage 21 的 route-aware composition policy 接入真实 runtime。
+- 保持默认运行策略不变，只有显式传入参数时才启用 route-aware。
+- 用完整 verified RAG end-to-end 路径对比当前 top-k baseline 和 route-aware policy。
+
+### 我学习和确认了什么
+
+- Stage 21 的 policy 原本只在离线 answer-gap report 上工作。
+- Runtime 真正拼答案的位置是
+  `ExtractiveAnswerGenerator.generate()`。
+- 如果只在评估脚本里临时改候选句数量，会让 runtime、分析脚本和测试路径分叉。
+- 所以本阶段把“候选句排序”和“最终选几句组成答案”拆成独立的
+  answer composition 层。
+
+### 本阶段改动
+
+- 新增 `src/ts_rag_agent/application/answer_composition.py`：
+  - `AnswerCompositionPolicy`
+  - `TopKAnswerCompositionPolicy`
+  - `RouteAwareAnswerCompositionPolicy`
+  - `create_answer_composition_policy`
+- 更新 `ExtractiveAnswerGenerator`：
+  - 新增 `composition_policy` 参数；
+  - 默认仍然使用 `TopKAnswerCompositionPolicy`；
+  - 新增统一的 `select_answer_candidates()`。
+- 更新 `AnswerGapAnalyzer`：
+  - 改为调用 generator 的统一候选选择方法；
+  - 避免分析路径和 runtime 路径使用不同的最终候选选择逻辑。
+- 更新 `scripts/evaluate_verified_rag.py`：
+  - 新增 `--composition-policy`；
+  - 可选值包括 `top-k` 和 `route-aware`；
+  - JSON report 的 `rag` 字段会记录实际 composition policy。
+- 更新测试：
+  - 覆盖 route-aware runtime 接入；
+  - 覆盖未知 composition policy 报错。
+
+### 命令和真实结果
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+```
+
+验证结果：
+
+```text
+ruff: passed
+pytest: 54 passed
+```
+
+当前代码下的 top-k baseline：
+
+```powershell
+python scripts\evaluate_verified_rag.py `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --min-evidence-score 15 `
+  --composition-policy top-k `
+  --output artifacts\verified_rag_dev_hybrid_routing_m15_stage22_topk_report.json
+```
+
+结果：
+
+```text
+composition_policy: top_k
+original average_token_f1: 0.2729
+original gold_doc_citation_rate: 0.5938
+original gold citation count: 95 / 160
+
+verified average_token_f1: 0.2755
+verified gold_doc_citation_rate: 0.6013
+verified gold citation count: 95 / 158 generated answerable
+
+answerable_refusal_rate: 0.0125
+unanswerable_refusal_rate: 0.0267
+newly_refused: 6
+```
+
+Route-aware runtime experiment：
+
+```powershell
+python scripts\evaluate_verified_rag.py `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --min-evidence-score 15 `
+  --composition-policy route-aware `
+  --output artifacts\verified_rag_dev_hybrid_routing_m15_stage22_route_aware_report.json
+```
+
+结果：
+
+```text
+composition_policy: route_aware_top1_direct_otherwise_top3
+original average_token_f1: 0.2769
+original gold_doc_citation_rate: 0.5875
+original gold citation count: 94 / 160
+
+verified average_token_f1: 0.2795
+verified gold_doc_citation_rate: 0.5949
+verified gold citation count: 94 / 158 generated answerable
+
+answerable_refusal_rate: 0.0125
+unanswerable_refusal_rate: 0.0267
+newly_refused: 6
+```
+
+端到端对比：
+
+```text
+verified average_token_f1 delta: +0.0040
+verified gold citation count delta: -1
+answerable_refusal_rate delta: 0.0000
+unanswerable_refusal_rate delta: 0.0000
+newly_refused delta: 0
+```
+
+### 事实边界
+
+- Stage 18 的 `0.2805` 是 answer-gap selected-answer F1，不是完整
+  verified RAG report 的 verified F1。
+- Stage 22 的对比使用同一份当前代码重跑出的两个完整 verified RAG report：
+  - `artifacts/verified_rag_dev_hybrid_routing_m15_stage22_topk_report.json`
+  - `artifacts/verified_rag_dev_hybrid_routing_m15_stage22_route_aware_report.json`
+- 旧文件 `artifacts/verified_rag_dev_hybrid_routing_m15_report.json`
+  缺少 `composition_policy` 字段，而且指标低于当前代码重跑结果；
+  因此本阶段没有把它当作 Stage 22 的直接对照数据。
+- `artifacts/*` 被 `.gitignore` 忽略，本阶段报告文件是本地实验产物，不会随提交进入仓库。
+
+### 遇到的问题
+
+- 初看旧 verified RAG artifact 时，它的 F1 和 gold citation 都低于本轮 top-k 重跑结果。
+- 这不是 route-aware policy 带来的变化，因为旧 artifact 缺少 composition policy 字段，也不是本轮同代码生成。
+
+### 原因
+
+- Stage 22 修改了 report schema，新增了 `composition_policy`。
+- 旧 report 不能证明当前默认 top-k 路径在新代码下的表现。
+- 为了避免混用不同时间、不同 schema、不同代码状态的结果，本阶段必须重跑 top-k baseline。
+
+### 处理方式
+
+- 用当前代码重新生成 top-k baseline。
+- 再用同一套参数只切换 `--composition-policy route-aware`。
+- 只比较这两份同代码、同参数、同时间段生成的 report。
+
+### 结论
+
+- Route-aware runtime policy 端到端保留了 Stage 21 的 F1 小幅收益：
+  verified F1 提升 `+0.0040`。
+- Citation 风险也被保留下来：
+  verified gold citation 少 1 个。
+- 验证器行为没有变差：
+  `answerable_refusal_rate`、`unanswerable_refusal_rate`、`newly_refused`
+  都没有变化。
+- 因为 gold citation 仍然少 1 个，本阶段不把 route-aware 改成默认策略。
+- 当前结论是：route-aware 可以作为显式 runtime 实验参数保留，但默认仍然使用 top-k。
+
+### 我学到的
+
+- 一个离线 policy 即使通过 answer-gap 分析，也必须通过真实 generator 和 verifier 链路验证。
+- 加 runtime 参数时，默认行为必须用当前代码重跑，而不是引用旧 artifact。
+- F1 提升和 citation 损失可以同时发生；这类策略不能只看一个指标。
+- 把 answer composition 独立封装后，后续可以继续做 route-specific 阈值，而不需要改检索器或 evidence selector。
+
+### 下一步
+
+- 做 Stage 23：分析 route-aware 少掉的那个 gold citation 是否仍然集中在
+  `DEV_Q202` 或同类 `install_upgrade_config` 问题。
+- 如果仍然是 install/config 路线导致 citation 损失，再评估是否需要一个更严格的
+  route-specific top1 gate。
+- 在确认之前，继续保持默认 `--composition-policy top-k`。

@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from ts_rag_agent.application.answer_composition import (
+    AnswerCompositionPolicy,
+    TopKAnswerCompositionPolicy,
+)
 from ts_rag_agent.application.evidence_selection import (
     OverlapSentenceEvidenceSelector,
     SentenceEvidenceCandidate,
@@ -22,6 +26,7 @@ class ExtractiveAnswerGenerator:
         min_sentence_score: float = 2.0,
         min_sentence_chars: int = 24,
         evidence_selector: SentenceEvidenceSelector | None = None,
+        composition_policy: AnswerCompositionPolicy | None = None,
     ) -> None:
         if max_sentences <= 0:
             raise ValueError("max_sentences must be positive")
@@ -36,6 +41,7 @@ class ExtractiveAnswerGenerator:
         self._evidence_selector = evidence_selector or OverlapSentenceEvidenceSelector(
             min_sentence_chars=min_sentence_chars
         )
+        self._composition_policy = composition_policy or TopKAnswerCompositionPolicy()
 
     @property
     def max_sentences(self) -> int:
@@ -55,6 +61,12 @@ class ExtractiveAnswerGenerator:
 
         return self._evidence_selector.name
 
+    @property
+    def composition_policy_name(self) -> str:
+        """Name of the answer-composition policy used by this generator."""
+
+        return self._composition_policy.name
+
     def generate(
         self,
         question: PrimeQAQuestion,
@@ -62,12 +74,7 @@ class ExtractiveAnswerGenerator:
     ) -> GeneratedAnswer:
         """Generate one extractive answer from retrieved documents."""
 
-        sentence_candidates = self.rank_sentence_candidates(question, retrieval_results)
-        selected = [
-            candidate
-            for candidate in sentence_candidates
-            if candidate.score >= self._min_sentence_score
-        ][: self._max_sentences]
+        selected = self.select_answer_candidates(question, retrieval_results)
 
         if not selected:
             return GeneratedAnswer(
@@ -96,6 +103,26 @@ class ExtractiveAnswerGenerator:
             citations=citations,
             refused=False,
         )
+
+    def select_answer_candidates(
+        self,
+        question: PrimeQAQuestion,
+        retrieval_results: Sequence[RetrievalResult],
+    ) -> list[SentenceEvidenceCandidate]:
+        """Return final evidence candidates used to compose one answer."""
+
+        sentence_candidates = self.rank_sentence_candidates(question, retrieval_results)
+        eligible_candidates = [
+            candidate
+            for candidate in sentence_candidates
+            if candidate.score >= self._min_sentence_score
+        ]
+        decision = self._composition_policy.select(
+            question=question,
+            candidates=eligible_candidates,
+            max_sentences=self._max_sentences,
+        )
+        return decision.selected_candidates
 
     def rank_sentence_candidates(
         self,

@@ -8,6 +8,10 @@ from typing import Annotated
 
 import typer
 
+from ts_rag_agent.application.answer_composition import (
+    AnswerCompositionPolicy,
+    create_answer_composition_policy,
+)
 from ts_rag_agent.application.answer_verification import AnswerVerifier
 from ts_rag_agent.application.evidence_selection import (
     SentenceEvidenceSelector,
@@ -64,6 +68,16 @@ def main(
             help="Maximum candidates retained from the same document.",
         ),
     ] = 1,
+    composition_policy: Annotated[
+        str,
+        typer.Option(
+            "--composition-policy",
+            help=(
+                "Answer composition policy: top-k or route-aware. "
+                "top-k keeps the current default runtime behavior."
+            ),
+        ),
+    ] = "top-k",
     min_evidence_score: Annotated[
         float,
         typer.Option("--min-evidence-score", help="Verifier minimum evidence score."),
@@ -121,12 +135,14 @@ def main(
         evidence_selector=evidence_selector,
         max_candidates_per_document=max_candidates_per_document,
     )
+    answer_composition_policy = _create_composition_policy(composition_policy)
     evaluator = VerifiedRAGEvaluator(
         retriever=retriever,
         answer_generator=ExtractiveAnswerGenerator(
             max_sentences=max_sentences,
             min_sentence_score=min_sentence_score,
             evidence_selector=sentence_selector,
+            composition_policy=answer_composition_policy,
         ),
         answer_verifier=AnswerVerifier(
             min_citations=min_citations,
@@ -149,6 +165,7 @@ def main(
         min_sentence_score=min_sentence_score,
         evidence_selector_name=sentence_selector.name,
         max_candidates_per_document=max_candidates_per_document,
+        composition_policy_name=answer_composition_policy.name,
         min_evidence_score=min_evidence_score,
         max_citation_rank=max_citation_rank,
         min_citations=min_citations,
@@ -208,6 +225,7 @@ def _build_report(
     min_sentence_score: float,
     evidence_selector_name: str,
     max_candidates_per_document: int,
+    composition_policy_name: str,
     min_evidence_score: float,
     max_citation_rank: int,
     min_citations: int,
@@ -233,6 +251,7 @@ def _build_report(
             "max_sentences": max_sentences,
             "min_sentence_score": min_sentence_score,
             "max_candidates_per_document": max_candidates_per_document,
+            "composition_policy": composition_policy_name,
             "answer_verifier": "citation_and_evidence_gate",
             "min_evidence_score": min_evidence_score,
             "max_citation_rank": max_citation_rank,
@@ -356,6 +375,13 @@ def _create_selector(
             selector_name=evidence_selector,
             max_candidates_per_document=max_candidates_per_document,
         )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+def _create_composition_policy(composition_policy: str) -> AnswerCompositionPolicy:
+    try:
+        return create_answer_composition_policy(composition_policy)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
 

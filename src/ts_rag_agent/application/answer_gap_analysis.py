@@ -226,12 +226,7 @@ class AnswerGapAnalyzer:
         question: PrimeQAQuestion,
         retrieval_results: list[RetrievalResult],
     ) -> list[SentenceEvidenceCandidate]:
-        candidates = self._answer_generator.rank_sentence_candidates(question, retrieval_results)
-        return [
-            candidate
-            for candidate in candidates
-            if candidate.score >= self._answer_generator.min_sentence_score
-        ][: self._answer_generator.max_sentences]
+        return self._answer_generator.select_answer_candidates(question, retrieval_results)
 
     def _best_gold_span(
         self,
