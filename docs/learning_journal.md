@@ -3440,3 +3440,185 @@ Observed details:
   2. prefer higher-ranked retrieved documents when CVE alignment is similar,
   3. add product-title alignment between question title and document title,
   4. test whether security detail answers should use top-1 or top-2 spans instead of always taking 3.
+
+## Stage 19 - Document-Aware Aggregation Experiment
+
+### Goal
+
+- Investigate whether security-bulletin detail answers should reduce cross-document evidence mixing.
+- Test a document-aware aggregation idea:
+  - choose one focus document using question CVE, product-title overlap, retrieval rank, and document-title signals,
+  - keep evidence windows from that focus document,
+  - avoid mixing multiple documents that mention the same CVE but belong to different IBM products.
+
+### What I Studied
+
+Stage 18 left two answer-aware wins:
+
+```text
+DEV_Q089
+DEV_Q019
+```
+
+The observed problem was not pure CVE matching anymore:
+
+- `DEV_Q089` selected the requested CVE, but answer quality was hurt by cross-document CVE windows.
+- `DEV_Q019` selected the target CVE, but the gold answer was closer to an affected-runtime summary than to the vulnerability-detail paragraph.
+- `DEV_Q220` had improved in Stage 18, but still showed that product/document alignment might matter.
+
+### What I Tried
+
+I implemented an experimental document-focus branch locally:
+
+1. First attempt:
+   - run normal section-span with `section_span_mcpd1`,
+   - choose a focus document,
+   - keep only candidates from that document.
+2. Second attempt:
+   - use a wider security-detail section-span pass with `mcpd3`,
+   - choose a focus document,
+   - keep up to three candidates from that document.
+3. Bug fix during the experiment:
+   - the first version accidentally changed no-CVE security bulletin questions because it used the wider focus selector even when no explicit CVE existed.
+   - fixed the experiment so document focus only activates when the question text contains an explicit CVE.
+
+The experiment used no gold answer and no gold document id.
+
+### Commands And Evidence
+
+```powershell
+python -m pytest tests\test_evidence_selection.py -q
+python -m ruff check src\ts_rag_agent\application\evidence_selection.py tests\test_evidence_selection.py
+python -m pytest -q
+
+python scripts\analyze_answer_gap.py `
+  --evidence-selector answer-aware `
+  --max-candidates-per-document 3 `
+  --sample-limit 1000 `
+  --output artifacts\answer_gap_analysis_dev_answer_aware_mcpd3_stage19_doc_focus.json
+
+python scripts\analyze_answer_gap.py `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --sample-limit 1000 `
+  --output artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage19_doc_focus.json
+
+python scripts\compare_selectors.py `
+  --baseline-report artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage18_cve_anchor.json `
+  --challenger-report artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage19_doc_focus.json `
+  --baseline-label hybrid-stage18 `
+  --challenger-label hybrid-stage19-doc-focus `
+  --f1-win-margin 0.03 `
+  --sample-limit-per-bucket 30 `
+  --output artifacts\selector_comparison_hybrid_stage18_vs_stage19_doc_focus.json
+
+python scripts\compare_selectors.py `
+  --baseline-report artifacts\answer_gap_analysis_dev_answer_aware_mcpd3_stage19_doc_focus.json `
+  --challenger-report artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage19_doc_focus.json `
+  --baseline-label answer-aware `
+  --challenger-label hybrid-routing-stage19 `
+  --f1-win-margin 0.03 `
+  --sample-limit-per-bucket 30 `
+  --output artifacts\selector_comparison_answer_aware_vs_hybrid_routing_stage19_doc_focus.json
+```
+
+### Main Results
+
+First attempt result:
+
+```text
+Stage 19 focus mcpd1 F1: 0.2789
+Stage 19 focus mcpd1 gold citation: 94 / 160
+```
+
+This was worse than Stage 18:
+
+```text
+Stage 18 F1: 0.2805
+Stage 18 gold citation: 95 / 160
+```
+
+Second attempt after widening focus document candidates:
+
+```text
+Stage 19 focus mcpd3 F1 before no-CVE fix: 0.2803
+Stage 19 focus mcpd3 gold citation before no-CVE fix: 95 / 160
+```
+
+After restricting focus only to questions with explicit CVE:
+
+```text
+Stage 19 F1: 0.2805
+Stage 19 gold citation: 95 / 160
+```
+
+Stage 18 vs Stage 19 after the no-CVE fix:
+
+```text
+total_compared: 160
+Stage 18 wins: 5
+Stage 19 wins: 8
+ties: 147
+avg_f1_delta: -0.0
+Stage 18 gold citation: 95
+Stage 19 gold citation: 95
+```
+
+Answer-aware vs Stage 19:
+
+```text
+answer-aware wins: 2
+Stage 19 hybrid wins: 15
+ties: 143
+avg_f1_delta: +0.0303
+gold citation: 95 / 160
+```
+
+For comparison, Stage 18 had:
+
+```text
+answer-aware wins: 2
+Stage 18 hybrid wins: 16
+ties: 142
+avg_f1_delta: +0.0304
+gold citation: 95 / 160
+```
+
+### Decision
+
+- The document-focus experiment was not adopted into runtime code.
+- Reason:
+  - first attempt regressed both F1 and gold citation,
+  - second attempt recovered citation but did not beat Stage 18,
+  - relative to answer-aware, Stage 19 had one fewer win than Stage 18,
+  - the best observed result remained Stage 18.
+- Final code was reverted to Stage 18 behavior.
+- Only this learning-journal record is kept.
+
+### Problems Encountered
+
+- The naive document-focus idea removed useful complementary evidence.
+- `section_span_mcpd1` was too narrow after document filtering.
+- `section_span_mcpd3` recovered some coverage, but introduced new local tradeoffs.
+- A no-CVE activation bug showed that aggregation rules must have strict entry conditions.
+
+### Root Cause
+
+- Cross-document mixing is sometimes harmful, but not uniformly harmful.
+- Some security bulletin answers benefit from multiple windows, even if those windows are not all from the same document.
+- A simple product-title/retrieval-rank focus rule is not enough to predict when document filtering will help.
+
+### What I Learned
+
+- Stage 19 is a useful negative result.
+- The next improvement should not be another hard document-focus rule.
+- The system needs better candidate-level answer quality prediction or a route-specific answer composer, not a blunt document filter.
+
+### Next Step
+
+- Do Stage 20: answer composition / candidate selection analysis.
+- Instead of filtering documents, analyze the top selected candidates themselves:
+  1. whether repeated near-duplicate CVE spans hurt F1,
+  2. whether selected spans should be compressed or deduplicated,
+  3. whether security-detail route should choose the best window rather than always concatenating top 3,
+  4. whether answer-aware and section-span candidates should be merged before final answer selection.
