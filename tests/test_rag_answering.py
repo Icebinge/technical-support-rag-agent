@@ -62,7 +62,7 @@ def test_extractive_answer_generator_can_use_route_aware_composition_policy():
     )
     selector = _StaticEvidenceSelector(
         [
-            _candidate(first_document, 140.0, "Install product A with the setup command."),
+            _candidate(first_document, 150.0, "Install product A with the setup command."),
             _candidate(second_document, 80.0, "Product A overview text."),
         ]
     )

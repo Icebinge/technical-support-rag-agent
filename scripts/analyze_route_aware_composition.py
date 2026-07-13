@@ -49,7 +49,14 @@ def main(
                 "top1 routing."
             ),
         ),
-    ] = 45.0,
+    ] = 60.0,
+    enable_how_to_top1: Annotated[
+        bool,
+        typer.Option(
+            "--enable-how-to-top1/--disable-how-to-top1",
+            help="Enable or disable top1 routing for how-to/lookup questions.",
+        ),
+    ] = False,
     max_top1_retrieval_rank: Annotated[
         int,
         typer.Option("--max-top1-retrieval-rank", help="Worst retrieval rank allowed for top1."),
@@ -101,6 +108,7 @@ def main(
         strong_first_score_ratio_min=strong_first_score_ratio_min,
         strong_first_score_margin_min=strong_first_score_margin_min,
         install_upgrade_score_margin_min=install_upgrade_score_margin_min,
+        enable_how_to_top1=enable_how_to_top1,
         max_top1_retrieval_rank=max_top1_retrieval_rank,
         duplicate_threshold=duplicate_threshold,
     )
@@ -117,6 +125,7 @@ def main(
         "strong_first_score_ratio_min": strong_first_score_ratio_min,
         "strong_first_score_margin_min": strong_first_score_margin_min,
         "install_upgrade_score_margin_min": install_upgrade_score_margin_min,
+        "enable_how_to_top1": enable_how_to_top1,
         "max_top1_retrieval_rank": max_top1_retrieval_rank,
         "duplicate_threshold": duplicate_threshold,
         "min_average_f1_gain": min_average_f1_gain,

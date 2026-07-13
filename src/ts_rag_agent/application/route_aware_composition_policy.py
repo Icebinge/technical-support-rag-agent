@@ -114,14 +114,15 @@ class RouteAwareCompositionResult:
 class RouteAwareCompositionPolicy:
     """Conservative route-aware policy for choosing answer evidence sentences."""
 
-    name = "route_aware_top1_direct_strict_install_otherwise_top3"
+    name = "route_aware_strict_install_top1_otherwise_top3"
 
     def __init__(
         self,
         strong_first_score_min: float = 100.0,
         strong_first_score_ratio_min: float = 1.15,
         strong_first_score_margin_min: float = 20.0,
-        install_upgrade_score_margin_min: float = 45.0,
+        install_upgrade_score_margin_min: float = 60.0,
+        enable_how_to_top1: bool = False,
         max_top1_retrieval_rank: int = 3,
         duplicate_threshold: float = 0.96,
     ) -> None:
@@ -142,6 +143,7 @@ class RouteAwareCompositionPolicy:
         self.strong_first_score_ratio_min = strong_first_score_ratio_min
         self.strong_first_score_margin_min = strong_first_score_margin_min
         self.install_upgrade_score_margin_min = install_upgrade_score_margin_min
+        self.enable_how_to_top1 = enable_how_to_top1
         self.max_top1_retrieval_rank = max_top1_retrieval_rank
         self.duplicate_threshold = duplicate_threshold
 
@@ -197,6 +199,9 @@ class RouteAwareCompositionPolicy:
                 score_ratio_min=None,
                 score_margin_min=self.install_upgrade_score_margin_min,
             )
+
+        if question_route == "how_to_or_lookup" and not self.enable_how_to_top1:
+            return False
 
         return self._has_strong_first_candidate(
             candidates,

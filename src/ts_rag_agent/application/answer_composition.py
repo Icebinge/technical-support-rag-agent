@@ -122,6 +122,7 @@ def create_answer_composition_policy(policy_name: str) -> AnswerCompositionPolic
         "route_aware",
         "route_aware_top1_direct_otherwise_top3",
         RouteAwareCompositionPolicy.name,
+        "route_aware_top1_direct_strict_install_otherwise_top3",
     }:
         return RouteAwareAnswerCompositionPolicy()
 

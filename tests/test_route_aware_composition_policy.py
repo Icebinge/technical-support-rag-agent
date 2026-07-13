@@ -62,6 +62,7 @@ def test_route_aware_policy_uses_top1_only_for_strong_direct_routes():
             strong_first_score_ratio_min=1.15,
             strong_first_score_margin_min=20.0,
             install_upgrade_score_margin_min=20.0,
+            enable_how_to_top1=True,
         ),
     )
 
@@ -73,7 +74,7 @@ def test_route_aware_policy_uses_top1_only_for_strong_direct_routes():
     assert result.changed_cases[0].question_id == "q1"
 
 
-def test_route_aware_policy_uses_stricter_install_upgrade_margin():
+def test_route_aware_policy_uses_stricter_install_upgrade_margin_and_disables_how_to():
     report = {
         "cases": [
             {
@@ -135,10 +136,46 @@ def test_route_aware_policy_uses_stricter_install_upgrade_margin():
         case.question_id: case.strategy
         for case in result.changed_cases
     }
-    assert result.summary.strategy_counts["keep_top3_default"] == 1
-    assert result.summary.strategy_counts["top1_direct_strong_signal"] == 1
+    assert result.summary.strategy_counts["keep_top3_default"] == 2
+    assert "top1_direct_strong_signal" not in result.summary.strategy_counts
     assert "q1" not in strategy_by_question_id
-    assert strategy_by_question_id["q2"] == "top1_direct_strong_signal"
+    assert "q2" not in strategy_by_question_id
+
+
+def test_route_aware_policy_can_enable_how_to_top1_explicitly():
+    report = {
+        "cases": [
+            {
+                "question_id": "q1",
+                "question_title": "How can I export a private key?",
+                "question_route": "how_to_or_lookup",
+                "gold_answer_doc_id": "gold",
+                "gold_answer": "Use the export key action.",
+                "selected_candidates": [
+                    _candidate(
+                        document_id="gold",
+                        score=120.0,
+                        rank=1,
+                        sentence="Use the export key action.",
+                    ),
+                    _candidate(
+                        document_id="other",
+                        score=90.0,
+                        rank=2,
+                        sentence="General product information unrelated to keys.",
+                    ),
+                ],
+            },
+        ]
+    }
+
+    result = analyze_route_aware_composition_policy(
+        answer_gap_report=report,
+        policy=RouteAwareCompositionPolicy(enable_how_to_top1=True),
+    )
+
+    assert result.summary.strategy_counts["top1_direct_strong_signal"] == 1
+    assert result.changed_cases[0].question_id == "q1"
 
 
 def test_route_aware_policy_rejects_weak_top1_and_deduplicates_same_doc():

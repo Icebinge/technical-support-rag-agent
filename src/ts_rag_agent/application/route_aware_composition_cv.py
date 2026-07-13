@@ -10,7 +10,7 @@ from ts_rag_agent.application.route_aware_composition_policy import (
     analyze_route_aware_composition_policy,
 )
 
-DEFAULT_INSTALL_MARGIN_GRID = (20.0, 30.0, 35.0, 40.0, 45.0, 50.0, 60.0)
+DEFAULT_INSTALL_MARGIN_GRID = (45.0, 50.0, 60.0, 70.0, 80.0, 100.0)
 
 
 @dataclass(frozen=True)
@@ -85,6 +85,7 @@ def cross_validate_route_aware_composition_policy(
     strong_first_score_min: float = 100.0,
     strong_first_score_ratio_min: float = 1.15,
     strong_first_score_margin_min: float = 20.0,
+    enable_how_to_top1: bool = False,
     max_top1_retrieval_rank: int = 3,
     duplicate_threshold: float = 0.96,
 ) -> RouteAwareCVResult:
@@ -124,6 +125,7 @@ def cross_validate_route_aware_composition_policy(
                 strong_first_score_min=strong_first_score_min,
                 strong_first_score_ratio_min=strong_first_score_ratio_min,
                 strong_first_score_margin_min=strong_first_score_margin_min,
+                enable_how_to_top1=enable_how_to_top1,
                 max_top1_retrieval_rank=max_top1_retrieval_rank,
                 duplicate_threshold=duplicate_threshold,
             )
@@ -140,6 +142,7 @@ def cross_validate_route_aware_composition_policy(
             strong_first_score_min=strong_first_score_min,
             strong_first_score_ratio_min=strong_first_score_ratio_min,
             strong_first_score_margin_min=strong_first_score_margin_min,
+            enable_how_to_top1=enable_how_to_top1,
             max_top1_retrieval_rank=max_top1_retrieval_rank,
             duplicate_threshold=duplicate_threshold,
         )
@@ -203,6 +206,7 @@ def _score_cases(
     strong_first_score_min: float,
     strong_first_score_ratio_min: float,
     strong_first_score_margin_min: float,
+    enable_how_to_top1: bool,
     max_top1_retrieval_rank: int,
     duplicate_threshold: float,
 ) -> RouteAwareCVThresholdScore:
@@ -211,6 +215,7 @@ def _score_cases(
         strong_first_score_ratio_min=strong_first_score_ratio_min,
         strong_first_score_margin_min=strong_first_score_margin_min,
         install_upgrade_score_margin_min=install_upgrade_score_margin_min,
+        enable_how_to_top1=enable_how_to_top1,
         max_top1_retrieval_rank=max_top1_retrieval_rank,
         duplicate_threshold=duplicate_threshold,
     )

@@ -4823,3 +4823,334 @@ pytest: 57 passed
   2. 对 how-to 增加独立 CV 网格，而不是沿用全局 ratio/margin；
   3. 引入非 gold 的文档一致性信号，例如 top1 文档是否和 top2/top3 文档同主题、标题是否强匹配问题。
 - 在 Stage 25 前，`route-aware` 不能进入默认 runtime。
+
+## Stage 25 - Disable How-To Top1 And Keep Only Strict Install Top1
+
+### 目标
+
+- 重新设计 Stage 24 暴露风险的 `how_to_or_lookup` route gate。
+- 判断 how-to 是否能通过更高 margin/ratio 变安全。
+- 如果不能，就关闭 how-to top1，只保留更保守的 install/config top1。
+
+### 起始状态
+
+```text
+git: main...origin/main clean
+```
+
+Stage 24 结论：
+
+- Dev 上 strict route-aware 表现好。
+- Train CV 和 train verified RAG 都回退。
+- 即使把 install top1 几乎关掉，train 上仍有 how-to citation loss。
+
+### 离线候选策略分析
+
+本阶段先不改代码，直接用 dev/train answer-gap artifacts 做反事实分析：
+
+- current strict：Stage 24 策略，how-to 仍允许 top1，install margin `45.0`
+- install only：关闭 how-to top1，install margin `45.0`
+- how-to margin grid：`20, 30, 45, 60, 80, 100, 120`
+- how-to ratio grid：`1.15, 1.3, 1.5, 1.8, 2.0, 2.5`
+- install margin grid with how-to disabled：`45, 60, 80, 100, 120, 150, 999`
+
+关键结果：
+
+```text
+dev current strict:
+  F1 delta: +0.0061
+  citation_delta: 0
+
+dev install-only margin 60:
+  F1 delta: +0.0002
+  citation_delta: 0
+
+train current strict:
+  F1 delta: -0.0022
+  citation_delta: -7
+
+train install-only margin 45:
+  F1 delta: -0.0008
+  citation_delta: -3
+
+train install-only margin 60:
+  F1 delta: +0.0002
+  citation_delta: 0
+
+train install-only margin 100:
+  F1 delta: 0.0000
+  citation_delta: 0
+```
+
+How-to 结论：
+
+- 提高 how-to margin/ratio 不能可靠解决风险。
+- Train 里存在 high-margin how-to false positive，例如：
+
+```text
+TRAIN_Q384
+route: how_to_or_lookup
+first-vs-second margin: about 100.6
+ratio: about 1.977
+gold in top3: true
+gold top1: false
+```
+
+这说明单靠更高分数差会继续放过一部分 how-to citation loss。
+
+### 本阶段代码改动
+
+- 更新 `RouteAwareCompositionPolicy`：
+  - policy name 改为 `route_aware_strict_install_top1_otherwise_top3`
+  - `enable_how_to_top1=False`
+  - `install_upgrade_score_margin_min=60.0`
+  - how-to top1 只能显式启用，默认关闭
+- 更新 `scripts/analyze_route_aware_composition.py`：
+  - 新增 `--enable-how-to-top1/--disable-how-to-top1`
+  - 默认 `--disable-how-to-top1`
+  - 默认 install margin 改为 `60.0`
+- 更新 `route_aware_composition_cv.py`：
+  - 默认 install margin grid 改为 `45, 50, 60, 70, 80, 100`
+  - CV 默认禁用 how-to top1
+- 更新 `create_answer_composition_policy`：
+  - 保留旧 route-aware policy name alias，避免旧报告里的名字无法创建策略
+- 更新测试：
+  - 覆盖 how-to 默认不再 top1
+  - 覆盖 how-to 必须显式启用才会 top1
+  - runtime route-aware 测试改用足够强的 install margin
+
+### 离线验证
+
+Dev：
+
+```powershell
+python scripts\analyze_route_aware_composition.py `
+  --answer-gap-report artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage18_cve_anchor.json `
+  --output artifacts\route_aware_composition_policy_stage25_dev_strict_install_only.json
+```
+
+结果：
+
+```text
+average_baseline_f1: 0.2808
+average_policy_f1: 0.2810
+average_f1_delta: +0.0002
+baseline gold citation: 95
+policy gold citation: 95
+citation_delta: 0
+changed_answer_count: 1
+f1_improved_count: 1
+f1_regressed_count: 0
+citation_lost_count: 0
+```
+
+Train：
+
+```powershell
+python scripts\analyze_route_aware_composition.py `
+  --answer-gap-report artifacts\answer_gap_analysis_train_hybrid_routing_mcpd3_stage24_cv_source.json `
+  --output artifacts\route_aware_composition_policy_stage25_train_strict_install_only.json
+```
+
+结果：
+
+```text
+average_baseline_f1: 0.2609
+average_policy_f1: 0.2614
+average_f1_delta: +0.0005
+baseline gold citation: 232
+policy gold citation: 232
+citation_delta: 0
+changed_answer_count: 5
+f1_improved_count: 5
+f1_regressed_count: 0
+citation_lost_count: 0
+```
+
+### CV 验证
+
+Dev：
+
+```powershell
+python scripts\cross_validate_route_aware_composition.py `
+  --answer-gap-report artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage18_cve_anchor.json `
+  --fold-count 5 `
+  --output artifacts\route_aware_composition_cv_stage25_dev_strict_install_only.json
+```
+
+结果：
+
+```text
+average_baseline_f1: 0.2808
+average_policy_f1: 0.2818
+average_f1_delta: +0.0010
+baseline gold citation: 95
+policy gold citation: 95
+citation_delta: 0
+citation_lost_count: 0
+selected_margin_counts:
+  45.0: 4
+  50.0: 1
+```
+
+Train：
+
+```powershell
+python scripts\cross_validate_route_aware_composition.py `
+  --answer-gap-report artifacts\answer_gap_analysis_train_hybrid_routing_mcpd3_stage24_cv_source.json `
+  --fold-count 5 `
+  --output artifacts\route_aware_composition_cv_stage25_train_strict_install_only.json
+```
+
+结果：
+
+```text
+average_baseline_f1: 0.2609
+average_policy_f1: 0.2612
+average_f1_delta: +0.0003
+baseline gold citation: 232
+policy gold citation: 232
+citation_delta: 0
+citation_lost_count: 0
+selected_margin_counts:
+  60.0: 4
+  70.0: 1
+```
+
+### End-To-End Verified RAG
+
+Dev route-aware：
+
+```powershell
+python scripts\evaluate_verified_rag.py `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --min-evidence-score 15 `
+  --composition-policy route-aware `
+  --sample-limit 1000 `
+  --output artifacts\verified_rag_dev_hybrid_routing_m15_stage25_route_aware_report.json
+```
+
+Result：
+
+```text
+composition_policy: route_aware_strict_install_top1_otherwise_top3
+
+verified average_token_f1: 0.2757
+verified gold_doc_citation_rate: 0.6013
+verified gold citation count: 95 / 158 generated answerable
+answerable_refusal_rate: 0.0125
+unanswerable_refusal_rate: 0.0267
+newly_refused: 6
+```
+
+Compared with Stage 23 top-k report:
+
+```text
+top-k verified average_token_f1: 0.2755
+route-aware verified average_token_f1: 0.2757
+F1 delta: +0.0002
+gold citation delta: 0
+```
+
+Train route-aware：
+
+```powershell
+python scripts\evaluate_verified_rag.py `
+  --split train `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --min-evidence-score 15 `
+  --composition-policy route-aware `
+  --sample-limit 1000 `
+  --output artifacts\verified_rag_train_hybrid_routing_m15_stage25_route_aware_report.json
+```
+
+Result：
+
+```text
+composition_policy: route_aware_strict_install_top1_otherwise_top3
+
+verified average_token_f1: 0.2562
+verified gold_doc_citation_rate: 0.5249
+verified gold citation count: about 232 / 442 generated answerable
+answerable_refusal_rate: 0.0178
+unanswerable_refusal_rate: 0.0333
+newly_refused: 13
+```
+
+Compared with Stage 24 top-k report:
+
+```text
+top-k verified average_token_f1: 0.2557
+route-aware verified average_token_f1: 0.2562
+F1 delta: +0.0005
+gold citation delta: 0
+```
+
+逐题 verified 对比：
+
+```text
+dev citation losses: 0
+dev citation gains: 0
+dev changed answers: 4
+
+train citation losses: 0
+train citation gains: 0
+train changed answers: 8
+```
+
+Changed answer routes：
+
+```text
+dev changed answerable:
+  DEV_Q022 install_upgrade_config F1 delta +0.0326
+
+train changed answerable:
+  TRAIN_Q013 install_upgrade_config F1 delta +0.1175
+  TRAIN_Q020 install_upgrade_config F1 delta +0.0781
+  TRAIN_Q136 install_upgrade_config F1 delta +0.0203
+  TRAIN_Q160 install_upgrade_config F1 delta +0.0101
+  TRAIN_Q345 install_upgrade_config F1 delta +0.0068
+```
+
+### 测试
+
+```powershell
+python -m ruff check .
+python -m pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 58 passed
+```
+
+### 结论
+
+- Stage 25 解决了 Stage 24 暴露的 how-to citation risk：
+  how-to top1 默认关闭后，dev/train verified 都没有 citation loss。
+- 新 route-aware policy 的收益非常小：
+  - dev verified F1 `+0.0002`
+  - train verified F1 `+0.0005`
+- 这说明它更像“安全的微调实验参数”，不是足够有价值的默认策略。
+- 默认 runtime 仍然保持 `top-k`。
+- `route-aware` 可以保留，但当前不值得默认化。
+
+### 我学到的
+
+- 数据驱动的下一步不一定是继续加复杂规则；有时是关闭不稳定分支。
+- How-to 问题表面上像 direct answer，但 top1 文档不一定是 gold 文档。
+- CV 让策略从“dev 上很好”变成“跨 split 更诚实”；收益变小了，但风险也被压下来了。
+- 当收益只有 `+0.0002` 到 `+0.0005` 时，默认化的工程价值不足。
+
+### 下一步
+
+- 做 Stage 26：决定 route-aware 的定位。
+- 可选方向：
+  1. 保留为实验参数，转向更高收益的 evidence selector / retrieval 改进；
+  2. 分析 install-only changed cases，看看是否能形成更有价值的 install-specific policy；
+  3. 回到 answer-gap 的最大痛点：gold document in context but selected answer weak，继续改 evidence selection 而不是 composition。
+- 当前建议：不要继续在 route-aware composition 上做小阈值调参，转向 evidence selection 或 retrieval。
