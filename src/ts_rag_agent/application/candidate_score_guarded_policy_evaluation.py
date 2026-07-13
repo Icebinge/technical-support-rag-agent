@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ts_rag_agent.application.candidate_reranker_cv import (
+    CandidateRerankerSelection,
     cross_validated_candidate_reranker_selections,
 )
 from ts_rag_agent.application.candidate_reranker_policy_search import (
@@ -67,12 +68,17 @@ class CandidateScoreGuardedPolicyEvaluationResult:
     """Stage 39 fixed-policy evaluation result."""
 
     model_name: str
-    fold_count: int
+    selection_scope: str
+    fold_count: int | None
     max_answer_candidates: int
     policies: list[GuardedPolicyEvaluation]
     deltas_vs_main: list[GuardedPolicyDelta]
     findings: list[str]
     analysis_scope: str
+    train_split: str | None = None
+    evaluation_split: str | None = None
+    train_question_count: int | None = None
+    evaluation_question_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -100,15 +106,54 @@ def evaluate_candidate_score_guarded_policies(
         raise ValueError("rows must not be empty")
     if max_answer_candidates <= 0:
         raise ValueError("max_answer_candidates must be positive")
-    policy_specs = list(policies or default_stage39_policy_specs())
-    if not policy_specs:
-        raise ValueError("policies must not be empty")
 
     selections = cross_validated_candidate_reranker_selections(
         rows=rows,
         model_name=model_name,
         fold_count=fold_count,
     )
+    return evaluate_candidate_score_guarded_policies_from_selections(
+        selections=selections,
+        rows=rows,
+        gold_answers_by_question_key=gold_answers_by_question_key,
+        model_name=model_name,
+        max_answer_candidates=max_answer_candidates,
+        policies=policies,
+        selection_scope="grouped_cv",
+        fold_count=fold_count,
+        analysis_scope=(
+            "Offline fixed-policy evaluation only. Policies use grouped-CV candidate "
+            "reranker selections and runtime-available candidate features. The "
+            "single-candidate mode uses candidate token-F1 labels; the top-k mode "
+            "recomputes answer token F1 from local gold answers and candidate "
+            "metadata sentences. Runtime behavior is not changed."
+        ),
+    )
+
+
+def evaluate_candidate_score_guarded_policies_from_selections(
+    selections: Sequence[CandidateRerankerSelection],
+    rows: Sequence[Mapping[str, Any]],
+    gold_answers_by_question_key: Mapping[str, str],
+    model_name: str = "logistic_best_candidate",
+    max_answer_candidates: int = 3,
+    policies: Sequence[tuple[str, CandidateRerankerPolicyConfig]] | None = None,
+    selection_scope: str = "precomputed",
+    fold_count: int | None = None,
+    train_split: str | None = None,
+    evaluation_split: str | None = None,
+    train_question_count: int | None = None,
+    evaluation_question_count: int | None = None,
+    analysis_scope: str | None = None,
+) -> CandidateScoreGuardedPolicyEvaluationResult:
+    """Evaluate fixed guarded policies from already-computed reranker selections."""
+
+    if not rows:
+        raise ValueError("rows must not be empty")
+    if not selections:
+        raise ValueError("selections must not be empty")
+    if max_answer_candidates <= 0:
+        raise ValueError("max_answer_candidates must be positive")
     policy_evaluations = [
         _evaluate_policy(
             label=label,
@@ -118,24 +163,28 @@ def evaluate_candidate_score_guarded_policies(
             gold_answers_by_question_key=gold_answers_by_question_key,
             max_answer_candidates=max_answer_candidates,
         )
-        for label, config in policy_specs
+        for label, config in _policy_specs(policies)
     ]
     main_policy = policy_evaluations[0]
     deltas = _deltas_vs_main(main_policy=main_policy, policies=policy_evaluations[1:])
     return CandidateScoreGuardedPolicyEvaluationResult(
         model_name=model_name,
+        selection_scope=selection_scope,
         fold_count=fold_count,
         max_answer_candidates=max_answer_candidates,
         policies=policy_evaluations,
         deltas_vs_main=deltas,
         findings=_findings(policy_evaluations, deltas),
-        analysis_scope=(
-            "Offline fixed-policy evaluation only. Policies use grouped-CV candidate "
-            "reranker selections and runtime-available candidate features. The "
-            "single-candidate mode uses candidate token-F1 labels; the top-k mode "
-            "recomputes answer token F1 from local gold answers and candidate "
-            "metadata sentences. Runtime behavior is not changed."
+        analysis_scope=analysis_scope
+        or (
+            "Offline fixed-policy evaluation only. Policies use precomputed candidate "
+            "reranker selections and runtime-available candidate features. Runtime "
+            "behavior is not changed."
         ),
+        train_split=train_split,
+        evaluation_split=evaluation_split,
+        train_question_count=train_question_count,
+        evaluation_question_count=evaluation_question_count,
     )
 
 
@@ -199,6 +248,8 @@ def candidate_score_guarded_policy_evaluation_to_dict(
 def write_candidate_score_guarded_policy_visualizations(
     result: CandidateScoreGuardedPolicyEvaluationResult,
     output_dir: Path,
+    artifact_prefix: str = "stage39",
+    title_prefix: str = "Stage 39",
 ) -> list[VisualizationArtifact]:
     """Write SVG charts for Stage 39 fixed-policy evaluation."""
 
@@ -206,8 +257,8 @@ def write_candidate_score_guarded_policy_visualizations(
     topk_mode_name = _topk_mode_name(result.policies[0])
     topk_label = _topk_display_label(topk_mode_name)
     charts = {
-        f"stage39_{topk_label}_policy_delta.svg": _render_bar_chart_svg(
-            title=f"Stage 39 {topk_label} proxy delta by policy",
+        f"{artifact_prefix}_{topk_label}_policy_delta.svg": _render_bar_chart_svg(
+            title=f"{title_prefix} {topk_label} proxy delta by policy",
             bars=[
                 _Bar(
                     label=policy.label,
@@ -218,8 +269,8 @@ def write_candidate_score_guarded_policy_visualizations(
             ],
             x_label="average answer token F1 delta vs baseline",
         ),
-        f"stage39_{topk_label}_policy_regressions.svg": _render_bar_chart_svg(
-            title=f"Stage 39 {topk_label} proxy regressions by policy",
+        f"{artifact_prefix}_{topk_label}_policy_regressions.svg": _render_bar_chart_svg(
+            title=f"{title_prefix} {topk_label} proxy regressions by policy",
             bars=[
                 _Bar(
                     label=policy.label,
@@ -230,8 +281,10 @@ def write_candidate_score_guarded_policy_visualizations(
             ],
             x_label="regression cases",
         ),
-        f"stage39_{topk_label}_policy_citation_exchange.svg": _render_bar_chart_svg(
-            title=f"Stage 39 {topk_label} proxy citation exchange by policy",
+        (
+            f"{artifact_prefix}_{topk_label}_policy_citation_exchange.svg"
+        ): _render_bar_chart_svg(
+            title=f"{title_prefix} {topk_label} proxy citation exchange by policy",
             bars=[
                 bar
                 for policy in result.policies
@@ -239,8 +292,8 @@ def write_candidate_score_guarded_policy_visualizations(
             ],
             x_label="case count",
         ),
-        "stage39_single_candidate_policy_delta.svg": _render_bar_chart_svg(
-            title="Stage 39 single-candidate proxy delta by policy",
+        f"{artifact_prefix}_single_candidate_policy_delta.svg": _render_bar_chart_svg(
+            title=f"{title_prefix} single-candidate proxy delta by policy",
             bars=[
                 _Bar(
                     label=policy.label,
@@ -259,6 +312,15 @@ def write_candidate_score_guarded_policy_visualizations(
         path.write_text(svg, encoding="utf-8")
         artifacts.append(VisualizationArtifact(name=filename, path=str(path)))
     return artifacts
+
+
+def _policy_specs(
+    policies: Sequence[tuple[str, CandidateRerankerPolicyConfig]] | None,
+) -> list[tuple[str, CandidateRerankerPolicyConfig]]:
+    policy_specs = list(default_stage39_policy_specs() if policies is None else policies)
+    if not policy_specs:
+        raise ValueError("policies must not be empty")
+    return policy_specs
 
 
 def _evaluate_policy(

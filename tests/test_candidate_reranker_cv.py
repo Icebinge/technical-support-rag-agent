@@ -3,6 +3,7 @@ from pathlib import Path
 from ts_rag_agent.application.candidate_reranker_cv import (
     candidate_reranker_cv_result_to_dict,
     cross_validate_candidate_rerankers,
+    split_validated_candidate_reranker_selections,
     write_cv_visualizations,
 )
 
@@ -83,6 +84,50 @@ def test_cross_validated_candidate_rerankers_reject_unknown_model():
         assert "Unknown candidate reranker model" in str(exc)
     else:
         raise AssertionError("unknown model should fail")
+
+
+def test_split_validated_candidate_reranker_selections_train_on_train_validate_dev():
+    rows = [
+        candidate
+        for question_index in range(1, 7)
+        for candidate in _question_rows(question_index)
+    ]
+
+    selections = split_validated_candidate_reranker_selections(
+        rows=rows,
+        model_name="logistic_best_candidate",
+        train_split="train",
+        validation_split="dev",
+    )
+
+    assert len(selections) == 3
+    assert {selection.split for selection in selections} == {"dev"}
+    assert all(selection.selected_candidate_rank == 2 for selection in selections)
+    assert all(
+        selection.selected_candidate_token_f1
+        > selection.baseline_candidate_token_f1
+        for selection in selections
+    )
+
+
+def test_split_validated_candidate_reranker_selections_reject_same_split():
+    rows = [
+        candidate
+        for question_index in range(1, 3)
+        for candidate in _question_rows(question_index)
+    ]
+
+    try:
+        split_validated_candidate_reranker_selections(
+            rows=rows,
+            model_name="logistic_best_candidate",
+            train_split="train",
+            validation_split="train",
+        )
+    except ValueError as exc:
+        assert "must be different" in str(exc)
+    else:
+        raise AssertionError("same train/validation split should fail")
 
 
 def _question_rows(question_index: int) -> list[dict]:

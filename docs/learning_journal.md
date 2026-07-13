@@ -9167,3 +9167,263 @@ pytest: 97 passed
   4. 继续同时报告 single-candidate proxy 和 top3 proxy；
   5. 明确保持 held-out test set 不使用；
   6. 只有 train-to-dev 边界验证也稳定后，才讨论是否进入最终 test set 一次性评估或 runtime dev-style end-to-end。
+
+## Stage 40 - Split-respecting train-to-dev candidate-score policy validation
+
+真实执行时间：2026-07-13
+
+### 目标
+
+- 把 Stage 39 的 `dev,train` grouped-CV 结果推进到更严格的 split-respecting 验证。
+- 分成两块做：
+  1. `train` only grouped-CV：只在 train split 内观察固定策略；
+  2. train-to-dev holdout：candidate reranker 只用 train split 拟合，再只在 dev split 上评估固定策略。
+- 继续保持边界：
+  - 不使用 held-out test set；
+  - 不改 runtime 默认策略；
+  - 不把 holdout 结果包装成最终泛化结论。
+
+### 变更内容
+
+- 在 `candidate_reranker_cv.py` 新增 `split_validated_candidate_reranker_selections()`：
+  - 明确训练 split 和验证 split 必须不同；
+  - 明确拒绝空 split；
+  - 训练时只使用 `train_split`；
+  - selection 只输出 `validation_split` 的 question。
+- 把 Stage 39 的 candidate-score policy evaluation 抽象为可复用接口：
+  - 新增 `evaluate_candidate_score_guarded_policies_from_selections()`；
+  - 结果中新增 `selection_scope`、`train_split`、`evaluation_split`、question count 等字段；
+  - SVG 写出支持自定义 artifact prefix 和 title prefix。
+- 新增 `candidate_score_guarded_policy_split_validation.py`：
+  - 统一输出 train-only CV 与 train-to-dev holdout；
+  - 复用同一套 single/top3 proxy metrics；
+  - 复用同一套固定策略集合。
+- 新增脚本 `scripts/evaluate_candidate_score_guarded_policy_split_validation.py`。
+- 新增测试：
+  - train-to-dev selection 只输出 dev 问题；
+  - 同 split 会报错；
+  - Stage 40 split validation 可序列化；
+  - Stage 40 SVG 可写出；
+  - 显式空 policy list 会报错，避免隐式回到默认策略。
+
+### 实验命令
+
+```powershell
+python scripts\evaluate_candidate_score_guarded_policy_split_validation.py `
+  --dataset artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --model logistic_best_candidate `
+  --train-split train `
+  --evaluation-split dev `
+  --train-fold-count 5 `
+  --max-answer-candidates 3 `
+  --output artifacts\candidate_reranker_stage40_candidate_score_split_validation.json `
+  --visualization-dir artifacts\candidate_reranker_stage40_split_validation_visuals
+```
+
+真实数据规模：
+
+```text
+train question count: 450
+dev evaluation question count: 160
+held-out test set: not used
+```
+
+### Train-only CV 结果
+
+`single_candidate_answer`：
+
+```text
+stage36_main:
+  F1 0.2581, delta +0.0293, replacements 124, regressions 34, citation lost/gained 6/42, gold citation delta +36
+
+model_margin_gte_0.10:
+  F1 0.2516, delta +0.0228, replacements 96, regressions 26, citation lost/gained 4/34, gold citation delta +30
+
+candidate_score_gte_60:
+  F1 0.2576, delta +0.0288, replacements 97, regressions 24, citation lost/gained 4/40, gold citation delta +36
+
+candidate_score_gte_90:
+  F1 0.2445, delta +0.0157, replacements 49, regressions 11, citation lost/gained 2/16, gold citation delta +14
+```
+
+`top3_leading_candidate_rewrite`：
+
+```text
+stage36_main:
+  F1 0.2612, delta +0.0011, replacements 124, regressions 14, citation lost/gained 1/3, gold citation delta +2
+
+model_margin_gte_0.10:
+  F1 0.2612, delta +0.0011, replacements 96, regressions 9, citation lost/gained 0/2, gold citation delta +2
+
+candidate_score_gte_60:
+  F1 0.2609, delta +0.0008, replacements 97, regressions 8, citation lost/gained 1/3, gold citation delta +2
+
+candidate_score_gte_90:
+  F1 0.2608, delta +0.0006, replacements 49, regressions 2, citation lost/gained 0/0, gold citation delta 0
+```
+
+Train-only CV 观察：
+
+- `model_margin_gte_0.10` 和 `stage36_main` 在 rounded top3 delta 上同为 `+0.0011`，但 `model_margin_gte_0.10` regression 更少。
+- `candidate_score_gte_60` 在 train-only CV 的 top3 delta 是 `+0.0008`，低于 main 和 margin gate；
+- 但它把 top3 regression 从 `14` 降到 `8`，single gold citation delta 仍保持 `+36`。
+
+### Train-to-dev holdout 结果
+
+`single_candidate_answer`：
+
+```text
+stage36_main:
+  F1 0.2928, delta +0.0363, replacements 42, regressions 12, citation lost/gained 3/19, gold citation delta +16
+
+model_margin_gte_0.10:
+  F1 0.2879, delta +0.0315, replacements 35, regressions 12, citation lost/gained 2/16, gold citation delta +14
+
+candidate_score_gte_60:
+  F1 0.2952, delta +0.0388, replacements 29, regressions 8, citation lost/gained 0/16, gold citation delta +16
+
+candidate_score_gte_90:
+  F1 0.2746, delta +0.0181, replacements 12, regressions 3, citation lost/gained 0/7, gold citation delta +7
+```
+
+`top3_leading_candidate_rewrite`：
+
+```text
+stage36_main:
+  F1 0.2791, delta -0.0014, replacements 42, regressions 8, citation lost/gained 2/1, gold citation delta -1
+
+model_margin_gte_0.10:
+  F1 0.2778, delta -0.0028, replacements 35, regressions 7, citation lost/gained 2/0, gold citation delta -2
+
+candidate_score_gte_60:
+  F1 0.2813, delta +0.0008, replacements 29, regressions 1, citation lost/gained 0/0, gold citation delta 0
+
+candidate_score_gte_90:
+  F1 0.2806, delta +0.0001, replacements 12, regressions 0, citation lost/gained 0/0, gold citation delta 0
+```
+
+Holdout 关键差异：
+
+```text
+candidate_score_gte_60 vs stage36_main / top3:
+  delta: -0.0014 -> +0.0008
+  regressions: 8 -> 1
+  citation lost/gained: 2/1 -> 0/0
+  gold citation delta: -1 -> 0
+
+candidate_score_gte_60 vs stage36_main / single:
+  delta: +0.0363 -> +0.0388
+  regressions: 12 -> 8
+  citation lost/gained: 3/19 -> 0/16
+  gold citation delta: +16 -> +16
+```
+
+### 可视化结果
+
+本阶段新增 8 个 SVG：
+
+```text
+artifacts/candidate_reranker_stage40_split_validation_visuals/stage40_train_cv_single_candidate_policy_delta.svg
+artifacts/candidate_reranker_stage40_split_validation_visuals/stage40_train_cv_top3_policy_delta.svg
+artifacts/candidate_reranker_stage40_split_validation_visuals/stage40_train_cv_top3_policy_regressions.svg
+artifacts/candidate_reranker_stage40_split_validation_visuals/stage40_train_cv_top3_policy_citation_exchange.svg
+artifacts/candidate_reranker_stage40_split_validation_visuals/stage40_holdout_single_candidate_policy_delta.svg
+artifacts/candidate_reranker_stage40_split_validation_visuals/stage40_holdout_top3_policy_delta.svg
+artifacts/candidate_reranker_stage40_split_validation_visuals/stage40_holdout_top3_policy_regressions.svg
+artifacts/candidate_reranker_stage40_split_validation_visuals/stage40_holdout_top3_policy_citation_exchange.svg
+```
+
+完整 JSON artifact：
+
+```text
+artifacts/candidate_reranker_stage40_candidate_score_split_validation.json
+```
+
+说明：以上 artifact 均在本地 `artifacts/` 下，按 `.gitignore` 规则不纳入 git。
+
+### 问题与原因
+
+- 问题 1：Stage 39 的 `candidate_score_gte_60` 阈值来自 `dev,train` grouped-CV 后的分析。
+  - 原因：Stage 38/39 都还没有严格切开 train/dev 边界。
+  - 处理：Stage 40 增加 train-only CV 与 train-to-dev holdout，明确不使用 test set。
+- 问题 2：Train-only CV 与 dev holdout 的策略排序不完全一致。
+  - Train-only CV 中 `model_margin_gte_0.10` 的 top3 rounded delta 与 main 同为 `+0.0011`，且 regression 更少；
+  - Dev holdout 中 `candidate_score_gte_60` 最强，top3 delta 变为正，regression 从 `8` 降到 `1`。
+  - 这说明 split 边界下仍存在分布差异，不能只凭一个 aggregate 排名直接改 runtime。
+- 问题 3：显式空 policy list 最初会因为 Python 的 truthy 逻辑退回默认 policy。
+  - 原因：`policies or default_stage39_policy_specs()` 会把空列表当作未传参。
+  - 处理：改成 `policies is None` 才使用默认策略；显式空策略会报错。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\candidate_reranker_cv.py `
+  src\ts_rag_agent\application\candidate_score_guarded_policy_evaluation.py `
+  src\ts_rag_agent\application\candidate_score_guarded_policy_split_validation.py `
+  scripts\evaluate_candidate_score_guarded_policy_split_validation.py `
+  tests\test_candidate_reranker_cv.py `
+  tests\test_candidate_score_guarded_policy_evaluation.py `
+  tests\test_candidate_score_guarded_policy_split_validation.py
+
+pytest -q tests\test_candidate_reranker_cv.py `
+  tests\test_candidate_score_guarded_policy_evaluation.py `
+  tests\test_candidate_score_guarded_policy_split_validation.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 10 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 102 passed
+```
+
+### 结论
+
+- `candidate_score_gte_60` 在 dev holdout 上是当前最强候选：
+  - top3 delta 从 main 的 `-0.0014` 提到 `+0.0008`；
+  - top3 regression 从 `8` 降到 `1`；
+  - top3 citation lost 从 `2` 降到 `0`；
+  - single-candidate delta 也比 main 高 `+0.0025`；
+  - single-candidate gold citation delta 保持 `+16`。
+- 但 train-only CV 并没有把它排成唯一明显第一：
+  - `model_margin_gte_0.10` 在 train-only CV 的 top3 rounded delta 与 main 同为 `+0.0011`；
+  - `candidate_score_gte_60` 的 train-only top3 delta 是 `+0.0008`。
+- 因此 Stage 40 的结论是：
+  - `candidate_score_gte_60` 可以进入更细的 dev holdout changed-case 审计；
+  - 不能直接设为 runtime 默认；
+  - 不能使用 held-out test set 做反复调参。
+
+### 我学到的
+
+- 严格切开 train/dev 后，aggregate ranking 可能变化；这比继续在 dev+train CV 上打磨更接近真实风险。
+- 只看 train-only CV 可能错过 dev holdout 上更稳的策略，但只看 dev holdout 又会带来新的调参风险。
+- candidate score gate 的价值不是“收益最大”，而是把负 top3 delta、regression 和 citation loss 同时压住。
+- 显式参数和默认参数要分清楚；空 policy list 不应该被当作“使用默认”。
+- 目前仍然没有使用测试集，这个边界必须一直写清楚。
+
+### 下一步
+
+- 做 Stage 41：dev holdout changed-case audit for `candidate_score_gte_60`。
+- 目标：
+  1. 只分析 Stage 40 dev holdout 中 `candidate_score_gte_60` 与 `stage36_main` 的 changed cases；
+  2. 找出 `candidate_score_gte_60` 留下的 1 个 top3 regression；
+  3. 拆 route、rank、document transition、candidate score bucket；
+  4. 输出 JSON 与 SVG 可视化；
+  5. 判断 holdout 收益是否集中在少数偶然 case，还是有稳定模式；
+  6. 继续不使用 held-out test set，不改 runtime 默认策略。

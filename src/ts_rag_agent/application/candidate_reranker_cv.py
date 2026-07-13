@@ -310,6 +310,45 @@ def cross_validated_candidate_reranker_selections(
     )
 
 
+def split_validated_candidate_reranker_selections(
+    rows: Sequence[Mapping[str, Any]],
+    model_name: str = LogisticBestCandidateScorer.name,
+    train_split: str = "train",
+    validation_split: str = "dev",
+) -> list[CandidateRerankerSelection]:
+    """Train on one split and select candidates for a different validation split."""
+
+    normalized_model_names = _normalize_model_names([model_name])
+    normalized_train_split = _normalize_split_name(train_split)
+    normalized_validation_split = _normalize_split_name(validation_split)
+    if normalized_train_split == normalized_validation_split:
+        raise ValueError("train_split and validation_split must be different")
+
+    examples = candidate_reranker_rows_to_examples(rows)
+    train_examples = [
+        example for example in examples if example.split == normalized_train_split
+    ]
+    validation_examples = [
+        example for example in examples if example.split == normalized_validation_split
+    ]
+    if not train_examples:
+        raise ValueError(f"No training examples found for split: {normalized_train_split}")
+    if not validation_examples:
+        raise ValueError(
+            f"No validation examples found for split: {normalized_validation_split}"
+        )
+
+    scorer = SCORER_FACTORIES[normalized_model_names[0]]().fit(train_examples)
+    selections = _select_validation_candidates(
+        scorer=scorer,
+        validation_groups=_group_examples_by_question(validation_examples),
+    )
+    return sorted(
+        selections,
+        key=lambda selection: (selection.split, selection.question_id),
+    )
+
+
 def candidate_reranker_rows_to_examples(
     rows: Sequence[Mapping[str, Any]],
 ) -> list[CandidateRerankerExample]:
@@ -710,6 +749,13 @@ def _normalize_model_names(model_names: Sequence[str]) -> tuple[str, ...]:
     if unknown_names:
         raise ValueError(f"Unknown candidate reranker model(s): {', '.join(unknown_names)}")
     return normalized_names
+
+
+def _normalize_split_name(split_name: str) -> str:
+    normalized = split_name.strip().lower()
+    if not normalized:
+        raise ValueError("split name must not be empty")
+    return normalized
 
 
 def _validate_cv_options(
