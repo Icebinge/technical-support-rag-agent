@@ -3622,3 +3622,201 @@ gold citation: 95 / 160
   2. whether selected spans should be compressed or deduplicated,
   3. whether security-detail route should choose the best window rather than always concatenating top 3,
   4. whether answer-aware and section-span candidates should be merged before final answer selection.
+
+## Stage 20 - Answer Composition Analysis
+
+### Goal
+
+- Analyze whether the remaining quality gap comes from answer composition rather than retrieval or evidence selection.
+- Keep runtime unchanged unless a composition strategy clearly improves both answer quality and citation behavior.
+- Distinguish deployable strategies from oracle diagnostics:
+  - deployable: top1, top2, dedup-top3
+  - oracle only: best single candidate, best prefix, best same-document prefix
+
+### What I Built Or Changed
+
+- Added `src/ts_rag_agent/application/answer_composition_analysis.py`.
+- Added `scripts/analyze_answer_composition.py`.
+- Added `tests/test_answer_composition_analysis.py`.
+- The analysis reads an existing answer-gap JSON report and computes:
+  - current top-k answer F1
+  - top1 F1
+  - top2 F1
+  - deduplicated top3 F1
+  - best-single oracle F1
+  - best-prefix oracle F1
+  - best-same-document-prefix oracle F1
+  - multi-document answer count
+  - duplicate answer count
+  - representative gain cases
+
+### Commands And Evidence
+
+```powershell
+python -m pytest tests\test_answer_composition_analysis.py -q
+python -m ruff check src\ts_rag_agent\application\answer_composition_analysis.py scripts\analyze_answer_composition.py tests\test_answer_composition_analysis.py
+python -m pytest -q
+python -m ruff check .
+
+python scripts\analyze_answer_composition.py `
+  --answer-gap-report artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage18_cve_anchor.json `
+  --f1-gain-margin 0.03 `
+  --sample-limit-per-bucket 30 `
+  --output artifacts\answer_composition_analysis_stage20_hybrid_stage18.json
+
+python scripts\analyze_answer_gap.py `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --max-sentences 2 `
+  --sample-limit 1000 `
+  --output artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage20_max_sentences2.json
+
+python scripts\analyze_answer_gap.py `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --max-sentences 1 `
+  --sample-limit 1000 `
+  --output artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage20_max_sentences1.json
+
+python scripts\compare_selectors.py `
+  --baseline-report artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage18_cve_anchor.json `
+  --challenger-report artifacts\answer_gap_analysis_dev_hybrid_routing_mcpd3_stage20_max_sentences2.json `
+  --baseline-label hybrid-stage18-top3 `
+  --challenger-label hybrid-stage20-top2 `
+  --f1-win-margin 0.03 `
+  --sample-limit-per-bucket 30 `
+  --output artifacts\selector_comparison_hybrid_stage18_top3_vs_stage20_top2.json
+```
+
+Verification:
+
+```text
+new tests: 2 passed
+full pytest: 50 passed
+ruff: passed
+```
+
+### Main Composition Results
+
+Input report:
+
+```text
+artifacts/answer_gap_analysis_dev_hybrid_routing_mcpd3_stage18_cve_anchor.json
+```
+
+Composition analysis:
+
+```text
+total cases: 160
+current top3 average F1: 0.2805
+top1 average F1: 0.2600
+top2 average F1: 0.2826
+dedup-top3 average F1: 0.2820
+best-single oracle F1: 0.3847
+best-prefix oracle F1: 0.3553
+best-same-document-prefix oracle F1: 0.3864
+average best-prefix oracle gain: +0.0749
+```
+
+Case counts:
+
+```text
+top1 beats current: 52
+top2 beats current: 56
+dedup-top3 beats current: 7
+best-single oracle beats current: 88
+best-prefix oracle beats current: 78
+best-same-document-prefix oracle beats current: 89
+multi-document answer count: 151
+duplicate answer count: 6
+```
+
+Oracle strategy counts:
+
+```text
+best_single: 106
+best_prefix: 53
+best_same_doc_prefix: 1
+```
+
+### Deployable Top-K Experiment
+
+Because top2 was deployable and had a higher analysis F1 than current top3, I reran answer-gap with:
+
+```text
+max_sentences = 2
+```
+
+Result:
+
+```text
+top3 F1: 0.2805
+top3 gold citation: 95 / 160
+
+top2 F1: 0.2814
+top2 gold citation: 72 / 160
+```
+
+Comparison:
+
+```text
+top3 wins: 47
+top2 wins: 55
+ties: 58
+avg F1 delta: +0.0009
+top3 gold citation: 95
+top2 gold citation: 72
+```
+
+I also tested:
+
+```text
+max_sentences = 1
+```
+
+Result:
+
+```text
+top1 F1: 0.2565
+top1 gold citation: 48 / 160
+```
+
+### Decision
+
+- Do not change runtime default from top3 to top2.
+- Reason:
+  - top2 gives a small F1 improvement,
+  - but it loses 23 gold citations,
+  - citation faithfulness is a core RAG metric and should not be traded away for a tiny F1 gain.
+- Keep Stage 18 runtime behavior.
+- Keep Stage 20 analysis tool because it gives a clear diagnostic view of composition bottlenecks.
+
+### What I Learned
+
+- The dominant bottleneck is not just “too many documents”.
+- Many cases need better final candidate selection:
+  - top1 is often best for concise factual answers,
+  - top3 often preserves citation coverage,
+  - top2 is a tempting middle ground but hurts citation too much,
+  - dedup helps only a small number of cases.
+- The oracle gap is large:
+  - current top3 F1: 0.2805
+  - best-single oracle F1: 0.3847
+  - best-same-document-prefix oracle F1: 0.3864
+- That means the next useful model-free stage should predict which candidate subset to use, not blindly shrink all answers.
+
+### Remaining Questions
+
+- Can we predict when top1/top2 is better without using gold answers?
+- Can citation coverage be preserved while removing unrelated second/third candidates?
+- Should answer composition be route-specific?
+- Should we merge answer-aware and section-span candidates before composition?
+
+### Next Step
+
+- Do Stage 21: route-aware answer composition policy.
+- Candidate design:
+  1. keep top3 as default for citation-sensitive routes,
+  2. use top1 for concise direct-answer routes only when the first candidate has strong answer-section signals,
+  3. apply conservative near-duplicate removal,
+  4. test policy against Stage 18 top3 and reject it unless it improves F1 without large citation loss.
