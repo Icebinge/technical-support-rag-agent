@@ -10052,3 +10052,241 @@ pytest: 108 passed
   4. 重点观察是否能处理 `DEV_Q261`，同时不误杀太多类似 `DEV_Q119` 的有效替换；
   5. 继续只在 train/dev 范围内做离线验证；
   6. 不使用 held-out test set，不改 runtime 默认策略。
+
+## Stage 43 - Runtime-available document-risk proxy search
+
+### 本阶段目标
+
+- 把 Stage 42 的 document/citation 诊断结论转换成 runtime 可获得特征上的 proxy 搜索。
+- 决策特征只允许使用 candidate rank、candidate score、document id、query coverage、title overlap、answer/problem signal 等 runtime features。
+- gold answer、gold document、citation label 只用于离线评估，不能进入 guard 决策。
+- 继续只使用 train/dev，不使用 held-out test set。
+- 不改变 runtime 默认策略。
+
+### 新增内容
+
+- 新增 `src/ts_rag_agent/application/runtime_document_risk_proxy_search.py`
+  - 复用 train -> dev split validation selection；
+  - 校验 Stage 42 报告与当前重算的 `stage36_main`、`candidate_score_gte_60` 指标一致；
+  - 比较 7 个 runtime-only guard：
+    - `stage36_main`
+    - `candidate_score_gte_60`
+    - `rank4_score90`
+    - `rank5_score90`
+    - `score60_or_title3`
+    - `title_rescue_rank4_score90`
+    - `coverage_preserving_score60`
+  - 输出 guard metrics、相对 main/score60 delta、probe case 和 findings。
+- 新增 `scripts/evaluate_runtime_document_risk_proxies.py`
+  - 可复跑 Stage 43；
+  - 输出 JSON；
+  - 输出 SVG 可视化。
+- 新增 `tests/test_runtime_document_risk_proxy_search.py`
+  - 覆盖 runtime-only feature scope；
+  - 覆盖 Stage 42 报告一致性校验；
+  - 覆盖 SVG 写出。
+
+### 实验命令
+
+```powershell
+python scripts\evaluate_runtime_document_risk_proxies.py `
+  --dataset artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --stage42-report artifacts\candidate_reranker_stage42_document_aware_guard_design.json `
+  --model logistic_best_candidate `
+  --train-split train `
+  --evaluation-split dev `
+  --max-answer-candidates 3 `
+  --output artifacts\candidate_reranker_stage43_runtime_document_risk_proxy_search.json `
+  --visualization-dir artifacts\candidate_reranker_stage43_runtime_proxy_visuals
+```
+
+### 实验结果
+
+```text
+stage36_main:
+  F1 0.2791
+  delta -0.0014
+  replacements 42
+  regressions 8
+  citation lost 2
+  gold citation delta -1
+
+candidate_score_gte_60:
+  F1 0.2813
+  delta +0.0008
+  replacements 29
+  regressions 1
+  citation lost 0
+  gold citation delta 0
+
+rank4_score90:
+  F1 0.2806
+  delta +0.0001
+  replacements 25
+  regressions 0
+  citation lost 0
+  gold citation delta 0
+  changed vs score60 4
+
+rank5_score90:
+  F1 0.2803
+  delta -0.0002
+  replacements 26
+  regressions 1
+  citation lost 0
+  gold citation delta 0
+  changed vs score60 3
+
+score60_or_title3:
+  F1 0.2793
+  delta -0.0012
+  replacements 38
+  regressions 6
+  citation lost 2
+  gold citation delta -1
+
+title_rescue_rank4_score90:
+  F1 0.2790
+  delta -0.0015
+  replacements 32
+  regressions 3
+  citation lost 2
+  gold citation delta -1
+  changed vs score60 11
+
+coverage_preserving_score60:
+  F1 0.2805
+  delta +0.0000
+  replacements 24
+  regressions 0
+  citation lost 0
+  gold citation delta 0
+  changed vs score60 5
+```
+
+### Probe case 观察
+
+`DEV_Q119`：
+
+```text
+candidate_score_gte_60:
+  keep top candidate
+  delta +0.0000
+  gold cited false
+
+title_rescue_rank4_score90:
+  replace rank 4, score 13.0
+  delta +0.0758
+  gold cited true
+  citation delta +1
+```
+
+解释：`title_rescue_rank4_score90` 能救回 Stage 42 识别出的低分有效替换，但它在全体 dev 上引入了更多回归和 citation loss。
+
+`DEV_Q261`：
+
+```text
+candidate_score_gte_60:
+  replace rank 4, score 63.6936
+  same leading document false
+  delta -0.0573
+
+rank4_score90:
+  keep top candidate
+  delta +0.0000
+
+coverage_preserving_score60:
+  keep top candidate
+  delta +0.0000
+```
+
+解释：`rank4_score90` 和 `coverage_preserving_score60` 能挡住这个 residual regression，但会额外挡掉一些 score60 原本保留的正收益替换。
+
+### 可视化结果
+
+本阶段新增 5 个 SVG：
+
+```text
+artifacts/candidate_reranker_stage43_runtime_proxy_visuals/stage43_probe_delta.svg
+artifacts/candidate_reranker_stage43_runtime_proxy_visuals/stage43_runtime_proxy_changed_vs_score60.svg
+artifacts/candidate_reranker_stage43_runtime_proxy_visuals/stage43_runtime_proxy_citation_loss.svg
+artifacts/candidate_reranker_stage43_runtime_proxy_visuals/stage43_runtime_proxy_delta.svg
+artifacts/candidate_reranker_stage43_runtime_proxy_visuals/stage43_runtime_proxy_regressions.svg
+```
+
+完整 JSON artifact：
+
+```text
+artifacts/candidate_reranker_stage43_runtime_document_risk_proxy_search.json
+```
+
+说明：以上 artifact 均在本地 `artifacts/` 下，按 `.gitignore` 规则不纳入 git。
+
+### 问题与原因
+
+- 问题 1：没有找到同时优于 `candidate_score_gte_60` 的 runtime proxy。
+  - `candidate_score_gte_60` 的平均 delta 最高：`+0.0008`；
+  - `rank4_score90` 和 `coverage_preserving_score60` 可以把 regression 降到 `0`，但 delta 分别降到 `+0.0001` 和 `+0.0000`。
+- 问题 2：title overlap 不能直接替代 gold-document transition。
+  - `title_rescue_rank4_score90` 救回了 `DEV_Q119`；
+  - 但全局 delta 降到 `-0.0015`，regressions 升到 `3`，citation lost 升到 `2`。
+- 问题 3：runtime document id 只能判断是否换文档，不能判断新文档是否 gold。
+  - Stage 42 的最佳诊断信息来自 gold/citation label；
+  - Stage 43 的 runtime-only proxy 无法无损复现这个信号。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\runtime_document_risk_proxy_search.py `
+  scripts\evaluate_runtime_document_risk_proxies.py `
+  tests\test_runtime_document_risk_proxy_search.py
+
+pytest -q tests\test_runtime_document_risk_proxy_search.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 111 passed
+```
+
+### 结论
+
+- `candidate_score_gte_60` 仍是当前最好的 runtime-only reference。
+- `rank4_score90` 和 `coverage_preserving_score60` 是更保守的零回归候选，但收益低于 `candidate_score_gte_60`。
+- `title_rescue_rank4_score90` 虽然能处理 `DEV_Q119`，但整体质量更差，不能进入下一步 runtime 默认策略。
+- Stage 43 没有使用 held-out test set，也没有改变 runtime 默认行为。
+
+### 我学到的
+
+- Stage 42 的 gold/citation 诊断信号方向是对的，但 runtime proxy 的表达能力不足以直接复现。
+- `DEV_Q119` 和 `DEV_Q261` 之间存在真实冲突：救低分有效替换和拦截中分深 rank 换文档回归不是同一个简单规则能同时做好。
+- 如果只看 dev 结果继续调阈值，容易把 dev 当成训练集；下一步应把 proxy guard family 放回 train-only cross-validation。
+- runtime feature 的价值需要通过分层和交叉验证确认，不能只靠单个 probe case 决策。
+
+### 下一步
+
+- 做 Stage 44：train-only cross-validation for runtime proxy guard selection。
+- 目标：
+  1. 在 train split 内对 runtime-only guard family 做交叉验证；
+  2. 选择规则只看 train-CV aggregate，不看 dev 的最优标签；
+  3. 再用 dev holdout 做一次确认；
+  4. 继续不使用 held-out test set；
+  5. 继续不改变 runtime 默认策略。
