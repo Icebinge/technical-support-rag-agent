@@ -8102,3 +8102,294 @@ constrained regressions:   55
   4. 检查 `security_bulletin_affected_product` 这种 1-sample route 是否应从策略中移除；
   5. 决定是否进入 end-to-end answer-level 实验。
 - Stage 36 仍然只做离线分析，不改 runtime。
+
+## Stage 36 - Constrained Policy Stability Analysis
+
+### 目标
+
+- 接着 Stage 35 的 constrained policy search，检查最佳策略是否稳定。
+- 本阶段只做离线 stability analysis，不改 runtime。
+- 重点比较：
+  1. Stage 35 best policy：
+     - rank <= 5
+     - score margin >= 0.05
+     - block `how_to_or_lookup`
+     - block `security_bulletin_affected_product`
+  2. 更简单的 challenger policy：
+     - rank <= 5
+     - score margin >= 0.05
+     - block `how_to_or_lookup`
+- 核心问题：
+  - `security_bulletin_affected_product` 只有 1 个样本；
+  - 它进入 Stage 35 best policy 是否只是样本偶然性；
+  - 下一步是否应该用更简单、更稳定的 policy 进入后续验证。
+
+### 起始状态
+
+```text
+git: main...origin/main clean
+
+Stage 35 best policy:
+rank <= 5
+score margin >= 0.05
+block how_to_or_lookup
+block security_bulletin_affected_product
+
+Stage 35 best result:
+F1: 0.2708
+delta: +0.0347
+regressions: 55
+replacements: 188
+deep-rank selections: 0
+```
+
+### 本阶段新增内容
+
+- 更新 `src/ts_rag_agent/application/candidate_reranker_policy_search.py`
+  - 新增 `evaluate_candidate_reranker_policy_from_selections`
+  - 新增 `candidate_reranker_policy_decisions_from_selections`
+  - 新增 `summarize_candidate_reranker_policy_decisions`
+  - 目的是让 Stage 36 不复制 Stage 35 的 policy decision 逻辑。
+- 新增 `src/ts_rag_agent/application/candidate_reranker_policy_stability.py`
+  - `CandidateRerankerPolicyDelta`
+  - `CandidateRerankerPolicyFoldStability`
+  - `CandidateRerankerPolicyRouteComparison`
+  - `CandidateRerankerPolicyStabilityResult`
+  - 固定比较 Stage 35 best policy 和 challenger policy。
+- 新增 `scripts/analyze_candidate_reranker_policy_stability.py`
+  - 读取 Stage 31 JSONL。
+  - 重新跑 `logistic_best_candidate` grouped-CV selections。
+  - 输出 primary/challenger 的 aggregate、fold-level、route-level stability JSON。
+- 新增 `tests/test_candidate_reranker_policy_stability.py`
+  - 验证 fixed policy comparison。
+  - 验证 fold metrics 和 route comparisons。
+  - 验证结果可序列化。
+
+### 命令
+
+```powershell
+python scripts\analyze_candidate_reranker_policy_stability.py `
+  --dataset artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --model logistic_best_candidate `
+  --fold-count 5 `
+  --output artifacts\candidate_reranker_stage36_policy_stability.json
+```
+
+### 结果
+
+Primary policy：
+
+```text
+name:
+rank_lte_5__margin_gte_0.05__top1_score_protect_none__blocked_how_to_or_lookup+security_bulletin_affected_product
+
+policy_average_token_f1: 0.2708
+average_delta_vs_top_candidate: +0.0347
+oracle_gap_closed_rate: 17.97%
+replacement_count: 188
+regressed_count: 55
+final_missed_gold_document_count: 130
+final_deep_rank_count: 0
+```
+
+Challenger policy：
+
+```text
+name:
+rank_lte_5__margin_gte_0.05__top1_score_protect_none__blocked_how_to_or_lookup
+
+policy_average_token_f1: 0.2699
+average_delta_vs_top_candidate: +0.0338
+oracle_gap_closed_rate: 17.51%
+replacement_count: 189
+regressed_count: 56
+final_missed_gold_document_count: 130
+final_deep_rank_count: 0
+```
+
+Primary vs challenger：
+
+```text
+average_delta_difference: +0.0009
+policy_average_f1_difference: +0.0009
+oracle_gap_closed_difference: +0.0046
+replacement_count_difference: -1
+regressed_count_difference: -1
+final_missed_gold_document_count_difference: 0
+final_deep_rank_count_difference: 0
+```
+
+Fold-level metrics：
+
+```text
+challenger block_how_to_only:
+  fold 0: delta +0.0218, F1 0.2487, replacements 33, regressions 9
+  fold 1: delta +0.0254, F1 0.2627, replacements 37, regressions 13
+  fold 2: delta +0.0358, F1 0.2831, replacements 43, regressions 9
+  fold 3: delta +0.0470, F1 0.2699, replacements 45, regressions 15
+  fold 4: delta +0.0391, F1 0.2851, replacements 31, regressions 10
+
+primary block_how_to_and_affected_product:
+  fold 0: delta +0.0218, F1 0.2487, replacements 33, regressions 9
+  fold 1: delta +0.0254, F1 0.2627, replacements 37, regressions 13
+  fold 2: delta +0.0358, F1 0.2831, replacements 43, regressions 9
+  fold 3: delta +0.0470, F1 0.2699, replacements 45, regressions 15
+  fold 4: delta +0.0435, F1 0.2894, replacements 30, regressions 9
+```
+
+解释：
+
+- 两个 policy 在 fold 0-3 完全相同。
+- 差异只出现在 fold 4。
+- primary 比 challenger 少替换 1 个 case，少 1 个 regression，delta 多 `+0.0044` in fold 4。
+
+Route-level comparison：
+
+```text
+security_bulletin_affected_product:
+  question_count: 1
+  primary average_delta: +0.0000
+  challenger average_delta: -0.5334
+  average_delta_difference: +0.5334
+  primary replacements/regressions: 0 / 0
+  challenger replacements/regressions: 1 / 1
+
+all other routes:
+  average_delta_difference: +0.0000
+  replacement_count_difference: 0
+  regressed_count_difference: 0
+```
+
+Findings：
+
+```text
+1. Primary policy improves average delta by at most 0.001 over the simpler challenger.
+2. Primary policy reduces regression count by 1 versus the simpler challenger.
+3. security_bulletin_affected_product has only one question.
+4. Both policies eliminate deep-rank selections.
+```
+
+Artifact：
+
+```text
+artifacts/candidate_reranker_stage36_policy_stability.json
+size: 33,162 bytes
+```
+
+该 artifact 是本地生成结果，没有纳入 git。
+
+### 解释
+
+- Stage 36 说明 Stage 35 best policy 的额外优势完全来自 `security_bulletin_affected_product` 这个 1-sample route。
+- primary 比 challenger 只多：
+  - `+0.0009` average delta；
+  - 少 1 个 regression；
+  - 少 1 个 replacement。
+- 这不是足够稳定的策略证据。
+- `block how_to_or_lookup` 的主体约束是稳定的：
+  - 两个 policy 都 block 它；
+  - 两者都把 deep-rank selections 清零；
+  - 两者 fold-level delta 全部为正。
+- `security_bulletin_affected_product` 应该被视为样本量敏感项，不应在下一步主策略中写死。
+
+### 问题与原因
+
+- 问题 1：Stage 35 的 best policy 带有 1-sample route 敏感性。
+  - `security_bulletin_affected_product` 只有 1 个 question。
+  - block 它带来的收益是单个 case 贡献。
+- 问题 2：primary 与 challenger 的整体差异太小。
+  - +0.0009 average delta 不足以证明额外 route gate 稳定。
+- 问题 3：gold-document miss 没有改善。
+  - 两个 policy 的 final_missed_gold_document_count 都是 130。
+- 问题 4：仍不能 runtime 化。
+  - 两个 policy 仍有 55/56 个 regression。
+  - 当前仍是 candidate-level F1，不是 answer-level end-to-end。
+
+### 修正与处理
+
+- 不接入 runtime。
+- 不把 `security_bulletin_affected_product` block 写入下一步主策略。
+- 下一步主候选改为更简单的 challenger：
+
+```text
+rank <= 5
+score margin >= 0.05
+block how_to_or_lookup
+```
+
+- Stage 35 best policy 可作为 sensitivity 对照保留，但不作为主策略。
+
+### 测试
+
+```powershell
+ruff check src\ts_rag_agent\application\candidate_reranker_policy_search.py `
+  src\ts_rag_agent\application\candidate_reranker_policy_stability.py `
+  scripts\analyze_candidate_reranker_policy_stability.py `
+  tests\test_candidate_reranker_policy_stability.py
+
+pytest -q tests\test_candidate_reranker_policy_stability.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 1 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 90 passed
+```
+
+### 结论
+
+- Stage 36 结论：
+  - Stage 35 best policy 的额外 `security_bulletin_affected_product` block 不够稳定；
+  - `block how_to_or_lookup` 是更稳妥的主策略；
+  - rank <= 5 和 margin >= 0.05 仍然保留；
+  - 当前结果支持进入下一步 answer-level 离线实验，但仍不能改 runtime。
+
+推荐下一步主候选：
+
+```text
+rank <= 5
+score margin >= 0.05
+block how_to_or_lookup
+```
+
+对照候选：
+
+```text
+rank <= 5
+score margin >= 0.05
+block how_to_or_lookup
+block security_bulletin_affected_product
+```
+
+### 我学到的
+
+- 网格搜索的 best policy 不一定是最稳的 policy。
+- 当收益来自 1 个样本 route 时，应该优先选择更简单策略。
+- fold-level stability 能揭示“只有某一 fold 有差异”的情况。
+- 候选级策略进入 answer-level 之前，必须先把这种样本量敏感性拆出来。
+
+### 下一步
+
+- 做 Stage 37：answer-level offline guarded reranker experiment。
+- 目标：
+  1. 使用 Stage 36 主候选 policy；
+  2. 以 Stage 35 best policy 作为 sensitivity 对照；
+  3. 在 answer-level / verified RAG pipeline 上离线评估；
+  4. 比较 baseline top candidate answer 与 guarded reranker answer；
+  5. 重点看 average answer token F1、citation/gold-document、regression count。
+- Stage 37 仍先做可选离线实验，不改默认 runtime。

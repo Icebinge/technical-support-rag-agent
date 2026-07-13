@@ -243,6 +243,66 @@ def candidate_reranker_policy_search_to_dict(
     return asdict(result)
 
 
+def evaluate_candidate_reranker_policy_from_selections(
+    config: CandidateRerankerPolicyConfig,
+    selections: Sequence[CandidateRerankerSelection],
+    rows: Sequence[Mapping[str, Any]],
+    deep_rank_min: int = 6,
+) -> CandidateRerankerPolicyEvaluation:
+    """Evaluate one policy from already-computed grouped-CV selections."""
+
+    decisions = candidate_reranker_policy_decisions_from_selections(
+        config=config,
+        selections=selections,
+        rows=rows,
+        deep_rank_min=deep_rank_min,
+    )
+    return CandidateRerankerPolicyEvaluation(
+        config=config,
+        metrics=summarize_candidate_reranker_policy_decisions(
+            decisions=decisions,
+            selections=selections,
+        ),
+        route_metrics=_segment_metrics(
+            decisions=decisions,
+            segment_fn=lambda decision: decision.question_route,
+        ),
+        selected_rank_metrics=_segment_metrics(
+            decisions=decisions,
+            segment_fn=lambda decision: _rank_bucket_label(decision.final_candidate_rank),
+        ),
+    )
+
+
+def candidate_reranker_policy_decisions_from_selections(
+    config: CandidateRerankerPolicyConfig,
+    selections: Sequence[CandidateRerankerSelection],
+    rows: Sequence[Mapping[str, Any]],
+    deep_rank_min: int = 6,
+) -> list[CandidateRerankerPolicyDecision]:
+    """Apply one constrained policy to grouped-CV selections."""
+
+    row_index = _build_row_index(rows)
+    return [
+        _policy_decision(
+            config=config,
+            selection=selection,
+            question_rows=row_index[_question_key(selection.split, selection.question_id)],
+            deep_rank_min=deep_rank_min,
+        )
+        for selection in selections
+    ]
+
+
+def summarize_candidate_reranker_policy_decisions(
+    decisions: Sequence[CandidateRerankerPolicyDecision],
+    selections: Sequence[CandidateRerankerSelection],
+) -> CandidateRerankerPolicyMetrics:
+    """Summarize policy decisions against the original grouped-CV selections."""
+
+    return _metrics(decisions=decisions, selections=selections)
+
+
 def _evaluate_policy(
     config: CandidateRerankerPolicyConfig,
     selections: Sequence[CandidateRerankerSelection],
