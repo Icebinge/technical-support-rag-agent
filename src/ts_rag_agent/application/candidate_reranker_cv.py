@@ -262,6 +262,50 @@ def cross_validate_candidate_rerankers(
     )
 
 
+def cross_validated_candidate_reranker_selections(
+    rows: Sequence[Mapping[str, Any]],
+    model_name: str = LogisticBestCandidateScorer.name,
+    fold_count: int = 5,
+    f1_tie_margin: float = 0.0,
+) -> list[CandidateRerankerSelection]:
+    """Return deterministic grouped-CV selections for one candidate reranker."""
+
+    examples = candidate_reranker_rows_to_examples(rows)
+    normalized_model_names = _normalize_model_names([model_name])
+    _validate_cv_options(
+        examples=examples,
+        fold_count=fold_count,
+        f1_tie_margin=f1_tie_margin,
+    )
+    question_groups = _group_examples_by_question(examples)
+    folds = _build_deterministic_folds(list(question_groups), fold_count)
+    selections = []
+    for validation_question_keys in folds:
+        validation_key_set = set(validation_question_keys)
+        train_examples = [
+            example
+            for question_key, question_examples in question_groups.items()
+            if question_key not in validation_key_set
+            for example in question_examples
+        ]
+        validation_groups = {
+            question_key: question_examples
+            for question_key, question_examples in question_groups.items()
+            if question_key in validation_key_set
+        }
+        scorer = SCORER_FACTORIES[normalized_model_names[0]]().fit(train_examples)
+        selections.extend(
+            _select_validation_candidates(
+                scorer=scorer,
+                validation_groups=validation_groups,
+            )
+        )
+    return sorted(
+        selections,
+        key=lambda selection: (selection.split, selection.question_id),
+    )
+
+
 def candidate_reranker_rows_to_examples(
     rows: Sequence[Mapping[str, Any]],
 ) -> list[CandidateRerankerExample]:

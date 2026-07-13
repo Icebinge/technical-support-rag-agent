@@ -7252,3 +7252,425 @@ oracle gap closed: 11.85%
   4. gold-document candidate 存在但没选中的 case；
   5. 当前 runtime features 是否缺少关键语义信号。
 - Stage 34 仍然只做离线分析，不改 runtime。
+
+## Stage 34 - Candidate Reranker Regression/Error Analysis
+
+### 目标
+
+- 接着 Stage 33 的结论，分析 `logistic_best_candidate` 为什么虽然平均提升，但仍有不少 regression。
+- 本阶段只做离线 grouped-CV error analysis，不改 runtime。
+- 分析重点：
+  1. improved / regressed / tied case 分布；
+  2. route-level regression 来源，尤其 `how_to_or_lookup`；
+  3. selected rank 太深的 case；
+  4. gold-document candidate 存在但没选中的 case；
+  5. improved 与 regressed case 的 runtime feature 差异。
+
+### 起始状态
+
+```text
+git: main...origin/main clean
+
+Stage 33 best model:
+logistic_best_candidate
+
+Stage 33 headline:
+baseline top candidate F1: 0.2361
+selected average F1: 0.2590
+delta: +0.0229
+oracle gap closed: 11.85%
+improved / regressed / tied: 213 / 147 / 250
+```
+
+### 本阶段新增内容
+
+- 更新 `src/ts_rag_agent/application/candidate_reranker_cv.py`
+  - 新增 `cross_validated_candidate_reranker_selections`
+  - 用于重新跑同样的 deterministic grouped CV，并保留每个 validation question 的 selected candidate。
+- 新增 `src/ts_rag_agent/application/candidate_reranker_error_analysis.py`
+  - `CandidateSnapshot`
+  - `CandidateRerankerErrorCase`
+  - `ErrorOutcomeSummary`
+  - `SegmentErrorSummary`
+  - `FeatureContrastSummary`
+  - `CandidateRerankerErrorAnalysisResult`
+  - 支持 outcome、route、split、rank、gold miss、feature contrast 和 sample buckets 分析。
+- 新增 `scripts/analyze_candidate_reranker_errors.py`
+  - 读取 Stage 31 JSONL。
+  - 重新按 Stage 33 的 grouped CV 方式训练/验证。
+  - 输出 error-analysis JSON。
+- 新增 `tests/test_candidate_reranker_error_analysis.py`
+  - 验证 grouped-CV case analysis。
+  - 验证 unknown model 明确失败。
+
+### 命令
+
+```powershell
+python scripts\analyze_candidate_reranker_errors.py `
+  --dataset artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --model logistic_best_candidate `
+  --fold-count 5 `
+  --sample-limit 10 `
+  --output artifacts\candidate_reranker_stage34_error_analysis.json
+```
+
+### 结果
+
+Overall summary：
+
+```text
+question_count: 610
+improved_count: 213
+regressed_count: 147
+tied_count: 250
+
+improved_rate: 34.92%
+regressed_rate: 24.10%
+tied_rate: 40.98%
+
+average_delta_vs_top_candidate: +0.0229
+average_improvement_delta: +0.1819
+average_regression_delta: -0.1686
+
+selected_missed_gold_document_count: 130
+selected_missed_gold_document_rate: 21.31%
+
+selected_missed_oracle_best_count: 474
+selected_missed_oracle_best_rate: 77.70%
+
+selected_deep_rank_count: 117
+selected_deep_rank_rate: 19.18%
+```
+
+Route-level regression：
+
+```text
+security_bulletin_affected_product:
+  n: 1
+  improved / regressed / tied: 0 / 1 / 0
+  regressed_rate: 100.00%
+  average_delta: -0.5334
+
+security_bulletin_post_fix_behavior:
+  n: 3
+  improved / regressed / tied: 1 / 2 / 0
+  regressed_rate: 66.67%
+  average_delta: +0.0807
+  deep_rank_rate: 100.00%
+
+how_to_or_lookup:
+  n: 55
+  improved / regressed / tied: 13 / 18 / 24
+  regressed_rate: 32.73%
+  average_delta: -0.0092
+  selected_missed_gold_document_rate: 27.27%
+  deep_rank_rate: 23.64%
+
+other:
+  n: 241
+  improved / regressed / tied: 88 / 67 / 86
+  regressed_rate: 27.80%
+  average_delta: +0.0092
+  selected_missed_gold_document_rate: 23.65%
+  deep_rank_rate: 24.48%
+
+error_or_log:
+  n: 119
+  improved / regressed / tied: 52 / 28 / 39
+  regressed_rate: 23.53%
+  average_delta: +0.0602
+  selected_missed_gold_document_rate: 18.49%
+  deep_rank_rate: 22.69%
+
+install_upgrade_config:
+  n: 91
+  improved / regressed / tied: 37 / 19 / 35
+  regressed_rate: 20.88%
+  average_delta: +0.0368
+  selected_missed_gold_document_rate: 19.78%
+  deep_rank_rate: 16.48%
+
+limitation_or_restriction:
+  n: 11
+  improved / regressed / tied: 2 / 2 / 7
+  regressed_rate: 18.18%
+  average_delta: -0.0011
+  selected_missed_gold_document_rate: 36.36%
+
+security_bulletin_vulnerability_detail:
+  n: 87
+  improved / regressed / tied: 20 / 10 / 57
+  regressed_rate: 11.49%
+  average_delta: +0.0235
+  selected_missed_gold_document_rate: 14.94%
+
+security_bulletin_remediation:
+  n: 2
+  improved / regressed / tied: 0 / 0 / 2
+  regressed_rate: 0.00%
+  average_delta: +0.0000
+```
+
+Split-level：
+
+```text
+dev:
+  n: 160
+  improved / regressed / tied: 55 / 44 / 61
+  regressed_rate: 27.50%
+  average_delta: +0.0135
+  selected_missed_gold_document_rate: 26.87%
+  deep_rank_rate: 21.88%
+
+train:
+  n: 450
+  improved / regressed / tied: 158 / 103 / 189
+  regressed_rate: 22.89%
+  average_delta: +0.0262
+  selected_missed_gold_document_rate: 19.33%
+  deep_rank_rate: 18.22%
+```
+
+Selected-rank regression：
+
+```text
+rank_1:
+  n: 241
+  improved / regressed / tied: 0 / 0 / 241
+  average_delta: +0.0000
+
+rank_2:
+  n: 108
+  improved / regressed / tied: 68 / 37 / 3
+  regressed_rate: 34.26%
+  average_delta: +0.1006
+
+rank_3:
+  n: 79
+  improved / regressed / tied: 49 / 27 / 3
+  regressed_rate: 34.18%
+  average_delta: +0.0916
+
+rank_4_5:
+  n: 65
+  improved / regressed / tied: 40 / 23 / 2
+  regressed_rate: 35.38%
+  average_delta: -0.0020
+
+rank_6_10:
+  n: 71
+  improved / regressed / tied: 36 / 35 / 0
+  regressed_rate: 49.30%
+  average_delta: -0.0394
+  selected_missed_gold_document_rate: 30.99%
+
+rank_11_plus:
+  n: 46
+  improved / regressed / tied: 20 / 25 / 1
+  regressed_rate: 54.35%
+  average_delta: -0.0264
+  selected_missed_gold_document_rate: 39.13%
+```
+
+Feature contrast top signals：
+
+```text
+candidate_token_count:
+  improved selected-baseline mean: +17.1596
+  regressed selected-baseline mean: +37.3605
+  regressed_minus_improved: +20.2009
+
+retrieval_score:
+  improved selected-baseline mean: +17.9104
+  regressed selected-baseline mean: +9.1087
+  regressed_minus_improved: -8.8017
+
+candidate_score:
+  improved selected-baseline mean: -43.8597
+  regressed selected-baseline mean: -50.6369
+  regressed_minus_improved: -6.7772
+
+query_overlap_count:
+  improved selected-baseline mean: -1.0563
+  regressed selected-baseline mean: -0.1973
+  regressed_minus_improved: +0.8590
+
+answer_signal_score:
+  improved selected-baseline mean: -0.3587
+  regressed selected-baseline mean: -0.6912
+  regressed_minus_improved: -0.3325
+
+title_query_overlap_count:
+  improved selected-baseline mean: +1.0751
+  regressed selected-baseline mean: +0.7687
+  regressed_minus_improved: -0.3064
+```
+
+Largest regression samples：
+
+```text
+DEV_Q008:
+  route: how_to_or_lookup
+  delta: -0.9322
+  baseline rank/F1: 1 / 0.9630
+  selected rank/F1: 8 / 0.0308
+  oracle rank/F1: 1 / 0.9630
+  selected_missed_gold_document: true
+
+DEV_Q155:
+  route: other
+  delta: -0.9209
+  baseline rank/F1: 1 / 0.9697
+  selected rank/F1: 3 / 0.0488
+  oracle rank/F1: 1 / 0.9697
+  selected_missed_gold_document: true
+
+TRAIN_Q255:
+  route: error_or_log
+  delta: -0.9151
+  baseline rank/F1: 1 / 0.9655
+  selected rank/F1: 9 / 0.0504
+  oracle rank/F1: 1 / 0.9655
+  selected_missed_gold_document: true
+```
+
+Largest improvement samples：
+
+```text
+TRAIN_Q415:
+  route: error_or_log
+  delta: +0.9143
+  baseline rank/F1: 1 / 0.0000
+  selected rank/F1: 2 / 0.9143
+  oracle rank/F1: 2 / 0.9143
+
+TRAIN_Q548:
+  route: other
+  delta: +0.8960
+  baseline rank/F1: 1 / 0.0851
+  selected rank/F1: 7 / 0.9811
+  oracle rank/F1: 7 / 0.9811
+
+TRAIN_Q188:
+  route: how_to_or_lookup
+  delta: +0.8620
+  baseline rank/F1: 1 / 0.1176
+  selected rank/F1: 2 / 0.9796
+  oracle rank/F1: 2 / 0.9796
+```
+
+Artifact：
+
+```text
+artifacts/candidate_reranker_stage34_error_analysis.json
+size: 309,040 bytes
+```
+
+该 artifact 是本地生成结果，没有纳入 git。
+
+### 解释
+
+- Stage 34 说明 Stage 33 baseline 的主要风险不是“完全不会选更好候选”，而是“有时会跳过已经很好的 top1”。
+- 最大退化样例里，baseline rank 1 本来已经接近完美：
+  - `DEV_Q008`: top1 F1 `0.9630`
+  - `DEV_Q155`: top1 F1 `0.9697`
+  - `TRAIN_Q255`: top1 F1 `0.9655`
+- 但模型选择了 rank 3、8、9 等更深候选，导致 F1 接近 0。
+- selected rank 越深，风险明显越高：
+  - rank 2/3 虽然有 regression，但平均仍为正；
+  - rank 6-10 和 rank 11+ 的平均 delta 都为负；
+  - rank 11+ 的 regressed rate 达到 `54.35%`。
+- `how_to_or_lookup` 是 Stage 34 的重点风险 route：
+  - 平均 delta 是 `-0.0092`；
+  - regressed rate 是 `32.73%`；
+  - gold-document miss rate 是 `27.27%`。
+- feature contrast 暗示一个风险：
+  - regression case 中，selected candidate 相对 baseline 更长；
+  - 但 retrieval_score、candidate_score、answer_signal_score 的下降更明显；
+  - 当前浅层特征不能可靠判断“较长且排名更深的候选是否真的更接近答案”。
+- 130 个 selected_missed_gold_document case 说明：
+  - gold document 候选池中存在时，模型仍经常没有选中；
+  - 这不是 retrieval 缺失，而是 reranker 选择错误。
+
+### 问题与原因
+
+- 问题 1：模型缺少 top1 保护机制。
+  - 当 top1 本来非常好时，模型仍可能跳到深 rank 候选。
+- 问题 2：深 rank 选择风险高。
+  - rank 6-10 和 rank 11+ 平均收益都为负。
+- 问题 3：`how_to_or_lookup` route 不适合直接套用当前 learned reranker。
+  - 它在 Stage 33 就是负收益，Stage 34 进一步确认 regression 来源明显。
+- 问题 4：当前 runtime features 缺少语义判别能力。
+  - 现有特征主要是 overlap、heading、score、长度。
+  - 它们不足以稳定区分“更长的候选是否更完整”与“更长的候选是否只是噪声”。
+
+### 修正与处理
+
+- 不接入 runtime。
+- 不把 Stage 33 的 `logistic_best_candidate` 直接作为候选替换策略。
+- 保留 Stage 34 error-analysis 工具，作为后续策略约束和特征改进的依据。
+- 下一阶段不应盲目换模型，而应该先做 constrained reranker policy search：
+  - 限制 selected rank；
+  - 对 route 做门控；
+  - 对 top1 强信号做保护；
+  - 再用 grouped CV 验证是否能保留收益并减少 regression。
+
+### 测试
+
+```powershell
+ruff check src\ts_rag_agent\application\candidate_reranker_cv.py `
+  src\ts_rag_agent\application\candidate_reranker_error_analysis.py `
+  scripts\analyze_candidate_reranker_errors.py `
+  tests\test_candidate_reranker_error_analysis.py
+
+pytest -q tests\test_candidate_reranker_error_analysis.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 87 passed
+```
+
+### 结论
+
+- Stage 34 找到了 Stage 33 baseline 不能 runtime 化的核心原因：
+  - regression 数量 `147 / 610`；
+  - deep-rank selection 风险高；
+  - top1 本来很强时仍会被替换；
+  - `how_to_or_lookup` route 有负收益；
+  - gold-document candidate 存在时仍有 130 个没选中。
+- learned reranker 方向仍成立，但需要加约束，不能直接替换 top candidate。
+
+### 我学到的
+
+- 平均 F1 提升会掩盖严重退化个案。
+- reranker 的第一版工程化目标不是“尽量多替换”，而是“只在高把握场景替换”。
+- top1 保护、rank 上限和 route gate 是下一阶段最重要的安全约束。
+- 样例 case 比 aggregate 指标更能解释为什么不能上线。
+
+### 下一步
+
+- 做 Stage 35：constrained candidate-reranker policy search。
+- 搜索方向：
+  1. max selected rank，例如只允许 rank 2-3 或 rank 2-5；
+  2. route gate，例如先排除 `how_to_or_lookup`；
+  3. top1 protection，例如 top1 candidate F1 proxy 很强时不替换；
+  4. score margin gate，例如模型分数必须明显高于 top1 才替换；
+  5. gold-document miss / regression-aware summary。
+- Stage 35 仍然只做离线分析，不改 runtime。
