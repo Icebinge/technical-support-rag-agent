@@ -45,7 +45,11 @@ max_contexts: 1
 avg_contexts: 0.67
 ```
 
-This dataset is reserved for evaluation.
+Original intended use: evaluation.
+
+Current boundary: Stage 53 later proved that all 910 rows in this file exactly
+overlap PrimeQA train/dev after question normalization. Do not use this file as
+an independent held-out evaluation source for the current project history.
 
 ## PrimeQA TechQA
 
@@ -74,7 +78,11 @@ TechQA/training_and_dev/dev_Q_A.json
 TechQA/evaluation.py
 ```
 
-This archive is the intended source for training and development experiments.
+Original intended use: training and development experiments.
+
+Current boundary: Stage 67 uses the extracted PrimeQA/TechQA train, dev, and
+validation reference rows to plan a project-owned hybrid train/dev/test split.
+That split is still a dry run and is not yet frozen.
 
 ## Verification Boundary
 

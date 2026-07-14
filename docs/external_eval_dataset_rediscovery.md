@@ -6,6 +6,14 @@ dataset after Stage65 blocked Stage51 defaultization from MSQA adapter evidence.
 Stage66 does not download datasets, does not run metrics, does not tune Stage51,
 and does not change the default runtime.
 
+Post-Stage66 update:
+
+The user later chose to rebuild a project-owned PrimeQA/TechQA hybrid split for
+document-style RAG instead of continuing with HQA download and schema probing.
+Therefore, this document is now a historical external-dataset rediscovery
+snapshot. HQA remains a possible parked route, but it is no longer the active
+next stage.
+
 ## Why This Stage Exists
 
 Stage64 and Stage65 showed that MSQA is useful external-adapter risk evidence,
@@ -184,7 +192,7 @@ a357e2b466d102c1b30a374e87aca3b895f906ef8d5de6b7ea386741f5f6ace3
 
 These artifacts are local ignored outputs and are not committed by git policy.
 
-## Next Step
+## Original Next Step
 
 Stage67 should download HQA-Data only after user confirmation, record file URLs,
 sizes, and checksums, then run:
@@ -195,3 +203,10 @@ sizes, and checksums, then run:
 4. decision on whether HQA can be frozen into a project-owned evaluation split.
 
 No final metrics should be run before those checks pass.
+
+## Superseding Next Step
+
+Stage67 was redirected to the user-confirmed PrimeQA/TechQA hybrid split dry
+run. The active next stage after that dry run is Stage68: review whether to
+freeze the hybrid split and rebuild train/dev/test artifacts from the new split
+boundary.

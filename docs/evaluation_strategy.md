@@ -1,185 +1,31 @@
 # Evaluation Strategy
 
-This document records the current evaluation strategy after Stage 53 blocked the
-previously intended NVIDIA held-out path, Stage 55 completed external dataset
-discovery, Stage 56 probed MSQA locally, Stage 57 froze the MSQA evaluation
-split, Stage 58 recorded the MSQA answer-source baseline, Stage 59 blocked
-direct Stage 51 comparison on the current MSQA task, Stage 60 designed a
-recommended MSQA source/citation protocol, Stage 61 completed the user-confirmed
-adapter dry run, and Stage 62 blocked direct Stage 51 comparison because of
-candidate-pool mismatch.
+This document records the current evaluation strategy after Stage 67.
+
+The active route is now a project-owned PrimeQA/TechQA hybrid split. Stage 67
+only produced a dry-run plan; it did not freeze final split files, run metrics,
+or change runtime defaults.
 
 ## Current Facts
 
-- Stage 51 policy remains a non-default candidate:
+- Stage 51 remains a non-default candidate policy:
   `candidate_score_gte_60_rank_contained_preserve_baseline_out_of_rank_guarded_reranker`.
-- Stage 51 passed dev/train readiness checks, but dev/train are not final
-  held-out evidence.
-- NVIDIA TechQA-RAG-Eval `train.json` is blocked as an independent held-out
-  source for the current development history.
-- Stage 53 found:
-  - NVIDIA rows: 910
-  - exact overlap questions against PrimeQA train/dev: 910
-  - exact overlap pairs: 974
-  - unhandled overlap questions: 910
-- The user confirmed the external-independent-evaluation path after Stage 54.
-- Stage 55 recommends Microsoft Q&A (MSQA) only as the next schema-probe
-  candidate, not as an already usable held-out test set.
-- Stage 56 downloaded and parsed MSQA locally:
-  - local rows parsed: 32,236
-  - README row-count claim: 32,252
-  - row-level Microsoft Learn Q&A URL coverage: 32,236 / 32,236
-  - PrimeQA train/dev exact normalized question overlaps: 0
-  - `test_id.txt` IDs found in CSV: 587 / 588
-- Stage 57 defined the adapter contract and froze
-  `msqa_stage57_project_eval_v1`:
-  - answer field: `ProcessedAnswerText`
-  - source URL field: `Url`
-  - no answer-field fallback
-  - near-duplicate leakage threshold: token Jaccard `0.9`
-  - exact overlaps against PrimeQA train/dev: 0
-  - near-duplicate overlaps against PrimeQA train/dev: 0
-  - selected evaluation rows: 3,301
-- Stage 58 ran MSQA answer-source BM25 baselines on the frozen split:
-  - primary answer-only hit@1: 0.4147
-  - primary answer-only hit@10: 0.6128
-  - primary answer-only MRR: 0.4762
-  - primary answer-only average top1 token F1: 0.5138
-  - diagnostic question+answer page-text hit@1: 1.0
-- Stage 59 reviewed Stage 58 failure modes and compatibility with Stage 51:
-  - compatibility gate checks: 7
-  - pass: 2
-  - blocked: 5
-  - blocker count: 5
-  - primary answer-only gold-source misses at 10: 1278
-  - primary answer-only wrong top1 sources: 1932
-  - primary answer-only low-F1 top1 answers: 1758
-- Stage 59 decision:
-  - `can_run_stage51_candidate_now: false`
-  - `can_defaultize_runtime_now: false`
-  - diagnostic `question_answer_page_text` is rejected as a comparison target.
-- Stage 60 protocol design:
-  - recommended source/citation identity: `msqa_row_source_url`
-  - recommended candidate construction: `processed_answer_sentence_candidates`
-  - `can_run_stage51_candidate_now: false`
-- The user confirmed Stage 60 option A before Stage 61.
-- Stage 61 adapter dry run:
-  - candidate rows: 266,647
-  - samples with candidates: 3,301 / 3,301
-  - samples with gold-source candidate: 2,023 / 3,301
-  - contract checks passed: 7 / 7
-  - candidate JSONL rows with `question` field: 0
-  - `can_run_stage51_candidate_now: false`
-- Stage 62 distribution review:
-  - Stage61 median candidates/query: 79
-  - Stage61 p10 candidates/query: 51
-  - Stage31 max candidates/question: 15
-  - Stage61 average candidate count is 6.1134x Stage31 average
-  - direct Stage 51 adapter comparison is blocked
-- Default runtime remains unchanged.
-
-## Rejected Path
-
-Do not use `data/raw/nvidia_techqa_rag_eval/train.json` as the current held-out
-defaultization test. It has complete normalized question overlap with PrimeQA
-train/dev, so any quality metric reported as held-out would be misleading.
-
-## Chosen Path
-
-### External Independent Evaluation Set
-
-Status: user-confirmed on 2026-07-14; Stage 55 discovery complete; Stage 56
-local MSQA schema probe complete; Stage 57 project-owned MSQA split frozen;
-Stage 58 top-k answer-source baseline recorded.
-
-This is still the cleanest path to a real defaultization decision. It preserves
-the Stage 51 candidate as frozen and looks for an evaluation source that was not
-used in the PrimeQA train/dev development loop.
-
-Stage 55 result:
-
-- Recommended candidate: Microsoft Q&A (MSQA).
-- Stage 55 fit score: 17, from a generated audit rubric, not a model metric.
-- Reason: MSQA has the strongest external technical-support fit and a public
-  dataset license, but it still needs local schema and leakage checks.
-
-Stage 56 result:
-
-- MSQA local CSV is parseable and has 29 fields.
-- Required fields `QuestionId`, `AnswerId`, `QuestionText`, `AnswerText`,
-  `ProcessedAnswerText`, `Url`, and `Split` have 0 missing values.
-- `DoubleProcessedAnswerText` has 76 missing rows, so the future adapter must
-  choose an answer field explicitly.
-- Source-link coverage is strong at the row level because every row has a
-  Microsoft Learn Q&A page URL.
-- Processed-answer documentation-link coverage is partial, not complete.
-- Exact normalized overlap with PrimeQA train/dev is 0, but near-duplicate
-  leakage has not been run.
-
-Stage 57 result:
-
-- Adapter contract version: `msqa_eval_adapter_v1`.
-- Frozen split: `msqa_stage57_project_eval_v1`.
-- Selected question count: 3,301.
-- Selected question ID checksum:
-  `26cab0b636845cd321a48c12e8bcbeb5b563e5eb234e63383bbc9d0a9d8cb93b`.
-- The split is frozen for the next top-k baseline step only.
-
-Stage 58 result:
-
-- Baseline task: answer-source retrieval over frozen MSQA Q&A rows.
-- Primary variant: `answer_only`.
-- Diagnostic variant: `question_answer_page_text`.
-- The diagnostic variant reaches 1.0 because it indexes the question text, so
-  it is not the primary evidence for defaultization.
-- Stage 51 comparison remains blocked because Stage 51 is PrimeQA
-  document-grounded verified RAG logic, while Stage 58 is an MSQA answer-source
-  retrieval baseline.
-
-Stage 59 result:
-
-- Stage 51 cannot be fairly compared directly on the current Stage 58 MSQA
-  answer-source task.
-- The diagnostic question+answer page-text variant must not be used for
-  candidate comparison because it indexes the question text and trivializes
-  source-row retrieval.
-- Before any candidate comparison, the project needs an MSQA-compatible
-  source/citation identity contract and candidate construction protocol.
-
-Stage 60 result:
-
-- Recommended protocol:
-  `msqa_row_source_url + processed_answer_sentence_candidates`.
-- This uses `QuestionId + AnswerId + Url` as row-source citation identity and
-  splits `ProcessedAnswerText` into answer-sentence candidates.
-- It excludes `QuestionText`, `AnswerText` fallback, `DoubleProcessedAnswerText`
-  fallback, processed-answer links as required citation ground truth, external
-  page fetching, and runtime default changes.
-- The user confirmed this protocol before Stage 61.
-
-Stage 61 result:
-
-- The MSQA row-source answer-sentence adapter dry run passed.
-- Candidate JSONL rows: 266,647.
-- All 3,301 evaluation samples have candidate rows.
-- 2,023 samples have gold-source candidate rows under top10 answer-only source
-  retrieval.
-- All contract checks passed.
-- No candidate rows contain a `question` field.
-- Stage 51 was not run.
-
-Stage 62 result:
-
-- Stage 61 adapter contract checks passed, but candidate distribution is not
-  aligned with the Stage 31 training candidate pool.
-- Stage61 median candidates/query: 79.
-- Stage31 max candidates/question: 15.
-- Stage61 p10 candidates/query: 51, so the mismatch is broad rather than an
-  outlier-only issue.
-- Direct Stage 51 adapter comparison remains blocked.
-
-Stage65 completed the Stage64 changed-case and source-citation tradeoff review.
-It confirmed:
+- PrimeQA train/dev experiments through Stage 51 are development evidence, not
+  final held-out evidence.
+- Stage 53 blocked NVIDIA TechQA-RAG-Eval `train.json` as an independent
+  held-out source:
+  - NVIDIA rows: 910;
+  - exact overlap questions against PrimeQA train/dev: 910;
+  - exact overlap pairs: 974;
+  - unhandled overlap questions: 910.
+- Stage 57 froze an MSQA project evaluation split with 3,301 rows and 0 exact or
+  near-duplicate overlaps against PrimeQA train/dev at token Jaccard `0.9`.
+- Stage 58 recorded MSQA answer-source baselines, but they are not
+  PrimeQA-style document-citation metrics.
+- Stage 64 ran the capped MSQA Stage51 adapter comparison and showed F1
+  regression.
+- Stage 65 reviewed changed cases and blocked defaultization from MSQA adapter
+  evidence:
 
 ```text
 consistency_checks_passed: true
@@ -191,76 +37,140 @@ citation_lost_count: 0
 decision: msqa_stage51_changed_case_review_blocks_defaultization
 ```
 
-Required next step:
+- Stage 66 searched for another external dataset and recommended HQA-Data only
+  as a schema-probe candidate. It did not download HQA, run HQA metrics, or
+  change runtime defaults.
+- After discussing the final document-style RAG target, the user chose to rebuild
+  a project-owned PrimeQA/TechQA split instead of continuing with a new external
+  dataset.
+- Stage 67 planned that split as a dry run from local PrimeQA/TechQA files.
 
-Stage66 followed the user-confirmed route to find another external dataset. It
-recommends HQA-Data from Ubuntu Dialogue Corpus for the next schema probe:
+## Rejected Path
+
+Do not use `data/raw/nvidia_techqa_rag_eval/train.json` as the current held-out
+defaultization test. It has complete normalized question overlap with PrimeQA
+train/dev, so any quality metric reported as held-out would be misleading.
+
+## Chosen Path
+
+### Project-Owned PrimeQA/TechQA Hybrid Split
+
+Status: Stage 67 dry-run complete; not frozen.
+
+This route preserves the final target: document-style RAG over TechQA technotes.
+It accepts that old Stage 31-66 model-selection evidence cannot be treated as
+final-test evidence once the split boundary is rebuilt.
+
+The Stage 67 route used:
 
 ```text
-recommended_candidate: hqa_data_ubuntu_dialogue
-recommended_next_stage: Stage 67 HQA-Data local schema probe, file checksum capture,
-  context-span coverage audit, and PrimeQA/MSQA leakage protocol
+1A: fully isolate 10% of answer documents into a document-disjoint test subtype
+2A: split the remaining grouped rows into 70% train, 15% dev, 15% random test
+3A: include PrimeQA validation_reference rows in the planning pool
+```
+
+The grouping rule is:
+
+```text
+normalized_question + answer_doc_id
+normalized_question + UNANSWERABLE
+```
+
+The strict document-disjoint rule is:
+
+```text
+If any row in a group has candidate DOC_IDS intersecting a selected answer
+document, the whole group goes to test/document_disjoint.
+```
+
+Stage 67 result:
+
+```text
+input rows: 930
+input groups: 889
+duplicate groups: 40
+answerable rows: 621
+unanswerable rows: 309
+unique answer docs: 496
+selected answer docs for strict isolation: 50
+document-disjoint rows: 126
+document-disjoint groups: 121
+candidate-intersection-only document-disjoint groups: 54
+
+train rows: 562
+dev rows: 121
+test rows: 247
+test/document_disjoint rows: 126
+test/group_random_test rows: 121
+```
+
+Stage 67 leakage checks:
+
+```text
+normalized_question_answer_doc_groups_do_not_cross_splits: passed
+selected_document_answer_docs_only_in_document_disjoint_test: passed
+selected_document_candidate_doc_ids_only_in_document_disjoint_test: passed
+```
+
+Stage 67 decision:
+
+```text
+status: primeqa_hybrid_split_dry_run_ready_for_review
+split_files_finalized: false
 can_run_final_metrics_now: false
-can_download_without_user_confirmation: false
 default_runtime_policy: unchanged
 ```
 
 Required next step:
 
-1. Confirm whether to download HQA-Data for Stage67 schema probing.
-2. Treat Stage64/65 MSQA and Stage66 HQA rediscovery as external-risk evidence,
-   not defaultization evidence.
-3. Do not run HQA metrics before schema, checksum, span coverage, and leakage
-   checks pass.
+Stage 68 should review the Stage 67 dry-run distribution and confirm whether to
+freeze the hybrid split. If frozen, rebuild train/dev/test artifacts from this
+new split boundary before rerunning retrieval, reranker, or answer-composition
+metrics.
 
 ## Parked Paths
 
-### Rebuild A Leak-Safe PrimeQA Split
+### HQA-Data External Probe
 
-Status: parked after user chose the external evaluation route.
+Status: parked after the user chose the PrimeQA/TechQA hybrid split route.
 
-This avoids needing a new dataset, but it invalidates current Stage 31-53
-model-selection evidence. The current Stage 51 candidate cannot be defaultized
-from old evidence under this path.
+Stage 66 recommended HQA-Data from Ubuntu Dialogue Corpus for a possible schema
+probe because the public pages expose CSV/JSON, context/span structure, and a CC
+BY 4.0 license. The same stage also recorded that HQA questions and answers are
+generated from dialogue contexts, not natural user questions paired with human
+accepted answers.
 
-Required first steps:
+HQA was not downloaded and is not approved as final evaluation evidence.
 
-1. Design grouped split rules by normalized question and document identity.
-2. Rebuild the candidate-reranker dataset only from the new train split.
-3. Rerun the dev readiness workflow from scratch on the new dev split.
-4. Use the new test split once after a new protocol freeze.
+### MSQA External Adapter Evidence
+
+Status: parked as external-risk evidence.
+
+MSQA remains useful for understanding cross-dataset adapter risk, but Stage 64
+and Stage 65 blocked Stage51 defaultization from that path. Do not run more MSQA
+Stage51 comparisons without a new frozen protocol and explicit user approval.
 
 ### Freeze Without Defaultization
 
-Status: parked after user chose the external evaluation route.
+Status: available but not chosen.
 
-This keeps Stage 51 as a documented non-default research result and keeps top-k
-as the default runtime. It is the lowest-effort and safest path if no independent
-evaluation source is available now, but it cannot support a defaultization
-decision.
+This would keep Stage 51 as a documented non-default research result and keep
+top-k as the default runtime. It cannot support a defaultization decision.
 
 ## Current Decision Boundary
 
-The external route is confirmed, but no final evaluation can be reported yet.
-Until MSQA or another external source passes schema, citation, license, and
-leakage checks:
+The PrimeQA/TechQA hybrid split route is selected, but Stage 67 is a dry run.
+Until Stage 68 freezes and materializes the split:
 
-- Do not change the default runtime.
-- Do not run pseudo-held-out metrics.
-- Do not tune the Stage 51 candidate.
-- Do not use NVIDIA `train.json` as held-out evidence.
-- Do not treat MSQA as a held-out test set.
-- Do not run additional MSQA Stage51 comparisons without a new frozen protocol;
-  the approved single capped Stage64 comparison has already been run.
-- Do not reuse MSQA `test_id.txt` as this project's final split until the
-  missing ID and upstream filtering assumptions are handled explicitly.
-- Do not use an answer-field fallback for MSQA evaluation samples.
-- Do not treat Stage 58 MSQA answer-source metrics as PrimeQA-style verified
-  RAG document-citation metrics.
-- Do not use the Stage 58 diagnostic `question_answer_page_text` variant as a
-  candidate-comparison target.
-- Do not defaultize from MSQA adapter work without a separate final evaluation
-  decision.
+- do not run final metrics;
+- do not change the default runtime;
+- do not tune Stage 51 against the future test split;
+- do not use NVIDIA `train.json` as held-out evidence;
+- do not treat PrimeQA validation rows as independent held-out evidence;
+- do not treat MSQA answer-source metrics as PrimeQA-style document-citation
+  metrics;
+- do not continue HQA download/probe work unless the user explicitly redirects
+  back to that route.
 
 ## Artifacts
 
@@ -298,4 +208,13 @@ artifacts/msqa_stage51_changed_case_review_stage65.json
 artifacts/msqa_stage51_changed_case_review_stage65_visuals/
 artifacts/external_eval_dataset_rediscovery_stage66.json
 artifacts/external_eval_dataset_rediscovery_stage66_visuals/
+artifacts/primeqa_hybrid_split_stage67.json
+artifacts/primeqa_hybrid_split_stage67_assignments.jsonl
+artifacts/primeqa_hybrid_split_stage67_visuals/
+```
+
+The current Stage 67 protocol is recorded in:
+
+```text
+docs/primeqa_hybrid_split.md
 ```

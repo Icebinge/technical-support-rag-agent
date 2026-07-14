@@ -16,6 +16,30 @@ Local path:
 data/raw/primeqa_techqa/TechQA.tar.gz
 ```
 
+Current project-owned split direction:
+
+Stage 67 plans a PrimeQA/TechQA hybrid split dry run from local
+`training_Q_A.json`, `dev_Q_A.json`, and `validation_reference.json`. This is
+now the active route because the final target is document-style RAG over
+technotes.
+
+The Stage 67 dry run:
+
+- selects 10% of unique answer documents for strict document-disjoint test
+  isolation;
+- sends any group whose candidate `DOC_IDS` contain a selected document to
+  `test/document_disjoint`;
+- splits the remaining grouped rows into 70% train, 15% dev, and 15% random
+  test;
+- groups by normalized question plus answer document, or by normalized question
+  plus `UNANSWERABLE`;
+- includes validation reference rows in the planning pool only, not as
+  independent held-out evidence.
+
+Stage 67 is not frozen and cannot support final metrics yet. The current next
+data step is Stage 68: review the dry-run distribution and confirm whether to
+freeze and materialize the new train/dev/test artifacts.
+
 ### nvidia/TechQA-RAG-Eval
 
 Original intended use case: final evaluation set.
@@ -127,7 +151,14 @@ Stage31 max candidates/question: 15
 status: msqa_stage51_adapter_comparison_blocked_by_candidate_pool_mismatch
 ```
 
-The next data step is a Stage31-aligned MSQA candidate-pool cap dry run.
+Stages 63-65 completed the Stage31-aligned MSQA cap, comparison, and changed-case
+review. Stage 65 blocked defaultization from MSQA adapter evidence. Stage 66
+then searched for another external dataset and recommended HQA-Data only as a
+schema-probe candidate.
+
+The user later chose the document-style PrimeQA/TechQA split route instead of
+continuing the HQA download/probe route. MSQA remains useful external-risk
+evidence, but it is not the current final-test source.
 
 ## Split Rule
 
@@ -222,6 +253,12 @@ The current second external dataset rediscovery snapshot is recorded in:
 
 ```text
 docs/external_eval_dataset_rediscovery.md
+```
+
+The current PrimeQA/TechQA hybrid split dry run is recorded in:
+
+```text
+docs/primeqa_hybrid_split.md
 ```
 
 ## Leakage Checks

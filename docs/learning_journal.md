@@ -16583,3 +16583,190 @@ Stage67 只能在用户确认后下载 HQA-Data，并需要记录：
 5. 是否能冻结项目自有 HQA evaluation split。
 
 在 Stage67 通过前，不能运行 HQA baseline 或 Stage51 comparison。
+
+## Stage 67: PrimeQA/TechQA hybrid split protocol dry run
+
+### 阶段目标
+
+本阶段从原先 Stage66 的 HQA 外部数据集 probe 路线，转向用户确认的 PrimeQA/TechQA 文档型 RAG 重切分路线。
+
+用户选择的路线是：
+
+```text
+1A: 挑 10% answer document 做完全 document-disjoint 隔离
+2A: 其余 grouped rows 按 70/15/15 切成 train/dev/random-test
+3A: 把 PrimeQA validation_reference 的 20 行也放进 planning pool
+```
+
+本阶段只做 dry-run split plan，不冻结最终 split 文件，不重建索引，不跑模型指标，不改变默认 runtime。
+
+### 新增与修改
+
+- 新增应用模块：
+  - `src/ts_rag_agent/application/primeqa_hybrid_split_plan.py`
+- 新增脚本：
+  - `scripts/plan_primeqa_hybrid_split.py`
+- 新增测试：
+  - `tests/test_primeqa_hybrid_split_plan.py`
+- 新增文档：
+  - `docs/primeqa_hybrid_split.md`
+- 更新文档：
+  - `docs/data_strategy.md`
+  - `docs/dataset_snapshot.md`
+  - `docs/evaluation_strategy.md`
+  - `docs/external_eval_dataset_rediscovery.md`
+  - `docs/learning_journal.md`
+
+### Stage67 运行命令
+
+```powershell
+python scripts\plan_primeqa_hybrid_split.py `
+  --train-questions data\raw\primeqa_techqa\TechQA\training_and_dev\training_Q_A.json `
+  --dev-questions data\raw\primeqa_techqa\TechQA\training_and_dev\dev_Q_A.json `
+  --validation-reference data\raw\primeqa_techqa\TechQA\validation\validation_reference.json `
+  --output artifacts\primeqa_hybrid_split_stage67.json `
+  --assignments-output artifacts\primeqa_hybrid_split_stage67_assignments.jsonl `
+  --visualization-dir artifacts\primeqa_hybrid_split_stage67_visuals `
+  --document-disjoint-answer-doc-ratio 0.10 `
+  --remainder-train-ratio 0.70 `
+  --remainder-dev-ratio 0.15 `
+  --remainder-test-ratio 0.15 `
+  --seed 20260714
+```
+
+### 真实输入摘要
+
+```text
+total rows: 930
+groups: 889
+duplicate groups: 40
+duplicate rows: 81
+answerable rows: 621
+unanswerable rows: 309
+answerable rate: 0.6677
+unique answer docs: 496
+unique candidate docs: 28461
+
+source rows:
+  primeqa_train: 600
+  primeqa_dev: 310
+  primeqa_validation: 20
+```
+
+### 真实 dry-run split 结果
+
+Document-disjoint 部分：
+
+```text
+selected answer docs: 50
+selected answer docs sha256: aedb4bef21d64aa58d6a99ccc2099ad4c0b03f07790d6d6c5194a386bd0dbdf9
+document_disjoint groups: 121
+document_disjoint rows: 126
+answer_doc_selected groups: 67
+candidate_doc_intersection_only groups: 54
+answerable rows: 103
+unanswerable rows: 23
+```
+
+最终 dry-run 分布：
+
+```text
+train:
+  rows: 562
+  groups: 534
+  answerable: 370
+  unanswerable: 192
+  answerable_rate: 0.6584
+
+dev:
+  rows: 121
+  groups: 117
+  answerable: 76
+  unanswerable: 45
+  answerable_rate: 0.6281
+
+test:
+  rows: 247
+  groups: 238
+  answerable: 175
+  unanswerable: 72
+  answerable_rate: 0.7085
+  document_disjoint rows: 126
+  group_random_test rows: 121
+```
+
+### 泄漏检查
+
+```text
+normalized_question_answer_doc_groups_do_not_cross_splits: passed
+selected_document_answer_docs_only_in_document_disjoint_test: passed
+selected_document_candidate_doc_ids_only_in_document_disjoint_test: passed
+```
+
+第三项是本阶段补强的检查：不仅确认抽中的 answer doc 不作为非隔离答案文档出现，也确认这些文档不会出现在 train/dev/random-test 的 candidate `DOC_IDS` 中。
+
+### 可视化结果
+
+本阶段生成 4 个本地 SVG artifact：
+
+```text
+artifacts/primeqa_hybrid_split_stage67_visuals/stage67_primeqa_split_rows.svg
+artifacts/primeqa_hybrid_split_stage67_visuals/stage67_primeqa_answerable_rows.svg
+artifacts/primeqa_hybrid_split_stage67_visuals/stage67_primeqa_test_subtypes.svg
+artifacts/primeqa_hybrid_split_stage67_visuals/stage67_primeqa_source_rows.svg
+```
+
+这些可视化位于本地 `artifacts/`，按 `.gitignore` 不纳入 git。
+
+### Artifact checksum
+
+```text
+artifacts/primeqa_hybrid_split_stage67.json
+sha256: c59ad5269861d866364468031f08fe577a05aeb84970fd89f48b0226a08718e2
+
+artifacts/primeqa_hybrid_split_stage67_assignments.jsonl
+sha256: 713bd017ab52e27a6524733499bf240a79a4eb46503ab5b8b82a526e0940599e
+```
+
+`assignments.jsonl` 不包含原始 question text 或 answer text，只保存 source split、question id、assigned split/subtype、group hash、answerability、answer document id、candidate doc count 和 candidate doc hash。
+
+### 问题、原因与修正
+
+- 问题 1：Stage66 文档中仍把 HQA schema probe 写成下一步。
+  - 原因：Stage66 之后用户明确最终目标仍是文档型 RAG，并要求从之前数据集重新划分随机测试集。
+  - 修正：保留 HQA 发现结果为历史外部数据集 snapshot，同时把当前主线改成 PrimeQA/TechQA hybrid split。
+- 问题 2：初版 leakage check 只证明 selected answer docs 不越界，没有在报告里直接证明 candidate `DOC_IDS` 级别也不越界。
+  - 原因：assignment artifact 为了避免泄露原始文本和过多候选列表，只保存了 candidate doc hash。
+  - 修正：在 planner 内部用原始 group rows 增加 `selected_document_candidate_doc_ids_only_in_document_disjoint_test` 检查，但仍保持 assignment artifact 不写 raw question/answer text。
+- 问题 3：旧的 NVIDIA dataset snapshot 仍写着 reserved for evaluation。
+  - 原因：这是 Stage53 leakage audit 前的早期快照表述。
+  - 修正：更新为“原计划 evaluation，当前因 910/910 exact overlap 不能作为独立 held-out”。
+
+### 验证
+
+```text
+ruff check .: passed
+pytest -q: 182 passed
+git diff --check: passed
+git check-ignore artifacts/primeqa_hybrid_split_stage67*: passed
+```
+
+### 结论
+
+- Stage67 完成了 PrimeQA/TechQA hybrid split dry-run protocol。
+- 当前有可复验的 split plan、row-level assignment artifact、4 个 SVG 可视化和独立文档。
+- Stage67 没有冻结 split，没有运行 final metrics，没有使用测试集做调参，也没有改变默认 runtime。
+- 旧 Stage31-66 的模型选择证据不能直接迁移成新 split 的 final-test evidence。
+
+### 我学到的
+
+- 当最终目标是“文档型 RAG”，外部 QA 数据集即使更独立，也可能因为不是 technote/document-grounded citation 任务而不适合作为主线。
+- PrimeQA validation_reference 可以进入 planning pool 做去重和分布规划，但不能被说成独立测试集。
+- 真正的 document-disjoint 不只是 answer doc 不重复，还要检查候选文档列表中也不能出现被隔离文档。
+- 新 split 一旦冻结，之前在旧 train/dev 上做出的 tuning 和 comparison 只能作为历史参考，不能作为最终默认化证据。
+
+### 下一步
+
+做 Stage68：review and freeze PrimeQA/TechQA hybrid split。
+
+Stage68 需要先确认是否接受 Stage67 dry-run 分布；如果接受，再把 dry-run plan materialize 成正式 train/dev/test artifacts。冻结前仍不能跑 final metrics，冻结后才可以从新 train/dev/test 边界重新开始训练、开发和最终测试流程。
