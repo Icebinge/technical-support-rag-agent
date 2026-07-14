@@ -132,5 +132,11 @@ These artifacts are local ignored outputs and are not committed by git policy.
 
 ## Next Step
 
-Stage 60 should design the MSQA source/citation adapter and comparison protocol
-before any Stage 51 candidate run.
+Stage 60 designed the MSQA source/citation adapter and comparison protocol. The
+current protocol record is:
+
+```text
+docs/msqa_stage51_protocol.md
+```
+
+The recommended protocol still requires user confirmation before implementation.

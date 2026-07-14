@@ -177,6 +177,38 @@ Decision:
 - diagnostic `question_answer_page_text` is rejected as a comparison target;
 - the next step is an MSQA source/citation adapter and comparison protocol.
 
+## Stage 60 MSQA Stage 51 Protocol Design
+
+Stage 60 designed the recommended MSQA source/citation protocol for user
+confirmation.
+
+Recommended source/citation identity:
+
+```text
+msqa_row_source_url
+```
+
+Recommended candidate construction:
+
+```text
+processed_answer_sentence_candidates
+```
+
+Decision:
+
+```text
+status: msqa_stage51_protocol_ready_for_user_confirmation
+requires_user_confirmation: true
+can_run_stage51_candidate_now: false
+can_defaultize_runtime_now: false
+default_runtime_policy: unchanged
+```
+
+This design uses `QuestionId + AnswerId + Url` as row-source citation identity
+and splits `ProcessedAnswerText` into answer-sentence candidates. It explicitly
+excludes `QuestionText` indexing, answer-field fallbacks, required
+processed-answer links, external page fetching, and runtime default changes.
+
 ## Source Snapshot
 
 Sources checked on 2026-07-14:
@@ -229,6 +261,11 @@ artifacts/msqa_stage51_compatibility_stage59.json
 artifacts/msqa_stage51_compatibility_stage59_visuals/stage59_msqa_stage51_gate_checks.svg
 artifacts/msqa_stage51_compatibility_stage59_visuals/stage59_msqa_answer_only_failure_modes.svg
 artifacts/msqa_stage51_compatibility_stage59_visuals/stage59_msqa_variant_metric_comparison.svg
+artifacts/msqa_stage51_protocol_stage60.json
+artifacts/msqa_stage51_protocol_stage60_visuals/stage60_source_identity_scores.svg
+artifacts/msqa_stage51_protocol_stage60_visuals/stage60_candidate_construction_scores.svg
+artifacts/msqa_stage51_protocol_stage60_visuals/stage60_source_coverage.svg
+artifacts/msqa_stage51_protocol_stage60_visuals/stage60_decision_flags.svg
 ```
 
 These artifacts are local outputs under `artifacts/` and are not committed by

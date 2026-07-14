@@ -99,6 +99,16 @@ answer-source row retrieval.
 The next data step is to design an MSQA source/citation adapter and comparison
 protocol before any Stage 51 candidate run.
 
+Stage 60 designed the recommended protocol:
+
+```text
+msqa_row_source_url + processed_answer_sentence_candidates
+```
+
+This protocol uses `QuestionId + AnswerId + Url` as the row-source citation
+identity and `ProcessedAnswerText` answer sentences as evidence candidates. It
+requires user confirmation before implementation.
+
 ## Split Rule
 
 Any future held-out dataset must not be used for:
@@ -150,6 +160,12 @@ The current MSQA Stage 51 compatibility review is recorded in:
 
 ```text
 docs/msqa_stage51_compatibility.md
+```
+
+The current MSQA Stage 51 protocol design is recorded in:
+
+```text
+docs/msqa_stage51_protocol.md
 ```
 
 ## Leakage Checks

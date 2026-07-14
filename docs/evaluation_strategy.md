@@ -3,8 +3,9 @@
 This document records the current evaluation strategy after Stage 53 blocked the
 previously intended NVIDIA held-out path, Stage 55 completed external dataset
 discovery, Stage 56 probed MSQA locally, Stage 57 froze the MSQA evaluation
-split, Stage 58 recorded the MSQA answer-source baseline, and Stage 59 blocked
-direct Stage 51 comparison on the current MSQA task.
+split, Stage 58 recorded the MSQA answer-source baseline, Stage 59 blocked
+direct Stage 51 comparison on the current MSQA task, and Stage 60 designed a
+recommended MSQA source/citation protocol for user confirmation.
 
 ## Current Facts
 
@@ -55,6 +56,12 @@ direct Stage 51 comparison on the current MSQA task.
   - `can_run_stage51_candidate_now: false`
   - `can_defaultize_runtime_now: false`
   - diagnostic `question_answer_page_text` is rejected as a comparison target.
+- Stage 60 protocol design:
+  - recommended source/citation identity: `msqa_row_source_url`
+  - recommended candidate construction: `processed_answer_sentence_candidates`
+  - protocol status: `draft_requires_user_confirmation`
+  - `requires_user_confirmation: true`
+  - `can_run_stage51_candidate_now: false`
 - Default runtime remains unchanged.
 
 ## Rejected Path
@@ -125,10 +132,21 @@ Stage 59 result:
 - Before any candidate comparison, the project needs an MSQA-compatible
   source/citation identity contract and candidate construction protocol.
 
+Stage 60 result:
+
+- Recommended protocol:
+  `msqa_row_source_url + processed_answer_sentence_candidates`.
+- This uses `QuestionId + AnswerId + Url` as row-source citation identity and
+  splits `ProcessedAnswerText` into answer-sentence candidates.
+- It excludes `QuestionText`, `AnswerText` fallback, `DoubleProcessedAnswerText`
+  fallback, processed-answer links as required citation ground truth, external
+  page fetching, and runtime default changes.
+- The protocol is not implemented yet and requires user confirmation.
+
 Required next step:
 
-1. Design the MSQA source/citation adapter and comparison protocol before any
-   Stage 51 candidate run.
+1. Ask the user to confirm whether to proceed with the recommended Stage 60
+   protocol before implementing the Stage 61 adapter.
 
 ## Parked Paths
 
@@ -168,7 +186,8 @@ leakage checks:
 - Do not use NVIDIA `train.json` as held-out evidence.
 - Do not treat MSQA as a held-out test set.
 - Do not compare top-k against Stage 51 on MSQA until an MSQA source/citation
-  adapter and comparison protocol have been designed and frozen.
+  adapter and comparison protocol have been confirmed, implemented, and dry-run
+  checked.
 - Do not reuse MSQA `test_id.txt` as this project's final split until the
   missing ID and upstream filtering assumptions are handled explicitly.
 - Do not use an answer-field fallback for MSQA evaluation samples.
@@ -176,6 +195,7 @@ leakage checks:
   RAG document-citation metrics.
 - Do not use the Stage 58 diagnostic `question_answer_page_text` variant as a
   candidate-comparison target.
+- Do not implement the Stage 60 recommended adapter before user confirmation.
 
 ## Artifacts
 
@@ -195,4 +215,6 @@ artifacts/msqa_topk_baseline_stage58.json
 artifacts/msqa_topk_baseline_stage58_visuals/
 artifacts/msqa_stage51_compatibility_stage59.json
 artifacts/msqa_stage51_compatibility_stage59_visuals/
+artifacts/msqa_stage51_protocol_stage60.json
+artifacts/msqa_stage51_protocol_stage60_visuals/
 ```

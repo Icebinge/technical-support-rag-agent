@@ -14706,3 +14706,310 @@ svg visualizations: 3 generated
   3. 明确是否使用 answer sentence、processed answer chunk、source URL 或 Microsoft Learn link 作为 citation unit；
   4. 冻结 baseline/candidate 共享的 comparison protocol；
   5. 继续不运行 Stage 51 candidate，直到 Stage 60 protocol 明确通过。
+
+## 2026-07-14 Stage 60：MSQA source/citation adapter 与 comparison protocol 设计
+
+### 本阶段目标
+
+Stage 59 已经明确：不能直接把 Stage 51 PrimeQA document-grounded evidence composition policy 跑到当前 MSQA answer-source task 上。本阶段目标是先做协议设计，而不是实现 adapter 或运行 Stage 51：
+
+1. 复用 Stage 56 的真实 source-link coverage；
+2. 复用 Stage 57 的 adapter contract 与 frozen split；
+3. 复用 Stage 59 的 compatibility gate 结果；
+4. 比较 source/citation identity 选项；
+5. 比较 candidate construction 选项；
+6. 产出推荐协议，但由于这是设计选择，按项目规则标记为需要用户确认；
+7. 继续不运行 Stage 51 candidate，不改变默认 runtime。
+
+### 新增与修改
+
+新增 Stage 60 protocol design 模块：
+
+```text
+src/ts_rag_agent/application/msqa_stage51_protocol_design.py
+```
+
+新增能力：
+
+- 读取并校验 Stage 56 / Stage 57 / Stage 59 artifacts；
+- 从真实 Stage 56 report 中读取覆盖率：
+  - `rows_with_row_url`
+  - `rows_with_processed_answer_link`
+  - `rows_with_processed_answer_learn_link`
+  - `rows_with_processed_answer_azure_docish_link`
+- 从 Stage 57 report 中读取 frozen split 与 adapter contract；
+- 从 Stage 59 report 中确认 direct Stage 51 comparison 仍被 blocked；
+- 用 generated protocol-fit rubric 比较 source identity options；
+- 用同一 rubric 比较 candidate construction options；
+- 输出 recommended protocol；
+- 明确 `requires_user_confirmation: true`；
+- 生成 SVG 可视化。
+
+新增 CLI：
+
+```text
+scripts/design_msqa_stage51_protocol.py
+```
+
+新增测试：
+
+```text
+tests/test_msqa_stage51_protocol_design.py
+```
+
+新增文档：
+
+```text
+docs/msqa_stage51_protocol.md
+```
+
+同步更新：
+
+```text
+docs/msqa_stage51_compatibility.md
+docs/msqa_topk_baseline.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+docs/external_eval_datasets.md
+docs/learning_journal.md
+```
+
+### Stage 60 运行命令
+
+```powershell
+python scripts\design_msqa_stage51_protocol.py `
+  --schema-probe artifacts\msqa_schema_probe_stage56.json `
+  --evaluation-split artifacts\msqa_evaluation_split_stage57.json `
+  --compatibility-review artifacts\msqa_stage51_compatibility_stage59.json `
+  --output artifacts\msqa_stage51_protocol_stage60.json `
+  --visualization-dir artifacts\msqa_stage51_protocol_stage60_visuals
+```
+
+### Stage 60 结果
+
+当前约束：
+
+```text
+frozen_split: msqa_stage57_project_eval_v1
+adapter_contract_version: msqa_eval_adapter_v1
+selected_question_count: 3301
+approved_answer_field: ProcessedAnswerText
+approved_source_url_field: Url
+no_answer_field_fallback: true
+question_text_index_rejected: true
+stage59_blocker_count: 5
+default_runtime_policy: unchanged
+```
+
+source/citation identity 选项：
+
+```text
+msqa_row_source_url:
+  status: recommended_for_user_confirmation
+  coverage_percent: 100.0
+  total_score: 9
+
+processed_answer_links:
+  status: blocked
+  coverage_percent: 61.807
+  total_score: 8
+
+processed_answer_learn_links:
+  status: blocked
+  coverage_percent: 33.903
+  total_score: 7
+
+processed_answer_azure_docish_links:
+  status: blocked
+  coverage_percent: 13.473
+  total_score: 7
+
+question_answer_page_text:
+  status: rejected
+  coverage_percent: 100.0
+  total_score: 4
+```
+
+candidate construction 选项：
+
+```text
+processed_answer_sentence_candidates:
+  status: recommended_for_user_confirmation
+  coverage_percent: 100.0
+  total_score: 9
+
+processed_answer_chunk_candidates:
+  status: secondary_option
+  coverage_percent: 100.0
+  total_score: 8
+
+source_row_single_candidate:
+  status: secondary_option
+  coverage_percent: 100.0
+  total_score: 8
+
+linked_learn_document_candidates:
+  status: blocked
+  coverage_percent: 33.903
+  total_score: 6
+
+question_answer_text_candidates:
+  status: rejected
+  coverage_percent: 100.0
+  total_score: 5
+```
+
+推荐协议：
+
+```text
+protocol_status: draft_requires_user_confirmation
+source_citation_identity: msqa_row_source_url
+candidate_construction: processed_answer_sentence_candidates
+retrieval_corpus_scope: frozen_split_only
+retrieval_index_text: ProcessedAnswerText only
+excluded_index_text: QuestionText
+gold_source_identity: QuestionId + AnswerId + Url
+candidate_identity: QuestionId::processed_answer_sentence::<one_based_sentence_index>
+```
+
+下一阶段 adapter 必须具备字段：
+
+```text
+question_id
+answer_id
+source_url
+candidate_id
+candidate_sentence
+retrieval_rank
+retrieval_score
+candidate_score
+source_row_id
+```
+
+明确排除：
+
+```text
+Do not use AnswerText fallback.
+Do not use DoubleProcessedAnswerText fallback.
+Do not index QuestionText for candidate comparison.
+Do not require processed-answer links as citation ground truth.
+Do not fetch external pages in this protocol.
+Do not change the default runtime.
+```
+
+decision：
+
+```text
+status: msqa_stage51_protocol_ready_for_user_confirmation
+requires_user_confirmation: true
+can_run_stage51_candidate_now: false
+can_defaultize_runtime_now: false
+default_runtime_policy: unchanged
+recommended_source_citation_identity: msqa_row_source_url
+recommended_candidate_construction: processed_answer_sentence_candidates
+```
+
+### 可视化结果
+
+本阶段生成：
+
+```text
+artifacts/msqa_stage51_protocol_stage60_visuals/stage60_source_identity_scores.svg
+artifacts/msqa_stage51_protocol_stage60_visuals/stage60_candidate_construction_scores.svg
+artifacts/msqa_stage51_protocol_stage60_visuals/stage60_source_coverage.svg
+artifacts/msqa_stage51_protocol_stage60_visuals/stage60_decision_flags.svg
+```
+
+Stage 60 report：
+
+```text
+artifacts/msqa_stage51_protocol_stage60.json
+```
+
+Stage 60 report checksum：
+
+```text
+2267f1ac14e0866eb4c4835f40a06124d00833503a0c756bc06f0e891983db25
+```
+
+以上 artifacts 位于本地 `artifacts/`，按 `.gitignore` 不纳入 git。
+
+### 问题与原因
+
+- 问题 1：Stage 60 涉及真实设计选择，不能擅自冻结成最终实施方案。
+  - 原因：用户规则要求对模糊或特殊落地方案列出选项并确认；
+  - 处理：本阶段产出推荐协议，但 decision 中明确 `requires_user_confirmation: true`。
+- 问题 2：processed-answer links 更接近 document citation，但不能作为当前 required citation identity。
+  - 原因：真实覆盖率只有 `61.807%`，learn links 只有 `33.903%`，azure doc-like links 只有 `13.473%`；
+  - 处理：全部标记为 blocked，不引入 fallback。
+- 问题 3：`question_answer_page_text` 虽然覆盖率 100%，但不能进入比较协议。
+  - 原因：Stage 58/59 已显示 question text 自匹配导致 diagnostic variant 达到 1.0；
+  - 处理：标记为 rejected，推荐协议显式排除 `QuestionText`。
+- 问题 4：`source_row_single_candidate` 便于 smoke test，但不适合作为真实 Stage 51 reranker comparison。
+  - 原因：单行单候选缺少 candidate competition，基本退化为 Stage 58 source-row retrieval；
+  - 处理：保留为 secondary option，不作为推荐 candidate construction。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\msqa_stage51_protocol_design.py scripts\design_msqa_stage51_protocol.py tests\test_msqa_stage51_protocol_design.py
+pytest -q tests\test_msqa_stage51_protocol_design.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 4 passed
+```
+
+Stage 60 真实 artifact 生成：
+
+```text
+python scripts\design_msqa_stage51_protocol.py --schema-probe artifacts\msqa_schema_probe_stage56.json --evaluation-split artifacts\msqa_evaluation_split_stage57.json --compatibility-review artifacts\msqa_stage51_compatibility_stage59.json --output artifacts\msqa_stage51_protocol_stage60.json --visualization-dir artifacts\msqa_stage51_protocol_stage60_visuals
+```
+
+结果：
+
+```text
+json report: generated
+svg visualizations: 4 generated
+```
+
+### 结论
+
+- Stage 60 完成 MSQA source/citation adapter 与 comparison protocol 设计。
+- 推荐协议是：
+
+```text
+msqa_row_source_url + processed_answer_sentence_candidates
+```
+
+- 但该协议仍处于：
+
+```text
+draft_requires_user_confirmation
+```
+
+- 当前不能实现 adapter、不能运行 Stage 51 candidate、不能 defaultize。
+- 默认 runtime 不变。
+
+### 我学到的
+
+- “看起来更像 document citation”的 link-based 方案，如果覆盖率不足，就不能在 no-fallback 规则下作为 required citation identity。
+- 对 MSQA 当前数据，最诚实的 source identity 是 row-level `QuestionId + AnswerId + Url`，它不是 document-span citation，必须把这个边界写清楚。
+- Stage 51 comparison 的前提不是“能构造一个输入对象”，而是 baseline 和 candidate 在同一个 source/citation identity、同一个 candidate unit、同一个 metric boundary 下比较。
+- 设计阶段也要产出 artifact 和可视化，方便后续确认时知道每个方案为什么被推荐、阻塞或拒绝。
+
+### 下一步
+
+- 请用户确认是否按推荐协议进入 Stage 61：
+
+```text
+msqa_row_source_url + processed_answer_sentence_candidates
+```
+
+- 若确认，Stage 61 做 MSQA row-source answer-sentence candidate adapter 与 dry-run contract tests。
+- Stage 61 仍然不跑最终 Stage 51 comparison；它只验证 adapter contract、candidate fields、样本稳定性和 no-fallback/no-question-text 约束。

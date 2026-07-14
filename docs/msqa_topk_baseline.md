@@ -172,5 +172,6 @@ These artifacts are local ignored outputs and are not committed by git policy.
 ## Next Step
 
 Stage 59 reviewed MSQA baseline failure modes and blocked direct Stage 51
-comparison. Stage 60 should design an MSQA source/citation adapter and comparison
-protocol before any Stage 51 candidate run.
+comparison. Stage 60 designed the recommended MSQA row-source answer-sentence
+protocol, but it still requires user confirmation before implementation or any
+Stage 51 candidate run.
