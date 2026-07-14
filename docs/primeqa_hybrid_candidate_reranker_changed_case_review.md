@@ -121,8 +121,13 @@ tuning.
 
 ## Next Step
 
-Stage 73 should decide the gate path:
+Stage 73 ran the requested train/dev top10 diagnostic in:
 
-- refine train/dev candidate-reranker policy gates further; or
-- explicitly open one one-time final-test evaluation gate for the selected
-  candidate, with no test tuning.
+```text
+docs/primeqa_hybrid_candidate_reranker_top10_diagnostic.md
+```
+
+The current next step is Stage 74: choose whether to stop reranker-policy
+development as non-actionable for now, or refine train/dev reranker gates using
+the top3/top10 diagnostics. The test split still cannot be used for evaluation
+or tuning.

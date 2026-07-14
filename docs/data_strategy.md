@@ -42,8 +42,9 @@ artifacts from this frozen boundary. Stage 70 ran train/dev BM25 development
 baselines and audited the Stage 69 train/dev candidate artifact. Stage 71 then
 ran train-only candidate-reranker cross-validation and train-to-dev guarded
 policy validation. Stage 72 reviewed the Stage 71 dev changed cases and
-visualized the remaining train/dev-only risk. The frozen test split remains
-locked and must not be used for tuning.
+visualized the remaining train/dev-only risk. Stage 73 ran a train/dev-only
+top10 answer proxy diagnostic for the candidate-reranker policies. The frozen
+test split remains locked and must not be used for tuning.
 
 ### nvidia/TechQA-RAG-Eval
 
@@ -297,6 +298,13 @@ recorded in:
 
 ```text
 docs/primeqa_hybrid_candidate_reranker_changed_case_review.md
+```
+
+The current PrimeQA/TechQA hybrid candidate-reranker top10 diagnostic is
+recorded in:
+
+```text
+docs/primeqa_hybrid_candidate_reranker_top10_diagnostic.md
 ```
 
 ## Leakage Checks

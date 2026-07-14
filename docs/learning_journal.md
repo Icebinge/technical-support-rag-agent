@@ -17780,3 +17780,237 @@ Stage73 只能在两个方向中做明确选择：
 
 - 继续 refine train/dev candidate-reranker policy gates；
 - 或显式批准一次 one-time final-test evaluation gate，只评估一次选定候选，不用 test 做 tuning。
+
+## Stage73：PrimeQA hybrid candidate-reranker top10 diagnostic
+
+时间：2026-07-15
+
+### 目标
+
+回应“top10 跑一下看看”的请求，只在 train/dev 上跑 reranker answer proxy 的 top10 diagnostic。
+
+本阶段继续遵守新的硬边界：
+
+- 训练阶段永远不能在测试集上做评估；
+- 不读取 frozen test split；
+- 不运行 final test metrics；
+- 不使用 test 做 tuning；
+- 不改变默认 runtime policy。
+
+### 本次新增
+
+- 新增 `src/ts_rag_agent/application/primeqa_hybrid_candidate_reranker_topk_diagnostic.py`。
+- 新增 `scripts/run_primeqa_hybrid_candidate_reranker_top10_diagnostic.py`。
+- 新增 `tests/test_primeqa_hybrid_candidate_reranker_topk_diagnostic.py`。
+- 新增 `docs/primeqa_hybrid_candidate_reranker_top10_diagnostic.md`。
+- 更新 `docs/evaluation_strategy.md`、`docs/data_strategy.md`、`docs/primeqa_hybrid_candidate_reranker_changed_case_review.md`。
+
+### 真实运行命令
+
+```powershell
+python scripts\run_primeqa_hybrid_candidate_reranker_top10_diagnostic.py `
+  --output artifacts\primeqa_hybrid_candidate_reranker_top10_diagnostic_stage73.json `
+  --visualization-dir artifacts\primeqa_hybrid_candidate_reranker_top10_diagnostic_stage73_visuals `
+  --models logistic_best_candidate,ridge_candidate_token_f1 `
+  --max-answer-candidates 10
+```
+
+### 真实结果
+
+Train-only CV top10 proxy：
+
+```text
+logistic_best_candidate / stage36_main:
+  delta: +0.0000
+  policy F1: 0.1845
+  baseline F1: 0.1845
+  oracle F1: 0.1893
+  replacements: 105
+  improved / regressed / tied: 0 / 0 / 370
+  gold citation delta: +0
+
+logistic_best_candidate / candidate_score_gte_60:
+  delta: +0.0000
+  policy F1: 0.1845
+  baseline F1: 0.1845
+  oracle F1: 0.1893
+  replacements: 77
+  improved / regressed / tied: 0 / 0 / 370
+  gold citation delta: +0
+
+ridge_candidate_token_f1 / stage36_main:
+  delta: +0.0000
+  policy F1: 0.1845
+  baseline F1: 0.1845
+  oracle F1: 0.1893
+  replacements: 40
+  improved / regressed / tied: 0 / 0 / 370
+  gold citation delta: +0
+
+ridge_candidate_token_f1 / candidate_score_gte_60:
+  delta: +0.0000
+  policy F1: 0.1845
+  baseline F1: 0.1845
+  oracle F1: 0.1893
+  replacements: 25
+  improved / regressed / tied: 0 / 0 / 370
+  gold citation delta: +0
+```
+
+Dev holdout top10 proxy：
+
+```text
+logistic_best_candidate / stage36_main:
+  delta: +0.0000
+  policy F1: 0.1933
+  baseline F1: 0.1933
+  oracle F1: 0.1947
+  replacements: 21
+  improved / regressed / tied: 0 / 0 / 76
+  gold citation delta: +0
+
+logistic_best_candidate / candidate_score_gte_60:
+  delta: +0.0000
+  policy F1: 0.1933
+  baseline F1: 0.1933
+  oracle F1: 0.1947
+  replacements: 17
+  improved / regressed / tied: 0 / 0 / 76
+  gold citation delta: +0
+
+ridge_candidate_token_f1 / stage36_main:
+  delta: +0.0000
+  policy F1: 0.1933
+  baseline F1: 0.1933
+  oracle F1: 0.1947
+  replacements: 8
+  improved / regressed / tied: 0 / 0 / 76
+  gold citation delta: +0
+
+ridge_candidate_token_f1 / candidate_score_gte_60:
+  delta: +0.0000
+  policy F1: 0.1933
+  baseline F1: 0.1933
+  oracle F1: 0.1947
+  replacements: 3
+  improved / regressed / tied: 0 / 0 / 76
+  gold citation delta: +0
+```
+
+### top3 与 top10 对比
+
+Stage72 top3 还有一个非常小的 dev signal：
+
+```text
+logistic_best_candidate / candidate_score_gte_60:
+  top3 dev delta: +0.0004
+  regressions: 0
+  gold citation delta: +0
+```
+
+Stage73 top10 后，这个 signal 消失：
+
+```text
+logistic_best_candidate / candidate_score_gte_60:
+  top10 dev delta: +0.0000
+  regressions: 0
+  gold citation delta: +0
+```
+
+### 可视化结果
+
+本次生成 20 个 SVG，位于：
+
+```text
+artifacts/primeqa_hybrid_candidate_reranker_top10_diagnostic_stage73_visuals/
+```
+
+重点图：
+
+```text
+stage73_logistic_best_candidate_dev_holdout_top10_policy_delta.svg
+stage73_logistic_best_candidate_dev_holdout_top10_policy_regressions.svg
+stage73_ridge_candidate_token_f1_dev_holdout_top10_policy_delta.svg
+stage73_ridge_candidate_token_f1_dev_holdout_top10_policy_regressions.svg
+```
+
+报告和 SVG 都在 `artifacts/` 下，按项目 git policy 被 ignore，不提交进仓库。
+
+### Guard checks
+
+```text
+candidate_artifact_splits_are_train_dev_only: passed
+candidate_summary_splits_are_train_dev_only: passed
+candidate_rows_have_no_test_split: passed
+gold_answer_splits_are_train_dev_only: passed
+train_cv_uses_train_only: passed
+split_validations_are_train_to_dev: passed
+candidate_artifact_checks_passed: passed
+final_test_metrics_not_run: passed
+default_runtime_policy_unchanged: passed
+stage73_topk_window_matches_requested_value: passed
+stage73_split_validations_are_train_to_dev: passed
+stage73_final_test_metrics_not_run: passed
+stage73_default_runtime_policy_unchanged: passed
+```
+
+### 问题、原因与修正
+
+- 问题 1：直接复用 Stage71 runner 会把 top10 结果写成 Stage71。
+  - 原因：原 runner 的 stage metadata 固定为 Stage71。
+  - 修正：新增 Stage73 top-k diagnostic 封装，复用 train/dev 评估逻辑，但单独写 Stage73 metadata、decision 和 visualization prefix。
+- 问题 2：第一版 Stage73 摘要只把 dev holdout top10 提到顶层。
+  - 原因：我最初按 gate decision 的视角只汇总 dev。
+  - 修正：把 `train_cv_policy_rows` 和 `dev_holdout_policy_rows` 都提升到 `topk_diagnostic` 顶层，保证“训练/验证集”都有结构化结果。
+- 问题 3：top10 结果没有带来 F1 gain。
+  - 原因：当 answer proxy 包含 10 个候选时，替换 leading candidate 不足以改变整体 composed answer token F1。
+  - 修正：结论中明确 top10 削弱继续推进当前 reranker policy 的理由，不进入 final test gate。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_candidate_reranker_topk_diagnostic.py scripts\run_primeqa_hybrid_candidate_reranker_top10_diagnostic.py tests\test_primeqa_hybrid_candidate_reranker_topk_diagnostic.py
+pytest -q tests\test_primeqa_hybrid_candidate_reranker_topk_diagnostic.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+真实报告运行耗时：
+
+```text
+load_candidates: 0.056s
+load_train_dev_splits: 0.052s
+train_only_cv: 0.692s
+train_to_dev_policy_validation: 2.087s
+candidate_checks: 0.002s
+total: 2.890s
+```
+
+### 结论
+
+- Stage73 已完成 train/dev-only top10 diagnostic。
+- Stage73 没有读取 test split。
+- Stage73 没有运行 final test metrics。
+- Stage73 没有改变默认 runtime policy。
+- top10 proxy 在 train-only CV 和 dev holdout 上都是 `+0.0000`。
+- 这说明当前 candidate-reranker policy 的收益只存在于非常窄的 top3/leading-candidate 表面；扩到 top10 后不再体现。
+- 当前不能进入 final test metrics，也不应该把当前 reranker policy defaultize。
+
+### 我学到的
+
+- top-k answer proxy 的窗口大小会显著改变结论：top3 的微小信号在 top10 下可能完全消失。
+- 如果更宽的组合答案窗口没有收益，那么 reranker 的排序微调不一定能转化为答案层面的真实改进。
+- 对训练/验证阶段，报告应该同时写 train-CV 和 dev-holdout，而不是只写 dev。
+
+### 下一步
+
+做 Stage74：决定是否停止当前 reranker-policy 路线，或只在 train/dev 上重新设计更有实质影响的 reranker gates。
+
+Stage74 不能使用 test 做评估或 tuning。
