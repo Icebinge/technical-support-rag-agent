@@ -152,6 +152,13 @@ shows no train/dev F1 gain.
 
 ## Next Step
 
-Stage 74 should choose whether to stop reranker-policy development as
-non-actionable for now, or refine train/dev reranker gates using the top3/top10
-diagnostics. The test split still cannot be used for evaluation or tuning.
+Stage 74 stopped the current reranker-policy development route as
+non-actionable for now. The decision is recorded in:
+
+```text
+docs/primeqa_hybrid_candidate_reranker_stop_decision.md
+```
+
+The current next step is Stage 75: select a new non-reranker-policy direction
+only after explicit user confirmation. The test split still cannot be used for
+evaluation or tuning.

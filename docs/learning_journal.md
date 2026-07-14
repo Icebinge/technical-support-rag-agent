@@ -18014,3 +18014,115 @@ total: 2.890s
 做 Stage74：决定是否停止当前 reranker-policy 路线，或只在 train/dev 上重新设计更有实质影响的 reranker gates。
 
 Stage74 不能使用 test 做评估或 tuning。
+
+## Stage74：停止当前 candidate-reranker policy 路线
+
+时间：2026-07-15
+
+### 目标
+
+根据 Stage71-Stage73 的 train/dev 证据，正式停止当前 candidate-reranker policy 路线。
+
+这一步是 decision checkpoint，不是新的实验：
+
+- 不读取 frozen test split；
+- 不运行 final test metrics；
+- 不使用 test 做 tuning；
+- 不改变默认 runtime policy；
+- 不继续在同一 reranker-policy 路线上调参。
+
+### 使用的真实证据
+
+Stage71 的 train-only CV 显示 reranker model 本身在 candidate-level 有提升：
+
+```text
+ridge_candidate_token_f1:
+  train-CV selected F1: 0.2652
+  train-CV delta: +0.0383
+
+logistic_best_candidate:
+  train-CV selected F1: 0.2523
+  train-CV delta: +0.0254
+```
+
+但是 Stage71/72 的 dev top3 answer proxy 只有极小收益：
+
+```text
+logistic_best_candidate / candidate_score_gte_60:
+  dev top3 delta: +0.0004
+  regressions: 0
+  gold citation delta: +0
+```
+
+Stage73 的 top10 diagnostic 进一步削弱了这条路线：
+
+```text
+train-only CV top10:
+  selected policy deltas: +0.0000
+  regressions: 0
+
+dev holdout top10:
+  selected policy deltas: +0.0000
+  regressions: 0
+```
+
+### 本次新增
+
+- 新增 `docs/primeqa_hybrid_candidate_reranker_stop_decision.md`。
+- 更新 `docs/evaluation_strategy.md`。
+- 更新 `docs/data_strategy.md`。
+- 更新 `docs/primeqa_hybrid_candidate_reranker_top10_diagnostic.md`。
+- 更新 `docs/learning_journal.md`。
+
+### 决策
+
+```text
+status: candidate_reranker_policy_route_stopped_as_non_actionable
+default_runtime_policy: unchanged
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+current_reranker_policy_defaultization: blocked
+```
+
+### 问题、原因与修正
+
+- 问题 1：candidate-level CV 有提升，但 answer-level proxy 几乎没有收益。
+  - 原因：当前 reranker policy 主要改变候选排序，不能稳定转化为组合答案 F1 改进。
+  - 修正：停止当前 reranker-policy 路线，不继续在同一路径上做小幅调参。
+- 问题 2：Stage72 top3 的 `+0.0004` 容易被误读为可以进入 final gate。
+  - 原因：只看 top3 会放大 leading-candidate 表面的微弱信号。
+  - 修正：把 Stage73 top10 的 `+0.0000` 纳入 stop decision，明确 blocked defaultization。
+- 问题 3：如果不记录停止决策，后续容易再次回到这条路线。
+  - 原因：Stage71-73 都留下了可继续 train/dev 的技术入口。
+  - 修正：新增 Stage74 stop-decision 文档，并在总策略页把当前 reranker-policy route 标记为 stopped。
+
+### 验证
+
+本阶段是 docs-only decision checkpoint。验证在提交前执行：
+
+```text
+ruff check .
+pytest -q
+git diff --check
+```
+
+### 结论
+
+- Stage74 已停止当前 candidate-reranker policy 路线。
+- 当前 reranker policy 不 defaultize。
+- 当前 reranker policy 不进入 final-test gate。
+- 测试集继续完全 locked，不能用于训练阶段评估或 tuning。
+- 默认 runtime policy 保持 unchanged。
+
+### 我学到的
+
+- candidate-level reranker 指标不能直接等价于 answer-level RAG 改进。
+- 当 top3 的微弱收益在 top10 消失时，应优先停止路线，而不是继续局部调参。
+- “停止”也需要作为正式阶段记录，否则后续很容易把已否定路线重新当成待推进事项。
+
+### 下一步
+
+Stage75 只有在用户明确确认新的方向后再开始。
+
+当前不自动开启新的实验路线；如果继续，必须先确认新的非 reranker-policy train/dev 方向，并继续遵守：训练阶段永远不能在测试集上评估。

@@ -43,8 +43,9 @@ baselines and audited the Stage 69 train/dev candidate artifact. Stage 71 then
 ran train-only candidate-reranker cross-validation and train-to-dev guarded
 policy validation. Stage 72 reviewed the Stage 71 dev changed cases and
 visualized the remaining train/dev-only risk. Stage 73 ran a train/dev-only
-top10 answer proxy diagnostic for the candidate-reranker policies. The frozen
-test split remains locked and must not be used for tuning.
+top10 answer proxy diagnostic for the candidate-reranker policies. Stage 74
+stopped the current candidate-reranker policy route as non-actionable for now.
+The frozen test split remains locked and must not be used for tuning.
 
 ### nvidia/TechQA-RAG-Eval
 
@@ -305,6 +306,13 @@ recorded in:
 
 ```text
 docs/primeqa_hybrid_candidate_reranker_top10_diagnostic.md
+```
+
+The current PrimeQA/TechQA hybrid candidate-reranker stop decision is recorded
+in:
+
+```text
+docs/primeqa_hybrid_candidate_reranker_stop_decision.md
 ```
 
 ## Leakage Checks

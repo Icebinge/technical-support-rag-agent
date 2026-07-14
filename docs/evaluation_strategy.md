@@ -1,6 +1,6 @@
 # Evaluation Strategy
 
-This document records the current evaluation strategy after Stage 73.
+This document records the current evaluation strategy after Stage 74.
 
 The active route is now the project-owned PrimeQA/TechQA hybrid split
 `primeqa_hybrid_stage68_v1`. Stage 68 froze local split artifacts, and Stage 69
@@ -9,8 +9,9 @@ Stage 70 ran train/dev development baselines and candidate artifact checks.
 Stage 71 ran train-only candidate-reranker cross-validation and train-to-dev
 guarded policy validation. Stage 72 reviewed the candidate-reranker dev changed
 cases and generated visualization artifacts. Stage 73 ran a train/dev-only
-top10 answer proxy diagnostic. The frozen test split remains locked for future
-final evaluation.
+top10 answer proxy diagnostic. Stage 74 stopped the current reranker-policy
+development route as non-actionable for now. The frozen test split remains
+locked for future final evaluation.
 
 ## Current Facts
 
@@ -115,6 +116,18 @@ final test metrics: not run
 default runtime policy: unchanged
 ```
 
+- Stage 74 stopped the current candidate-reranker policy route:
+
+```text
+status: candidate_reranker_policy_route_stopped_as_non_actionable
+reason: top3 dev signal is only +0.0004 and top10 train/dev signal is +0.0000
+current_reranker_policy_defaultization: blocked
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+default_runtime_policy: unchanged
+```
+
 - Stage 71 ran train-only candidate-reranker grouped CV and train-to-dev guarded
   policy validation for both `logistic_best_candidate` and
   `ridge_candidate_token_f1`:
@@ -149,8 +162,8 @@ train/dev, so any quality metric reported as held-out would be misleading.
 
 ### Project-Owned PrimeQA/TechQA Hybrid Split
 
-Status: Stage 73 train/dev top10 candidate-reranker diagnostic completed; final
-metrics not run.
+Status: Stage 74 stopped the current candidate-reranker policy route as
+non-actionable; final metrics not run.
 
 This route preserves the final target: document-style RAG over TechQA technotes.
 It accepts that old Stage 31-66 model-selection evidence cannot be treated as
@@ -221,9 +234,8 @@ default_runtime_policy: unchanged
 
 Required next step:
 
-Stage 74 should choose whether to stop reranker-policy development as
-non-actionable for now, or refine train/dev reranker gates using the top3/top10
-diagnostics. Do not use test for evaluation or tuning.
+Stage 75 should select a new non-reranker-policy direction only after explicit
+user confirmation. Do not use test for evaluation or tuning.
 
 ## Parked Paths
 
@@ -260,11 +272,15 @@ The PrimeQA/TechQA hybrid split route is selected, Stage 68 froze local split
 JSONL files, Stage 69 rebuilt train/dev candidate artifacts, and Stage 70
 completed train/dev development checks. Stage 71 completed candidate-reranker
 development on train/dev. Stage 72 completed changed-case review on dev only.
-Stage 73 completed a train/dev-only top10 diagnostic. Until a future stage
-explicitly opens final evaluation:
+Stage 73 completed a train/dev-only top10 diagnostic. Stage 74 stopped the
+current candidate-reranker policy route. Until a future stage explicitly opens
+final evaluation:
 
 - do not run final metrics;
 - do not change the default runtime;
+- do not defaultize the current candidate-reranker policy;
+- do not continue the current reranker-policy route without a new user-confirmed
+  train/dev-only plan;
 - do not tune Stage 51 against the frozen test split;
 - do not use NVIDIA `train.json` as held-out evidence;
 - do not treat PrimeQA validation rows as independent held-out evidence;
@@ -370,4 +386,10 @@ The current Stage 73 candidate-reranker top10 diagnostic is recorded in:
 
 ```text
 docs/primeqa_hybrid_candidate_reranker_top10_diagnostic.md
+```
+
+The current Stage 74 candidate-reranker stop decision is recorded in:
+
+```text
+docs/primeqa_hybrid_candidate_reranker_stop_decision.md
 ```
