@@ -15848,3 +15848,308 @@ distribution visualizations: 4 generated
   3. 对比同一 capped candidate pool 下的 baseline 与 Stage51 adapter；
   4. 单独记录 top5 source availability warning；
   5. 输出可视化和完整学习记录。
+
+## 2026-07-14 - Stage 64：MSQA capped Stage51 adapter comparison
+
+### 背景
+
+Stage 63 已经把 MSQA candidate pool 对齐到 Stage31 训练候选池形状：
+
+```text
+top_k: 5
+max_candidates_per_source_row: 3
+effective_candidate_pool_cap: 15
+candidate_rows: 47342
+median candidates/query: 15.0
+max candidates/query: 15.0
+```
+
+Stage 64 的目标是在**同一个 Stage63 capped candidate pool** 上运行一次 Stage51
+adapter comparison，而不是重建候选池、调参或 defaultize。
+
+### 用户确认的特殊处理
+
+Stage51 scorer 需要 `runtime_features`，其中包含 route、query overlap、token count
+等基于 question text 的运行时特征；但 Stage63 candidate JSONL 按协议不包含
+`question` 字段。
+
+本阶段先向用户列出选项：
+
+```text
+A. 从 Stage57 frozen split 读取 question text，只用于计算 runtime_features
+B. 只使用 Stage63 candidate JSONL 里已有字段打分
+C. 先做 Stage64a：只生成 MSQA runtime feature adapter 并审计，不跑 comparison
+```
+
+用户确认选择 A。
+
+本阶段真实边界：
+
+```text
+question text source: Stage57 frozen split only
+question text written to candidate JSONL: false
+question text used for retrieval indexing: false
+candidate pool rebuilt: false
+```
+
+### 新增能力
+
+新增模块：
+
+```text
+src/ts_rag_agent/application/msqa_stage51_adapter_comparison.py
+```
+
+新增 CLI：
+
+```text
+scripts/compare_msqa_stage51_capped_adapter.py
+```
+
+新增测试：
+
+```text
+tests/test_msqa_stage51_adapter_comparison.py
+```
+
+新增文档：
+
+```text
+docs/msqa_stage51_adapter_comparison.md
+```
+
+同步更新：
+
+```text
+docs/evaluation_strategy.md
+docs/data_strategy.md
+docs/msqa_stage51_candidate_pool_cap.md
+docs/learning_journal.md
+```
+
+### Stage51 adapter contract
+
+本阶段复用真实 Stage51 runtime policy，而不是重新发明一个“像 Stage51”的策略：
+
+```text
+model: logistic_best_candidate
+train_split: train
+selector_name_runtime_feature: hybrid_routing_answer_aware_mcpd3_section_span_mcpd1
+composition_policy: candidate_score_gte_60_rank_contained_preserve_baseline_out_of_rank_guarded_reranker
+runtime_guard: candidate_score_gte_60_all_selected_citations_rank_lte_max_citation_rank_preserve_baseline_out_of_rank_docs
+max_answer_candidates: 3
+rank_contained_max_retrieval_rank: 3
+candidate_pool_rebuilt: false
+candidate_pool_rows: 47342
+```
+
+Stage64 在每个 query 内只对**已存在的 capped candidates** 赋予 Stage31-like
+global candidate rank：
+
+```text
+candidate_score descending
+retrieval_rank ascending
+candidate_id ascending
+```
+
+注意：MSQA `candidate_score` 是 Stage63 dry-run adapter score，不是训练好的 Stage51
+model score；本阶段保留 Stage51 的 `score >= 60` guard 不变，因此 score calibration
+差异属于 adapter-risk 证据的一部分。
+
+### Stage 64 运行命令
+
+```powershell
+python scripts\compare_msqa_stage51_capped_adapter.py `
+  --split-jsonl artifacts\msqa_evaluation_split_stage57.jsonl `
+  --candidate-jsonl artifacts\msqa_stage51_candidate_adapter_stage63_capped_candidates.jsonl `
+  --adapter-report artifacts\msqa_stage51_candidate_adapter_stage63_capped.json `
+  --distribution-report artifacts\msqa_stage51_candidate_distribution_stage63_capped.json `
+  --candidate-reranker-dataset artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --stage31-summary artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid_summary.json `
+  --output artifacts\msqa_stage51_adapter_comparison_stage64.json `
+  --visualization-dir artifacts\msqa_stage51_adapter_comparison_stage64_visuals `
+  --model logistic_best_candidate `
+  --train-split train `
+  --max-answer-candidates 3 `
+  --max-citation-rank 3 `
+  --sample-limit 20
+```
+
+### Stage 64 结果
+
+Answer-source proxy F1：
+
+```text
+baseline_top1_average_token_f1: 0.2881
+stage51_top1_average_token_f1: 0.2863
+top1_average_delta_vs_baseline: -0.0018
+
+baseline_top3_average_answer_token_f1: 0.4199
+stage51_top3_average_answer_token_f1: 0.4171
+top3_average_delta_vs_baseline: -0.0028
+
+oracle_best_single_average_token_f1: 0.4156
+```
+
+Top3 outcomes：
+
+```text
+question_count: 3301
+top3_improved_count: 20
+top3_regressed_count: 57
+top3_tied_count: 3224
+changed_answer_count: 719
+changed_answer_rate: 0.2178
+replacement_count: 719
+replacement_rate: 0.2178
+```
+
+Gold-source citation：
+
+```text
+baseline_gold_source_citation_count: 1394
+stage51_gold_source_citation_count: 1397
+baseline_gold_source_citation_rate: 0.4223
+stage51_gold_source_citation_rate: 0.4232
+gold_source_citation_delta: +3
+citation_lost_count: 0
+citation_gained_count: 3
+```
+
+Decision reasons：
+
+```text
+candidate_score_gte_60_accepted: 719
+candidate_score_gte_60_blocked: 479
+model_selected_top_candidate: 1050
+score_margin_below_min: 555
+selected_rank_exceeds_limit: 498
+```
+
+Selected rank distribution：
+
+```text
+rank_1: 1050
+rank_2: 717
+rank_3: 585
+rank_4_5: 451
+rank_6_10: 415
+rank_11_15: 83
+```
+
+Route metrics 摘要：
+
+```text
+other: questions 2402, top3 delta -0.0017, changed 488, improved 13, regressed 28, citation delta +3
+error_or_log: questions 452, top3 delta -0.0050, changed 136, improved 4, regressed 12, citation delta 0
+install_upgrade_config: questions 351, top3 delta -0.0078, changed 77, improved 3, regressed 16, citation delta 0
+limitation_or_restriction: questions 95, top3 delta -0.0007, changed 18, improved 0, regressed 1, citation delta 0
+```
+
+### Stage63 warning 保留
+
+Stage64 保留 Stage63 的 source availability warning：
+
+```text
+Stage63 gold-source candidate rate: 0.5604
+Stage31 gold-document candidate rate: 0.6197
+delta: -0.0593
+```
+
+这意味着 Stage64 只评价 top5 source-row boundary 下的 Stage51 adapter 行为；
+missing gold source rows 不能由 Stage51 scorer 恢复。
+
+### 可视化结果
+
+本阶段生成：
+
+```text
+artifacts/msqa_stage51_adapter_comparison_stage64_visuals/stage64_msqa_answer_f1.svg
+artifacts/msqa_stage51_adapter_comparison_stage64_visuals/stage64_msqa_answer_f1_delta.svg
+artifacts/msqa_stage51_adapter_comparison_stage64_visuals/stage64_msqa_gold_source_citation.svg
+artifacts/msqa_stage51_adapter_comparison_stage64_visuals/stage64_msqa_decision_reasons.svg
+```
+
+Stage64 report：
+
+```text
+artifacts/msqa_stage51_adapter_comparison_stage64.json
+```
+
+Stage64 report checksum：
+
+```text
+2dd3427631028248c552c1ec68983ff3e271d7332940bb7768a58b63c0aaa8b3
+```
+
+以上 artifacts 位于本地 `artifacts/`，按 `.gitignore` 不纳入 git。
+
+### 问题、原因与修正
+
+- 问题 1：Stage51 scorer 需要 question-derived runtime features，但 Stage63 candidate JSONL
+  不能包含 question text。
+  - 原因：Stage60/61 明确 no question text in candidate rows，防止把 MSQA 变成 question-text diagnostic index。
+  - 处理：从 Stage57 frozen split 读取 question text，只用于 runtime feature computation；
+    report 中明确记录 `question text written to candidate JSONL: false`。
+- 问题 2：MSQA adapter score 与 PrimeQA Stage31 candidate score 不是同一个校准分布。
+  - 原因：MSQA `candidate_score` 是 Stage63 dry-run adapter score；Stage51 guard 的
+    `score >= 60` 来自 PrimeQA candidate-reranker workflow。
+  - 处理：不调阈值、不重新搜索策略，把 calibration difference 作为 adapter-risk 证据记录。
+- 问题 3：Stage51 在 MSQA capped pool 上 citation 有收益但 answer F1 回退。
+  - 证据：gold-source citation delta `+3`，citation lost `0`；但 top3 F1 delta `-0.0028`。
+  - 处理：decision status 标记为 `msqa_stage51_capped_adapter_comparison_f1_regressed`；
+    不 defaultize，下一步做 changed-case/tradeoff review。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src/ts_rag_agent/application/msqa_stage51_adapter_comparison.py scripts/compare_msqa_stage51_capped_adapter.py tests/test_msqa_stage51_adapter_comparison.py
+pytest -q tests/test_msqa_stage51_adapter_comparison.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+真实 artifact 生成：
+
+```text
+comparison report: generated
+visualizations: 4 generated
+candidate pool rebuilt: false
+candidate_pool_rows: 47342
+```
+
+### 结论
+
+- Stage64 完成一次 capped MSQA Stage51 adapter comparison。
+- Stage64 没有重建或改写 Stage63 capped candidate pool。
+- Stage64 没有 defaultize。
+- 默认 runtime 不变。
+- 结果是混合信号：
+  - gold-source citation `+3`，且 citation loss `0`；
+  - top3 answer-source proxy F1 `-0.0028`；
+  - changed answers `719 / 3301`，其中 improved 20、regressed 57。
+- 当前不能把 Stage51 推向默认化；应先审查 changed cases 与 source-citation tradeoff。
+
+### 我学到的
+
+- 外部 adapter comparison 必须把“candidate-pool fairness”和“score calibration”分开看；pool 对齐了，不代表 Stage51 guard 的阈值天然迁移。
+- MSQA 上 Stage51 的收益更像 source correction，而不是 answer text improvement。
+- 不丢 citation 不等于整体安全；719 个 changed answers 和 57 个 top3 F1 regressions 说明需要 case-level 风险复盘。
+- Stage64 的结果加强了一个边界：MSQA 是外部风险证据，不是 defaultization test。
+
+### 下一步
+
+- 做 Stage65：review Stage64 changed cases and source-citation tradeoffs。
+- Stage65 目标：
+  1. 分析 57 个 top3 regression 和 20 个 improvement；
+  2. 单独看 3 个 citation gained case；
+  3. 判断 regression 是否集中在 route、selected rank、score margin 或 cross-source replacement；
+  4. 决定是否需要另一个外部数据集，或冻结最终评估协议；
+  5. 继续不 defaultize。

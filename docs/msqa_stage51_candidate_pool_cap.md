@@ -214,7 +214,13 @@ These artifacts are local ignored outputs and are not committed by git policy.
 
 ## Next Step
 
-Stage64 should run one capped Stage51 adapter comparison against the same
-Stage63 capped candidate pool after user confirmation. The comparison must not
-change the default runtime and must preserve the source-availability warning in
-the interpretation.
+Stage64 ran one capped Stage51 adapter comparison against the same Stage63
+capped candidate pool:
+
+```text
+docs/msqa_stage51_adapter_comparison.md
+```
+
+The comparison preserved the source-availability warning and did not change the
+default runtime. It found gold-source citation gain but answer-F1 regression, so
+the next step is changed-case and tradeoff review, not defaultization.

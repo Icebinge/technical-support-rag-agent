@@ -206,6 +206,12 @@ The current Stage31-aligned MSQA candidate-pool cap is recorded in:
 docs/msqa_stage51_candidate_pool_cap.md
 ```
 
+The current capped MSQA Stage51 adapter comparison is recorded in:
+
+```text
+docs/msqa_stage51_adapter_comparison.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:

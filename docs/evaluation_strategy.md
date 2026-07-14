@@ -180,10 +180,11 @@ Stage 62 result:
 
 Required next step:
 
-1. Run one capped Stage51 adapter comparison against the same Stage63 capped
-   candidate pool after user confirmation.
-2. Preserve the Stage63 source-availability warning in the interpretation.
-3. Do not defaultize from the capped comparison alone.
+1. Review Stage64 changed cases and source-citation tradeoffs.
+2. Treat the Stage64 result as external-adapter risk evidence, not a
+   defaultization result.
+3. Decide whether another external dataset or a frozen final evaluation protocol
+   is needed before any defaultization decision.
 
 ## Parked Paths
 
@@ -222,9 +223,8 @@ leakage checks:
 - Do not tune the Stage 51 candidate.
 - Do not use NVIDIA `train.json` as held-out evidence.
 - Do not treat MSQA as a held-out test set.
-- Do not compare top-k against Stage 51 on MSQA except for the next approved
-  single capped Stage64 comparison against the same Stage63 capped candidate
-  pool.
+- Do not run additional MSQA Stage51 comparisons without a new frozen protocol;
+  the approved single capped Stage64 comparison has already been run.
 - Do not reuse MSQA `test_id.txt` as this project's final split until the
   missing ID and upstream filtering assumptions are handled explicitly.
 - Do not use an answer-field fallback for MSQA evaluation samples.
@@ -265,4 +265,6 @@ artifacts/msqa_stage51_candidate_adapter_stage63_capped_candidates.jsonl
 artifacts/msqa_stage51_candidate_adapter_stage63_capped_visuals/
 artifacts/msqa_stage51_candidate_distribution_stage63_capped.json
 artifacts/msqa_stage51_candidate_distribution_stage63_capped_visuals/
+artifacts/msqa_stage51_adapter_comparison_stage64.json
+artifacts/msqa_stage51_adapter_comparison_stage64_visuals/
 ```
