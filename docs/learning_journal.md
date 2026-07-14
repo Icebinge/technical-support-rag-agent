@@ -16962,3 +16962,243 @@ pytest -q: 185 passed
 做 Stage69：rebuild PrimeQA train/dev/test loaders and derived candidate artifacts。
 
 Stage69 应该让后续训练和开发流程读取 `primeqa_hybrid_stage68_v1`，并明确阻止 test split 参与调参。只有 rebuild 完成后，才可以重新跑 train/dev 上的基线、候选 reranker 或 verified RAG 流程。
+
+## Stage 69: Rebuild PrimeQA hybrid loaders and train/dev candidate artifacts
+
+### 阶段目标
+
+本阶段基于 Stage68 冻结的 `primeqa_hybrid_stage68_v1` 重建后续开发所需的本地 artifacts：
+
+1. 读取 frozen train/dev/test JSONL；
+2. 导出 PrimeQA-compatible question JSON；
+3. 只用 train/dev 构建 candidate-reranker derived artifacts；
+4. 显式阻止 test split 进入训练或调参。
+
+本阶段不运行 final metrics，不训练或选择最终模型，不改变默认 runtime。
+
+### 新增与修改
+
+- 新增 loader：
+  - `src/ts_rag_agent/infrastructure/primeqa_hybrid_split_loader.py`
+- 新增应用模块：
+  - `src/ts_rag_agent/application/primeqa_hybrid_split_rebuild.py`
+- 新增脚本：
+  - `scripts/rebuild_primeqa_hybrid_artifacts.py`
+- 新增测试：
+  - `tests/test_primeqa_hybrid_split_loader.py`
+  - `tests/test_primeqa_hybrid_split_rebuild.py`
+- 新增文档：
+  - `docs/primeqa_hybrid_rebuild.md`
+- 更新文档：
+  - `docs/data_strategy.md`
+  - `docs/evaluation_strategy.md`
+  - `docs/primeqa_hybrid_split_freeze.md`
+  - `docs/learning_journal.md`
+
+### Stage69 运行命令
+
+```powershell
+python scripts\rebuild_primeqa_hybrid_artifacts.py `
+  --output artifacts\primeqa_hybrid_rebuild_stage69.json `
+  --question-output-dir artifacts\primeqa_hybrid_rebuild_stage69_questions `
+  --candidate-output artifacts\primeqa_hybrid_rebuild_stage69_candidates.jsonl `
+  --candidate-summary-output artifacts\primeqa_hybrid_rebuild_stage69_candidates.summary.json `
+  --visualization-dir artifacts\primeqa_hybrid_rebuild_stage69_visuals `
+  --candidate-splits train,dev `
+  --retrieval-top-k 5 `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --candidate-limit 25 `
+  --min-candidate-score 2.0
+```
+
+### Loader contract
+
+```text
+split_name: primeqa_hybrid_stage68_v1
+protocol_version: primeqa_hybrid_split_v1
+PrimeQAQuestion.id: source_split:QUESTION_ID
+candidate_artifact_splits: train, dev
+forbidden_tuning_splits: test
+```
+
+使用 `source_split:QUESTION_ID` 是为了避免 validation rows 与 dev rows 复用原始 `QUESTION_ID` 后造成 candidate id 冲突。
+
+### 真实 loaded split 摘要
+
+```text
+train:
+  rows: 562
+  answerable: 370
+  unanswerable: 192
+  unique_answer_doc_ids: 309
+  unique_candidate_doc_ids: 19602
+
+dev:
+  rows: 121
+  answerable: 76
+  unanswerable: 45
+  unique_answer_doc_ids: 71
+  unique_candidate_doc_ids: 5373
+
+test:
+  rows: 247
+  answerable: 175
+  unanswerable: 72
+  unique_answer_doc_ids: 145
+  unique_candidate_doc_ids: 8954
+```
+
+test split 只被加载和导出 question artifact，用来验证 loader contract；没有进入 candidate training artifact。
+
+### 真实 candidate artifact 摘要
+
+```text
+selector: hybrid_routing_answer_aware_mcpd3_section_span_mcpd1
+candidate_splits: train, dev
+total answerable questions used: 446
+total candidate rows: 5993
+train questions: 370
+dev questions: 76
+train candidate rows: 5006
+dev candidate rows: 987
+average rows per question: 13.4372
+average top candidate token F1: 0.2343
+average best candidate token F1: 0.4263
+average oracle gain vs top candidate: 0.1920
+questions with gold-document candidate: 274
+gold-document candidate rows: 716
+```
+
+Rows by route：
+
+```text
+other: 2658
+error_or_log: 1300
+install_upgrade_config: 1087
+how_to_or_lookup: 592
+security_bulletin_vulnerability_detail: 236
+limitation_or_restriction: 60
+security_bulletin_post_fix_behavior: 30
+security_bulletin_remediation: 30
+```
+
+### Guard checks
+
+```text
+test_split_not_used_for_candidate_training_artifact: passed
+candidate_build_splits_match_allowed_train_dev: passed
+all_loaded_splits_have_rows: passed
+candidate_rows_have_no_test_split: passed
+```
+
+### 生成的本地 artifacts
+
+Report：
+
+```text
+artifacts/primeqa_hybrid_rebuild_stage69.json
+sha256: 7e92de033c58fe5623e0d4bff422f7e5f3acd1bb5673f7f919af9315ea5ec633
+```
+
+Question artifacts：
+
+```text
+artifacts/primeqa_hybrid_rebuild_stage69_questions/primeqa_hybrid_stage69_train_Q_A.json
+rows: 562
+sha256: 1db9f81f5ad0aec1f79eb42d90d201117e84f1f29331f31e63dc31a8a6c0105c
+
+artifacts/primeqa_hybrid_rebuild_stage69_questions/primeqa_hybrid_stage69_dev_Q_A.json
+rows: 121
+sha256: 7b84c09f8dd1e30aacf10e075a8c1da8f732cf84643fa789fefda42ca4b43081
+
+artifacts/primeqa_hybrid_rebuild_stage69_questions/primeqa_hybrid_stage69_test_Q_A.json
+rows: 247
+sha256: 1ad3c643131c8fddbed36aefb11141cf616022374f2774a248577d62bd04a021
+```
+
+Candidate artifacts：
+
+```text
+artifacts/primeqa_hybrid_rebuild_stage69_candidates.jsonl
+rows: 5993
+sha256: d379d59f5172394a40bcd1852aa8188f2dec18d4abcae20d08acd992a802da4d
+
+artifacts/primeqa_hybrid_rebuild_stage69_candidates.summary.json
+sha256: a753848fe2f6c111e2a376c53522ce5ca67536d0203d5addd135f86beaa6332d
+```
+
+可视化：
+
+```text
+artifacts/primeqa_hybrid_rebuild_stage69_visuals/stage69_primeqa_loaded_split_rows.svg
+artifacts/primeqa_hybrid_rebuild_stage69_visuals/stage69_primeqa_loaded_answerable_rows.svg
+artifacts/primeqa_hybrid_rebuild_stage69_visuals/stage69_primeqa_candidate_rows_by_split.svg
+artifacts/primeqa_hybrid_rebuild_stage69_visuals/stage69_primeqa_candidate_questions_by_split.svg
+```
+
+### 问题、原因与修正
+
+- 问题 1：旧 candidate-reranker build 默认读取原始 PrimeQA train/dev 文件。
+  - 原因：Stage68 之前没有项目自有 frozen split loader。
+  - 修正：新增 frozen split loader，把 Stage68 JSONL 转成 `PrimeQAQuestion`，并导出 PrimeQA-compatible question JSON。
+- 问题 2：validation rows 可能复用 dev 的原始 `QUESTION_ID`。
+  - 原因：PrimeQA validation_reference 与 dev 存在重复样本。
+  - 修正：loader 将 `PrimeQAQuestion.id` 设为 `source_split:QUESTION_ID`，避免 candidate id 冲突。
+- 问题 3：test split 必须锁住，不能进入调参 candidate artifact。
+  - 原因：Stage68 已经把 test 冻结为未来最终评估边界。
+  - 修正：Stage69 rebuild module 和 CLI 对 `candidate_splits` 做 guard；`test` 会被拒绝，真实 artifact 只包含 train/dev。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\infrastructure\primeqa_hybrid_split_loader.py src\ts_rag_agent\application\primeqa_hybrid_split_rebuild.py scripts\rebuild_primeqa_hybrid_artifacts.py tests\test_primeqa_hybrid_split_loader.py tests\test_primeqa_hybrid_split_rebuild.py
+pytest -q tests\test_primeqa_hybrid_split_loader.py tests\test_primeqa_hybrid_split_rebuild.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 4 passed
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 189 passed
+git diff --check: passed
+git check-ignore artifacts/primeqa_hybrid_rebuild_stage69*: passed
+```
+
+真实运行耗时：
+
+```text
+load_splits: 0.018s
+load_documents: 0.887s
+bm25_index: 4.150s
+candidate_build: 106.450s
+total: 111.505s
+```
+
+### 结论
+
+- Stage69 已完成 frozen split loader 和 train/dev candidate artifact rebuild。
+- 后续开发可以读取 `primeqa_hybrid_stage68_v1` 的 train/dev artifacts 重新跑基线和开发检查。
+- test split 仍然 locked，不能用于调参或多轮模型选择。
+- 当前没有运行 final metrics，也没有改变 runtime。
+
+### 我学到的
+
+- 重新划分 split 之后，不只是换几个文件路径；所有依赖 question id、candidate id、训练边界的代码都要重新对齐。
+- validation rows 混入 planning pool 后，必须重新定义稳定样本 ID，否则会在 candidate row 层发生隐性冲突。
+- train/dev derived artifacts 可以计算 gold labels，但这些 labels 只能服务离线开发，不能泄漏进 runtime features。
+
+### 下一步
+
+做 Stage70：rerun PrimeQA train/dev baselines and candidate-reranker development checks。
+
+Stage70 应该只在 `primeqa_hybrid_stage68_v1` 的 train/dev 上重跑 baseline 与候选 reranker 开发检查，继续保持 test split locked，不运行 final test metrics。

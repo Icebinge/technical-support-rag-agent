@@ -8,6 +8,15 @@ JSONL artifacts. It does not rebuild retrieval indexes, train or tune models,
 run answer-quality metrics, use test rows for tuning, or change the default
 runtime.
 
+Post-Stage68 update:
+
+Stage 69 rebuilt PrimeQA-compatible question files and train/dev candidate
+artifacts from `primeqa_hybrid_stage68_v1`. The rebuild record is:
+
+```text
+docs/primeqa_hybrid_rebuild.md
+```
+
 ## Frozen Split
 
 ```text
@@ -151,6 +160,8 @@ or final-test metric was run in this stage.
 
 ## Next Step
 
-Stage 69 should rebuild PrimeQA train/dev/test data loaders and derived
-candidate artifacts from `primeqa_hybrid_stage68_v1`, without using test rows
-for tuning.
+Stage 69 rebuilt PrimeQA-compatible question files and train/dev candidate
+artifacts from `primeqa_hybrid_stage68_v1`.
+
+The current next stage is Stage 70: rerun PrimeQA train/dev baselines and
+candidate-reranker development checks while keeping test locked.

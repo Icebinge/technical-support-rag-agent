@@ -36,9 +36,10 @@ The Stage 68 frozen split:
 - includes validation reference rows in the planning pool only, not as
   independent held-out evidence.
 
-Stage 68 materialized local ignored train/dev/test JSONL artifacts. It still
-cannot support final metrics until Stage 69 rebuilds loaders and derived
-candidate artifacts from this frozen boundary.
+Stage 68 materialized local ignored train/dev/test JSONL artifacts. Stage 69
+then rebuilt PrimeQA-compatible question files and train/dev candidate-reranker
+artifacts from this frozen boundary. The frozen test split remains locked and
+must not be used for tuning.
 
 ### nvidia/TechQA-RAG-Eval
 
@@ -265,6 +266,13 @@ The current PrimeQA/TechQA hybrid split freeze is recorded in:
 
 ```text
 docs/primeqa_hybrid_split_freeze.md
+```
+
+The current PrimeQA/TechQA hybrid loader and train/dev artifact rebuild is
+recorded in:
+
+```text
+docs/primeqa_hybrid_rebuild.md
 ```
 
 ## Leakage Checks
