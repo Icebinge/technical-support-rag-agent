@@ -18126,3 +18126,205 @@ git diff --check
 Stage75 只有在用户明确确认新的方向后再开始。
 
 当前不自动开启新的实验路线；如果继续，必须先确认新的非 reranker-policy train/dev 方向，并继续遵守：训练阶段永远不能在测试集上评估。
+
+## Stage75：BM25 top10 没召回分析
+
+时间：2026-07-15
+
+### 目标
+
+根据用户确认的方向，优先解决“没有召回”的问题，而不是继续当前 reranker-policy 路线。
+
+本阶段只分析 `primeqa_hybrid_stage68_v1` 的 train/dev：
+
+- 不读取 frozen test split；
+- 不运行 final test metrics；
+- 不用 test 做 tuning；
+- 不改变默认 runtime policy；
+- 不写入原始 question、answer、document title 或 document body text。
+
+### 本次新增
+
+- 新增 `src/ts_rag_agent/application/primeqa_hybrid_bm25_miss_analysis.py`。
+- 新增 `scripts/analyze_primeqa_hybrid_bm25_top10_misses.py`。
+- 新增 `tests/test_primeqa_hybrid_bm25_miss_analysis.py`。
+- 新增 `docs/primeqa_hybrid_bm25_top10_miss_analysis.md`。
+- 更新 `docs/evaluation_strategy.md`。
+- 更新 `docs/data_strategy.md`。
+- 更新 `docs/primeqa_hybrid_candidate_reranker_stop_decision.md`。
+- 更新 `docs/learning_journal.md`。
+
+### 真实运行命令
+
+```text
+python scripts\analyze_primeqa_hybrid_bm25_top10_misses.py `
+  --output artifacts\primeqa_hybrid_bm25_top10_miss_analysis_stage75.json `
+  --visualization-dir artifacts\primeqa_hybrid_bm25_top10_miss_analysis_stage75_visuals `
+  --top-k 10 `
+  --search-depth 50
+```
+
+真实运行耗时：
+
+```text
+load_splits: 0.012s
+load_documents: 0.865s
+scan_candidate_routes: 0.053s
+bm25_index: 4.624s
+miss_analysis: 114.647s
+total: 120.201s
+```
+
+### 真实结果
+
+```text
+train:
+  evaluated_questions: 370
+  hit@10: 0.6622
+  miss_count: 125
+  miss_rate: 0.3378
+
+dev:
+  evaluated_questions: 76
+  hit@10: 0.6974
+  miss_count: 23
+  miss_rate: 0.3026
+
+cross split:
+  evaluated_questions: 446
+  hit_count: 298
+  miss_count: 148
+  hit@10: 0.6682
+  miss_rate: 0.3318
+```
+
+miss driver：
+
+```text
+gold_doc_not_found_within_top50: 110
+gold_doc_rank_21_to_50: 24
+gold_doc_rank_11_to_20: 14
+top1_query_overlap_exceeds_gold: 103
+gold_doc_query_overlap_ratio_lt_0_25: 20
+gold_doc_low_query_overlap_lte_1: 1
+top10_contains_source_candidate_doc: 148
+```
+
+dev miss：
+
+```text
+dev miss_count: 23
+dev not_found_top50: 17
+dev rank_21_to_50: 4
+dev rank_11_to_20: 2
+dev top1_query_overlap_exceeds_gold: 14
+dev gold_doc_query_overlap_ratio_lt_0_25: 3
+```
+
+### 可视化产物
+
+```text
+artifacts\primeqa_hybrid_bm25_top10_miss_analysis_stage75_visuals\stage75_bm25_miss_count_by_split.svg
+artifacts\primeqa_hybrid_bm25_top10_miss_analysis_stage75_visuals\stage75_bm25_miss_rate_by_split.svg
+artifacts\primeqa_hybrid_bm25_top10_miss_analysis_stage75_visuals\stage75_bm25_miss_reason_tags.svg
+artifacts\primeqa_hybrid_bm25_top10_miss_analysis_stage75_visuals\stage75_bm25_miss_rank_buckets.svg
+artifacts\primeqa_hybrid_bm25_top10_miss_analysis_stage75_visuals\stage75_bm25_dev_miss_routes.svg
+```
+
+Stage75 JSON SHA256：
+
+```text
+45272301A177A275C3489B176ABB5F307CD3E809151E31760C36F6168E38A116
+```
+
+### Guard checks
+
+```text
+analysis_splits_are_train_dev_only: passed
+candidate_artifact_splits_are_train_dev_only: passed
+candidate_rows_have_no_test_split: passed
+search_depth_covers_top_k: passed
+stage75_report_is_public_safe_no_raw_text: passed
+final_test_metrics_not_run: passed
+default_runtime_policy_unchanged: passed
+```
+
+额外 raw-text 检查：
+
+```text
+Select-String over Stage75 JSON for question_title, question_text, gold_answer,
+candidate_sentence, document_title, document_text, and known raw-text snippets:
+no matches
+```
+
+artifact 忽略状态：
+
+```text
+.gitignore:19:artifacts/* artifacts\primeqa_hybrid_bm25_top10_miss_analysis_stage75.json
+.gitignore:19:artifacts/* artifacts\primeqa_hybrid_bm25_top10_miss_analysis_stage75_visuals\stage75_bm25_miss_reason_tags.svg
+```
+
+### 问题、原因与修正
+
+- 问题 1：继续 reranker 不能解决未召回问题。
+  - 原因：110 / 148 个 train/dev miss 的 gold document 不在 BM25 top50 内；gold document 没进候选窗口时，reranker 没有可重排对象。
+  - 修正：Stage75 转向 BM25 top10 miss analysis，并把 Stage76 定义为 retrieval-recall 改进设计。
+- 问题 2：旧的 BM25 error analyzer 不适合直接用于当前记录。
+  - 原因：旧脚本会输出 raw question/answer 文本，不符合当前 public-safe 记录边界。
+  - 修正：新增 Stage75 专用 analyzer，只输出 ID、rank bucket、route、overlap features、reason tags 和统计汇总。
+- 问题 3：第一版实现有小的代码质量问题。
+  - 原因：`Sequence` import 缺失，且 ruff 要求从 `collections.abc` 引入。
+  - 修正：补充并调整 import；同时修正 guard check 中 train/dev 顺序比较，统一用排序后的 split 列表。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_bm25_miss_analysis.py scripts\analyze_primeqa_hybrid_bm25_top10_misses.py tests\test_primeqa_hybrid_bm25_miss_analysis.py
+pytest -q tests\test_primeqa_hybrid_bm25_miss_analysis.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+提交前完整验证：
+
+```text
+ruff check .
+pytest -q
+git diff --check
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 199 passed
+git diff --check: passed
+```
+
+### 结论
+
+- Stage75 已完成 BM25 top10 miss analysis。
+- 训练阶段没有使用测试集。
+- final test metrics 没有运行。
+- 默认 runtime policy 保持 unchanged。
+- 当前最关键问题是 retrieval recall：dev 仍有 `23 / 76` answerable questions 未在 BM25 top10 召回 gold document，其中 `17 / 23` 连 top50 都没有找到。
+- 因为大多数 miss 不是 shallow rerank 问题，下一步应先设计 train/dev-only 的召回改进候选，而不是继续 reranker-policy 路线。
+
+### 我学到的
+
+- 对 RAG 来说，召回失败是比 reranker 排序更靠前的瓶颈；gold document 不进候选窗口，后续 composition 和 reranker 都无法弥补。
+- top10 miss 里要区分 `rank_11_to_50` 和 `not_found_top50`：前者可以先看重排或轻量 retrieval feature，后者更像 query/document matching 问题。
+- 记录分析类实验时，public-safe 边界要在脚本层面保证，不能只靠文档里承诺不展示 raw text。
+
+### 下一步
+
+Stage76：基于 Stage75 miss drivers，设计 train/dev-only 的 retrieval-recall improvement candidates。
+
+Stage76 仍然不能使用 test 做评估或 tuning，也不能运行 final test metrics。

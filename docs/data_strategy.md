@@ -45,6 +45,8 @@ policy validation. Stage 72 reviewed the Stage 71 dev changed cases and
 visualized the remaining train/dev-only risk. Stage 73 ran a train/dev-only
 top10 answer proxy diagnostic for the candidate-reranker policies. Stage 74
 stopped the current candidate-reranker policy route as non-actionable for now.
+Stage 75 then analyzed BM25 top10 misses on train/dev only and showed that
+retrieval recall is the next blocking issue.
 The frozen test split remains locked and must not be used for tuning.
 
 ### nvidia/TechQA-RAG-Eval
@@ -313,6 +315,12 @@ in:
 
 ```text
 docs/primeqa_hybrid_candidate_reranker_stop_decision.md
+```
+
+The current PrimeQA/TechQA hybrid BM25 top10 miss analysis is recorded in:
+
+```text
+docs/primeqa_hybrid_bm25_top10_miss_analysis.md
 ```
 
 ## Leakage Checks

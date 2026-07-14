@@ -1,6 +1,6 @@
 # Evaluation Strategy
 
-This document records the current evaluation strategy after Stage 74.
+This document records the current evaluation strategy after Stage 75.
 
 The active route is now the project-owned PrimeQA/TechQA hybrid split
 `primeqa_hybrid_stage68_v1`. Stage 68 froze local split artifacts, and Stage 69
@@ -10,8 +10,9 @@ Stage 71 ran train-only candidate-reranker cross-validation and train-to-dev
 guarded policy validation. Stage 72 reviewed the candidate-reranker dev changed
 cases and generated visualization artifacts. Stage 73 ran a train/dev-only
 top10 answer proxy diagnostic. Stage 74 stopped the current reranker-policy
-development route as non-actionable for now. The frozen test split remains
-locked for future final evaluation.
+development route as non-actionable for now. Stage 75 analyzed BM25 top10
+misses and showed that retrieval recall is now the blocking issue. The frozen
+test split remains locked for future final evaluation.
 
 ## Current Facts
 
@@ -128,6 +129,31 @@ can_use_test_for_tuning: false
 default_runtime_policy: unchanged
 ```
 
+- Stage 75 analyzed BM25 top10 misses on train/dev only:
+
+```text
+train evaluated questions: 370
+train hit@10: 0.6622
+train miss count: 125
+train miss rate: 0.3378
+
+dev evaluated questions: 76
+dev hit@10: 0.6974
+dev miss count: 23
+dev miss rate: 0.3026
+
+cross split evaluated questions: 446
+cross split hit@10: 0.6682
+cross split miss count: 148
+cross split miss rate: 0.3318
+
+cross split gold_doc_not_found_within_top50: 110
+cross split gold_doc_rank_21_to_50: 24
+cross split gold_doc_rank_11_to_20: 14
+final test metrics: not run
+default runtime policy: unchanged
+```
+
 - Stage 71 ran train-only candidate-reranker grouped CV and train-to-dev guarded
   policy validation for both `logistic_best_candidate` and
   `ridge_candidate_token_f1`:
@@ -162,8 +188,8 @@ train/dev, so any quality metric reported as held-out would be misleading.
 
 ### Project-Owned PrimeQA/TechQA Hybrid Split
 
-Status: Stage 74 stopped the current candidate-reranker policy route as
-non-actionable; final metrics not run.
+Status: Stage 75 completed BM25 top10 miss analysis on train/dev only;
+final metrics not run.
 
 This route preserves the final target: document-style RAG over TechQA technotes.
 It accepts that old Stage 31-66 model-selection evidence cannot be treated as
@@ -234,8 +260,8 @@ default_runtime_policy: unchanged
 
 Required next step:
 
-Stage 75 should select a new non-reranker-policy direction only after explicit
-user confirmation. Do not use test for evaluation or tuning.
+Stage 76 should design train/dev-only retrieval-recall improvement candidates
+from the Stage75 miss drivers. Do not use test for evaluation or tuning.
 
 ## Parked Paths
 
@@ -273,14 +299,17 @@ JSONL files, Stage 69 rebuilt train/dev candidate artifacts, and Stage 70
 completed train/dev development checks. Stage 71 completed candidate-reranker
 development on train/dev. Stage 72 completed changed-case review on dev only.
 Stage 73 completed a train/dev-only top10 diagnostic. Stage 74 stopped the
-current candidate-reranker policy route. Until a future stage explicitly opens
-final evaluation:
+current candidate-reranker policy route. Stage 75 completed BM25 top10 miss
+analysis and identified retrieval recall as the next blocking issue. Until a
+future stage explicitly opens final evaluation:
 
 - do not run final metrics;
 - do not change the default runtime;
 - do not defaultize the current candidate-reranker policy;
 - do not continue the current reranker-policy route without a new user-confirmed
   train/dev-only plan;
+- do not use the frozen test split while designing Stage 76 retrieval-recall
+  candidates;
 - do not tune Stage 51 against the frozen test split;
 - do not use NVIDIA `train.json` as held-out evidence;
 - do not treat PrimeQA validation rows as independent held-out evidence;
@@ -344,6 +373,8 @@ artifacts/primeqa_hybrid_candidate_reranker_changed_case_review_stage72.json
 artifacts/primeqa_hybrid_candidate_reranker_changed_case_review_stage72_visuals/
 artifacts/primeqa_hybrid_candidate_reranker_top10_diagnostic_stage73.json
 artifacts/primeqa_hybrid_candidate_reranker_top10_diagnostic_stage73_visuals/
+artifacts/primeqa_hybrid_bm25_top10_miss_analysis_stage75.json
+artifacts/primeqa_hybrid_bm25_top10_miss_analysis_stage75_visuals/
 ```
 
 The current Stage 67 protocol is recorded in:
@@ -392,4 +423,10 @@ The current Stage 74 candidate-reranker stop decision is recorded in:
 
 ```text
 docs/primeqa_hybrid_candidate_reranker_stop_decision.md
+```
+
+The current Stage 75 BM25 top10 miss analysis is recorded in:
+
+```text
+docs/primeqa_hybrid_bm25_top10_miss_analysis.md
 ```

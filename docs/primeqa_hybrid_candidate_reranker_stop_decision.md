@@ -96,6 +96,7 @@ development.
 
 ## Next Step
 
-Stage 75 should select a new non-reranker-policy direction only after explicit
-user confirmation. Until then, there is no active reranker-policy implementation
-track.
+Stage 75 selected and completed a new non-reranker-policy direction: BM25 top10
+miss analysis on train/dev only. The current next step is Stage 76: design
+train/dev-only retrieval-recall improvement candidates from the Stage75 miss
+drivers. The frozen test split must remain locked.
