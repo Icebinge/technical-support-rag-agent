@@ -18,7 +18,7 @@ data/raw/primeqa_techqa/TechQA.tar.gz
 
 ### nvidia/TechQA-RAG-Eval
 
-Use case: final evaluation set.
+Original intended use case: final evaluation set.
 
 This dataset is a reduced TechQA-derived RAG evaluation dataset with question,
 answer, answerability flag, and evidence contexts.
@@ -30,9 +30,21 @@ data/raw/nvidia_techqa_rag_eval/train.json
 data/raw/nvidia_techqa_rag_eval/corpus.zip
 ```
 
+Current boundary:
+
+Stage 53 leakage audit found that `train.json` is not an independent held-out
+set for the current PrimeQA train/dev development history. All 910 NVIDIA rows
+have exact normalized question overlap with PrimeQA train/dev, producing 974
+heldout-development overlap pairs because some development questions normalize
+to duplicate text.
+
+Therefore, do not use `nvidia/TechQA-RAG-Eval/train.json` as a held-out
+defaultization test for the current Stage 51 candidate unless a future workflow
+first redesigns the data split and removes or redoes all affected tuning.
+
 ## Split Rule
 
-The NVIDIA dataset is held out for evaluation. It must not be used for:
+Any future held-out dataset must not be used for:
 
 - prompt tuning
 - retriever parameter tuning
@@ -42,6 +54,10 @@ The NVIDIA dataset is held out for evaluation. It must not be used for:
 
 The PrimeQA data can be used for development, but any overlap with NVIDIA
 evaluation questions must be removed before training or tuning.
+
+For the current repository state, NVIDIA `train.json` has already been shown to
+overlap completely with PrimeQA train/dev, so it is blocked as a held-out
+evaluation source.
 
 ## Leakage Checks
 

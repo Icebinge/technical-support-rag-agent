@@ -12841,3 +12841,216 @@ python -m json.tool artifacts\verified_rag_stage52_defaultization_readiness_revi
   4. 若 leakage 无未处理重叠，再按冻结协议运行 top-k baseline 和 Stage 51 candidate；
   5. 只运行冻结候选，不新增候选、不调参；
   6. 根据 Stage 52 验收标准判断是否允许进入默认化决策。
+
+## 2026-07-14 Stage 53：NVIDIA held-out leakage audit 与评估阻断
+
+### 本阶段目标
+
+Stage 52 冻结协议要求：在运行任何 held-out 指标前，必须先生成 NVIDIA TechQA-RAG-Eval 与 PrimeQA train/dev 的 leakage report。本阶段严格按这个顺序执行：
+
+1. 不改变 Stage 52 冻结的 runtime 参数；
+2. 先做 NVIDIA 与 PrimeQA train/dev 的问题文本泄漏检查；
+3. 如果无未处理重叠，再运行 held-out top-k baseline 和 Stage 51 candidate；
+4. 如果发现未处理重叠，则停止，不运行 held-out 指标。
+
+### 新增内容
+
+新增泄漏分析模块：
+
+```text
+src/ts_rag_agent/application/heldout_leakage_analysis.py
+```
+
+新增 CLI：
+
+```text
+scripts/analyze_nvidia_heldout_leakage.py
+```
+
+新增测试：
+
+```text
+tests/test_heldout_leakage_analysis.py
+```
+
+同步修正文档：
+
+```text
+docs/data_strategy.md
+```
+
+将 NVIDIA TechQA-RAG-Eval 从“当前可直接使用的 final evaluation set”修正为“原计划 final evaluation set，但 Stage 53 已证明 `train.json` 与 PrimeQA train/dev 完全重叠，当前不能作为 held-out defaultization test”。
+
+模块能力：
+
+- 对 question text 做稳定归一化：
+  - lowercase；
+  - 只保留 ASCII alnum token；
+  - 合并空白；
+- 检查 exact overlap；
+- 检查非 exact 的 near-duplicate overlap；
+- 区分：
+  - `exact_overlap_count`：发生 exact overlap 的 held-out question 数；
+  - `exact_overlap_pair_count`：held-out 与 development 的 overlap pair 数；
+- 输出 `heldout_usable_without_exclusions`；
+- 输出阻断决策；
+- 生成 SVG 可视化。
+
+### 实验命令
+
+```powershell
+python scripts\analyze_nvidia_heldout_leakage.py `
+  --nvidia-samples data\raw\nvidia_techqa_rag_eval\train.json `
+  --primeqa-train-questions data\raw\primeqa_techqa\TechQA\training_and_dev\training_Q_A.json `
+  --primeqa-dev-questions data\raw\primeqa_techqa\TechQA\training_and_dev\dev_Q_A.json `
+  --output artifacts\nvidia_heldout_leakage_stage53.json `
+  --visualization-dir artifacts\nvidia_heldout_leakage_stage53_visuals `
+  --near-duplicate-threshold 0.9 `
+  --sample-limit 20
+```
+
+### 结果
+
+正式 leakage report：
+
+```text
+heldout_questions: 910
+development_questions: 910
+PrimeQA/TechQA::train: 600
+PrimeQA/TechQA::dev: 310
+exact_overlap_count: 910
+exact_overlap_pair_count: 974
+near_duplicate_overlap_count: 0
+near_duplicate_overlap_pair_count: 0
+unhandled_overlap_count: 910
+heldout_questions_without_detected_overlap: 0
+heldout_usable_without_exclusions: false
+```
+
+阻断决策：
+
+```text
+blocked: proposed held-out source overlaps with development data; do not run held-out evaluation metrics.
+```
+
+解释：
+
+- NVIDIA TechQA-RAG-Eval `train.json` 的 910 个 question 全部与 PrimeQA train/dev exact overlap。
+- `exact_overlap_pair_count` 是 974，大于 910，是因为 PrimeQA train/dev 中存在归一化后重复的问题文本，导致一个 NVIDIA question 可能匹配多个 development row。
+- 因为 `unhandled_overlap_count = 910`，Stage 52 的 held-out 验收前置条件失败。
+
+### 可视化结果
+
+本阶段生成：
+
+```text
+artifacts/nvidia_heldout_leakage_stage53_visuals/stage53_heldout_overlap_counts.svg
+artifacts/nvidia_heldout_leakage_stage53_visuals/stage53_development_source_counts.svg
+```
+
+完整 JSON artifact：
+
+```text
+artifacts/nvidia_heldout_leakage_stage53.json
+```
+
+以上 artifacts 均在本地 `artifacts/` 下，按 `.gitignore` 规则不纳入 git。
+
+### 事实边界
+
+- 本阶段读取了 NVIDIA `train.json` 的问题字段用于 leakage audit。
+- 本阶段没有运行 NVIDIA held-out top-k baseline。
+- 本阶段没有运行 NVIDIA held-out Stage 51 candidate。
+- 本阶段没有生成任何 held-out answer-quality metric。
+- 本阶段没有改变默认 runtime。
+- 本阶段没有新增候选策略、没有调参。
+- 本阶段没有实现 NVIDIA evaluator 的质量评估路径，因为 leakage audit 已经在评估前置步骤阻断，继续实现并运行指标会制造误导性“held-out”结果。
+
+### 问题与原因
+
+- 问题 1：Stage 52 假设 NVIDIA TechQA-RAG-Eval 可作为 held-out evaluation source，但 Stage 53 发现它与 PrimeQA train/dev 完全重叠。
+  - 910/910 NVIDIA questions 与 PrimeQA train/dev exact overlap；
+  - 因此它不能作为当前开发过程的独立 held-out test set。
+- 问题 2：项目早期数据策略把 NVIDIA 标成 final evaluation set，但没有先完成 overlap exclusion。
+  - Stage 53 证明这个假设不成立；
+  - 后续必须修正 evaluation strategy。
+- 问题 3：第一次正式 report 里把 exact overlap pair count 当成 unique held-out question count，导致 without-overlap 为负数。
+  - 原因是一个 held-out question 可以匹配多个 development duplicate row；
+  - 已修正为同时报告 question count 与 pair count；
+  - 新增测试覆盖该口径。
+
+### 修正与处理
+
+- 建立独立 leakage audit 工具，而不是手写一次性脚本。
+- 修正 exact overlap 计数口径：
+  - `exact_overlap_count = unique held-out question count`；
+  - `exact_overlap_pair_count = heldout-development pair count`。
+- 修正 `docs/data_strategy.md`，避免后续继续把 NVIDIA `train.json` 当作当前可用 held-out。
+- 按 Stage 52 协议停止，不运行 held-out metrics。
+- 将 NVIDIA held-out evaluation 标记为 blocked，而不是用重叠数据生成误导性分数。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\heldout_leakage_analysis.py scripts\analyze_nvidia_heldout_leakage.py tests\test_heldout_leakage_analysis.py
+pytest -q tests\test_heldout_leakage_analysis.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 6 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 140 passed
+```
+
+artifact JSON 校验：
+
+```powershell
+python -m json.tool artifacts\nvidia_heldout_leakage_stage53.json > $null
+```
+
+结果：通过。
+
+### 结论
+
+- Stage 53 完成 leakage audit。
+- NVIDIA TechQA-RAG-Eval `train.json` 不能作为当前项目的独立 held-out test set。
+- Stage 52 冻结协议中的 held-out evaluation 被正确阻断。
+- 没有运行任何 held-out quality metric。
+- Stage 51 仍然只是 dev/train 上通过 readiness 的候选，不能默认化。
+- 默认 runtime 仍然不变。
+
+### 我学到的
+
+- “数据集名字不同”不等于“评估样本独立”。
+- 在 RAG 项目里，held-out 前置 leakage audit 不是形式流程；它可以直接阻止错误结论。
+- overlap report 必须区分 question-level count 和 pair-level count，否则重复 development rows 会让指标解释混乱。
+- 被阻断也是有效阶段结果，因为它保护了实验可信度。
+
+### 下一步
+
+- 做 Stage 54：修正 evaluation strategy，重新定义真实可用的最终评估方案。
+- 目标：
+  1. 更新数据策略，明确 NVIDIA TechQA-RAG-Eval 与 PrimeQA train/dev 完全重叠，不能作为当前 held-out；
+  2. 盘点可选评估路径：
+     - 引入真正外部数据集；
+     - 从现有数据重新划分 leak-safe split 并重新训练/重跑全部 dev 流程；
+     - 保留 Stage 51 为 dev/train candidate，但不默认化；
+  3. 不运行任何伪 held-out 指标；
+  4. 在用户确认新评估路径前，不改变默认 runtime。
