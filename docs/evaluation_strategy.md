@@ -4,8 +4,9 @@ This document records the current evaluation strategy after Stage 53 blocked the
 previously intended NVIDIA held-out path, Stage 55 completed external dataset
 discovery, Stage 56 probed MSQA locally, Stage 57 froze the MSQA evaluation
 split, Stage 58 recorded the MSQA answer-source baseline, Stage 59 blocked
-direct Stage 51 comparison on the current MSQA task, and Stage 60 designed a
-recommended MSQA source/citation protocol for user confirmation.
+direct Stage 51 comparison on the current MSQA task, Stage 60 designed a
+recommended MSQA source/citation protocol, and Stage 61 completed the
+user-confirmed adapter dry run.
 
 ## Current Facts
 
@@ -59,8 +60,14 @@ recommended MSQA source/citation protocol for user confirmation.
 - Stage 60 protocol design:
   - recommended source/citation identity: `msqa_row_source_url`
   - recommended candidate construction: `processed_answer_sentence_candidates`
-  - protocol status: `draft_requires_user_confirmation`
-  - `requires_user_confirmation: true`
+  - `can_run_stage51_candidate_now: false`
+- The user confirmed Stage 60 option A before Stage 61.
+- Stage 61 adapter dry run:
+  - candidate rows: 266,647
+  - samples with candidates: 3,301 / 3,301
+  - samples with gold-source candidate: 2,023 / 3,301
+  - contract checks passed: 7 / 7
+  - candidate JSONL rows with `question` field: 0
   - `can_run_stage51_candidate_now: false`
 - Default runtime remains unchanged.
 
@@ -141,12 +148,23 @@ Stage 60 result:
 - It excludes `QuestionText`, `AnswerText` fallback, `DoubleProcessedAnswerText`
   fallback, processed-answer links as required citation ground truth, external
   page fetching, and runtime default changes.
-- The protocol is not implemented yet and requires user confirmation.
+- The user confirmed this protocol before Stage 61.
+
+Stage 61 result:
+
+- The MSQA row-source answer-sentence adapter dry run passed.
+- Candidate JSONL rows: 266,647.
+- All 3,301 evaluation samples have candidate rows.
+- 2,023 samples have gold-source candidate rows under top10 answer-only source
+  retrieval.
+- All contract checks passed.
+- No candidate rows contain a `question` field.
+- Stage 51 was not run.
 
 Required next step:
 
-1. Ask the user to confirm whether to proceed with the recommended Stage 60
-   protocol before implementing the Stage 61 adapter.
+1. Review MSQA adapter candidate distribution and decide whether one single
+   Stage 51 adapter comparison is fair.
 
 ## Parked Paths
 
@@ -186,8 +204,7 @@ leakage checks:
 - Do not use NVIDIA `train.json` as held-out evidence.
 - Do not treat MSQA as a held-out test set.
 - Do not compare top-k against Stage 51 on MSQA until an MSQA source/citation
-  adapter and comparison protocol have been confirmed, implemented, and dry-run
-  checked.
+  adapter candidate distribution review decides that one comparison is fair.
 - Do not reuse MSQA `test_id.txt` as this project's final split until the
   missing ID and upstream filtering assumptions are handled explicitly.
 - Do not use an answer-field fallback for MSQA evaluation samples.
@@ -195,7 +212,8 @@ leakage checks:
   RAG document-citation metrics.
 - Do not use the Stage 58 diagnostic `question_answer_page_text` variant as a
   candidate-comparison target.
-- Do not implement the Stage 60 recommended adapter before user confirmation.
+- Do not defaultize from MSQA adapter work without a separate final evaluation
+  decision.
 
 ## Artifacts
 
@@ -217,4 +235,7 @@ artifacts/msqa_stage51_compatibility_stage59.json
 artifacts/msqa_stage51_compatibility_stage59_visuals/
 artifacts/msqa_stage51_protocol_stage60.json
 artifacts/msqa_stage51_protocol_stage60_visuals/
+artifacts/msqa_stage51_candidate_adapter_stage61.json
+artifacts/msqa_stage51_candidate_adapter_stage61_candidates.jsonl
+artifacts/msqa_stage51_candidate_adapter_stage61_visuals/
 ```

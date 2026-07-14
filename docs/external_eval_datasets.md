@@ -209,6 +209,37 @@ and splits `ProcessedAnswerText` into answer-sentence candidates. It explicitly
 excludes `QuestionText` indexing, answer-field fallbacks, required
 processed-answer links, external page fetching, and runtime default changes.
 
+## Stage 61 MSQA Stage 51 Candidate Adapter Dry Run
+
+The user confirmed Stage 60 option A, and Stage 61 implemented the adapter dry
+run.
+
+Dry-run result:
+
+| Metric | Value |
+| --- | ---: |
+| Evaluation samples | 3,301 |
+| Candidate rows | 266,647 |
+| Samples with candidates | 3,301 |
+| Samples without candidates | 0 |
+| Samples with gold-source candidate | 2,023 |
+| Average candidates per sample | 80.7776 |
+| Median candidates per sample | 79.0 |
+| Unique source rows in candidates | 2,879 |
+
+Contract result:
+
+```text
+status: msqa_stage51_candidate_adapter_dry_run_passed
+contract_checks_passed: 7 / 7
+candidate_jsonl_rows: 266647
+candidate_rows_with_question_key: 0
+can_run_stage51_candidate_now: false
+can_defaultize_runtime_now: false
+default_runtime_policy: unchanged
+stage51_candidate_run_performed: false
+```
+
 ## Source Snapshot
 
 Sources checked on 2026-07-14:
@@ -266,6 +297,11 @@ artifacts/msqa_stage51_protocol_stage60_visuals/stage60_source_identity_scores.s
 artifacts/msqa_stage51_protocol_stage60_visuals/stage60_candidate_construction_scores.svg
 artifacts/msqa_stage51_protocol_stage60_visuals/stage60_source_coverage.svg
 artifacts/msqa_stage51_protocol_stage60_visuals/stage60_decision_flags.svg
+artifacts/msqa_stage51_candidate_adapter_stage61.json
+artifacts/msqa_stage51_candidate_adapter_stage61_candidates.jsonl
+artifacts/msqa_stage51_candidate_adapter_stage61_visuals/stage61_adapter_candidate_counts.svg
+artifacts/msqa_stage51_candidate_adapter_stage61_visuals/stage61_adapter_source_hit_rates.svg
+artifacts/msqa_stage51_candidate_adapter_stage61_visuals/stage61_adapter_contract_checks.svg
 ```
 
 These artifacts are local outputs under `artifacts/` and are not committed by

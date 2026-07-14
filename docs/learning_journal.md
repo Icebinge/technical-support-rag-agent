@@ -15013,3 +15013,275 @@ msqa_row_source_url + processed_answer_sentence_candidates
 
 - 若确认，Stage 61 做 MSQA row-source answer-sentence candidate adapter 与 dry-run contract tests。
 - Stage 61 仍然不跑最终 Stage 51 comparison；它只验证 adapter contract、candidate fields、样本稳定性和 no-fallback/no-question-text 约束。
+
+## 2026-07-14 Stage 61：MSQA row-source answer-sentence candidate adapter dry-run
+
+### 本阶段目标
+
+用户已确认 Stage 60 推荐方案 A：
+
+```text
+msqa_row_source_url + processed_answer_sentence_candidates
+```
+
+本阶段目标是实现 adapter dry-run，而不是运行 Stage 51 candidate：
+
+1. 强制要求显式 `--confirmed-protocol`；
+2. 从 Stage 57 frozen split JSONL 读取 MSQA rows；
+3. 仅使用 `ProcessedAnswerText` 构建 answer-only BM25 source-row index；
+4. 对每个 query 检索 top10 source rows；
+5. 将 retrieved source row 的 `ProcessedAnswerText` 拆成 answer sentence candidates；
+6. 生成 Stage 60 要求的 candidate fields；
+7. 验证 no fallback、no question-text、no external fetch；
+8. 输出 dry-run report、candidate JSONL 和 SVG 可视化；
+9. 继续不运行 Stage 51，不改变默认 runtime。
+
+### 新增与修改
+
+新增 Stage 61 adapter 模块：
+
+```text
+src/ts_rag_agent/application/msqa_stage51_candidate_adapter.py
+```
+
+新增能力：
+
+- `MsqaStage51AdapterSample`：读取 Stage 57 JSONL 中的 row-source sample；
+- `MsqaStage51CandidateRow`：表示 row-source answer-sentence candidate；
+- 强制校验 Stage 60 protocol report；
+- 强制 `confirmed_protocol=True`；
+- 使用 answer-only BM25 source-row retrieval；
+- 不把 `QuestionText` 写入 candidate rows；
+- 不使用 `AnswerText` / `DoubleProcessedAnswerText` fallback；
+- 不抓取外部页面；
+- 生成 dry-run report；
+- 输出 full candidate JSONL；
+- 生成 SVG 可视化。
+
+新增 CLI：
+
+```text
+scripts/dry_run_msqa_stage51_candidate_adapter.py
+```
+
+新增测试：
+
+```text
+tests/test_msqa_stage51_candidate_adapter.py
+```
+
+新增文档：
+
+```text
+docs/msqa_stage51_candidate_adapter.md
+```
+
+同步更新：
+
+```text
+docs/msqa_stage51_protocol.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+docs/external_eval_datasets.md
+docs/learning_journal.md
+```
+
+### Stage 61 运行命令
+
+```powershell
+python scripts\dry_run_msqa_stage51_candidate_adapter.py `
+  --split-jsonl artifacts\msqa_evaluation_split_stage57.jsonl `
+  --protocol-report artifacts\msqa_stage51_protocol_stage60.json `
+  --output artifacts\msqa_stage51_candidate_adapter_stage61.json `
+  --candidate-output artifacts\msqa_stage51_candidate_adapter_stage61_candidates.jsonl `
+  --visualization-dir artifacts\msqa_stage51_candidate_adapter_stage61_visuals `
+  --confirmed-protocol `
+  --top-k 10 `
+  --min-sentence-chars 1 `
+  --sample-limit 20
+```
+
+### Stage 61 结果
+
+用户确认记录：
+
+```text
+confirmed_protocol_option: A
+confirmed_source_citation_identity: msqa_row_source_url
+confirmed_candidate_construction: processed_answer_sentence_candidates
+confirmation_source: current Codex conversation on 2026-07-14
+```
+
+adapter contract：
+
+```text
+source_citation_identity: msqa_row_source_url
+candidate_construction: processed_answer_sentence_candidates
+retrieval_index_text: ProcessedAnswerText only
+excluded_index_text: QuestionText
+top_k: 10
+min_sentence_chars: 1
+no_answer_field_fallback: true
+external_fetch_used: false
+```
+
+dry-run summary：
+
+```text
+evaluation_samples: 3301
+candidate_rows: 266647
+samples_with_candidates: 3301
+samples_without_candidates: 0
+samples_with_gold_source_candidate: 2023
+average_candidates_per_sample: 80.7776
+median_candidates_per_sample: 79.0
+unique_source_rows_in_candidates: 2879
+```
+
+source retrieval summary：
+
+```text
+hit@1: 0.4147
+hit@10: 0.6128
+MRR: 0.4762
+gold_source_missing_at_10: 1278
+```
+
+contract checks：
+
+```text
+user_confirmed_stage60_protocol: pass
+protocol_matches_stage60_recommendation: pass
+no_question_text_indexed_or_written_to_candidates: pass
+no_answer_field_fallback_used: pass
+no_external_fetch_used: pass
+all_candidates_have_required_fields: pass
+all_samples_have_candidate_rows: pass
+```
+
+candidate JSONL 校验：
+
+```text
+jsonl rows: 266647
+rows_with_question_key: 0
+```
+
+decision：
+
+```text
+status: msqa_stage51_candidate_adapter_dry_run_passed
+can_run_stage51_candidate_now: false
+can_defaultize_runtime_now: false
+default_runtime_policy: unchanged
+stage51_candidate_run_performed: false
+recommended_next_stage: Stage 62: review MSQA adapter candidate distribution and decide whether a single Stage 51 adapter comparison is fair
+```
+
+### 可视化结果
+
+本阶段生成：
+
+```text
+artifacts/msqa_stage51_candidate_adapter_stage61_visuals/stage61_adapter_candidate_counts.svg
+artifacts/msqa_stage51_candidate_adapter_stage61_visuals/stage61_adapter_source_hit_rates.svg
+artifacts/msqa_stage51_candidate_adapter_stage61_visuals/stage61_adapter_contract_checks.svg
+```
+
+Stage 61 report：
+
+```text
+artifacts/msqa_stage51_candidate_adapter_stage61.json
+```
+
+Stage 61 full candidate JSONL：
+
+```text
+artifacts/msqa_stage51_candidate_adapter_stage61_candidates.jsonl
+```
+
+Stage 61 report checksum：
+
+```text
+c43d8dd6a38b1539bde8d1681c23878b60f663916f01c877f93ff5d38400d783
+```
+
+Stage 61 candidate JSONL checksum：
+
+```text
+e505895730f1bf4451dc3c7e0130798692d0c2f298c1b284f19083cb99b96980
+```
+
+以上 artifacts 位于本地 `artifacts/`，按 `.gitignore` 不纳入 git。candidate JSONL 约 228 MB，不提交。
+
+### 问题与原因
+
+- 问题 1：Stage 61 必须区分“用户确认协议”和“可以跑 Stage 51”。
+  - 原因：用户确认的是 adapter protocol，不是默认化，也不是最终 candidate comparison；
+  - 处理：CLI 强制 `--confirmed-protocol`，但 report 仍写 `can_run_stage51_candidate_now: false`。
+- 问题 2：candidate rows 很多。
+  - 现象：3301 个样本生成 266647 条 candidate rows，平均每题 80.7776 条；
+  - 原因：top10 source rows 的 processed answers 通常会拆出多句；
+  - 处理：本阶段只做 dry-run 和分布记录，下一阶段先分析 candidate distribution，再决定是否能公平跑一次 Stage 51 comparison。
+- 问题 3：只有 2023 / 3301 样本有 gold-source candidate。
+  - 原因：这继承了 answer-only source retrieval 的 hit@10 上限：gold_source_missing_at_10 为 1278；
+  - 处理：Stage 61 不把 adapter dry-run 伪装成质量提升；它只是把 Stage 58 的 source-row retrieval 结果转换成 candidate rows。
+- 问题 4：candidate score 容易被误解为 Stage 51 model score。
+  - 原因：adapter 必须提供 `candidate_score` 字段，但本阶段没有训练或运行 Stage 51；
+  - 处理：文档明确 `candidate_score` 是 dry-run adapter score，不是 tuned Stage 51 model score。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\msqa_stage51_candidate_adapter.py scripts\dry_run_msqa_stage51_candidate_adapter.py tests\test_msqa_stage51_candidate_adapter.py
+pytest -q tests\test_msqa_stage51_candidate_adapter.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 4 passed
+```
+
+Stage 61 真实 artifact 生成：
+
+```text
+python scripts\dry_run_msqa_stage51_candidate_adapter.py --split-jsonl artifacts\msqa_evaluation_split_stage57.jsonl --protocol-report artifacts\msqa_stage51_protocol_stage60.json --output artifacts\msqa_stage51_candidate_adapter_stage61.json --candidate-output artifacts\msqa_stage51_candidate_adapter_stage61_candidates.jsonl --visualization-dir artifacts\msqa_stage51_candidate_adapter_stage61_visuals --confirmed-protocol --top-k 10 --min-sentence-chars 1 --sample-limit 20
+```
+
+结果：
+
+```text
+json report: generated
+candidate jsonl rows: 266647
+svg visualizations: 3 generated
+```
+
+### 结论
+
+- Stage 61 完成用户确认后的 MSQA row-source answer-sentence candidate adapter dry-run。
+- Adapter contract 检查全部通过。
+- 所有 3301 个样本都有 candidate rows。
+- Candidate JSONL 没有写入 question text。
+- Stage 61 没有运行 Stage 51 candidate。
+- Stage 61 没有改变默认 runtime。
+- 当前仍不能 defaultize。
+
+### 我学到的
+
+- “adapter 能生成候选”不等于“候选比较已经公平”。候选分布本身可能影响 Stage 51 reranker 行为，必须先看分布。
+- row-source protocol 的上限仍受 answer-only retrieval 限制：如果 gold source 不在 top10，就不会有 gold-source candidate。
+- 把 `candidate_score` 写成 dry-run score 很重要，否则后续容易误把它当成 Stage 51 模型输出。
+- 候选 JSONL 不包含 question text，是验证 Stage 60 no-question-text 约束的一个直接证据。
+
+### 下一步
+
+- 做 Stage 62：MSQA adapter candidate distribution review。
+- Stage 62 目标：
+  1. 分析每题 candidate 数量分布；
+  2. 分析 gold-source candidate 覆盖与 source retrieval hit@10 的关系；
+  3. 检查 candidate_score / retrieval_rank 分布是否异常；
+  4. 判断是否允许一次 Stage 51 adapter comparison；
+  5. 即使允许，也仍不 defaultize。

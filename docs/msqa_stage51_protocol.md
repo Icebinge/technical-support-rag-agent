@@ -161,12 +161,12 @@ These artifacts are local ignored outputs and are not committed by git policy.
 
 ## Next Step
 
-Ask the user to confirm whether to proceed with:
+The user confirmed the recommended protocol, and Stage 61 implemented the
+adapter dry run. The current adapter record is:
 
 ```text
-msqa_row_source_url + processed_answer_sentence_candidates
+docs/msqa_stage51_candidate_adapter.md
 ```
 
-If confirmed, Stage 61 should implement the MSQA row-source answer-sentence
-candidate adapter and dry-run contract tests. It still should not run a final
-Stage 51 comparison until the adapter contract passes.
+Stage 62 should review the adapter candidate distribution before any Stage 51
+comparison is attempted.

@@ -107,7 +107,16 @@ msqa_row_source_url + processed_answer_sentence_candidates
 
 This protocol uses `QuestionId + AnswerId + Url` as the row-source citation
 identity and `ProcessedAnswerText` answer sentences as evidence candidates. It
-requires user confirmation before implementation.
+required user confirmation before implementation. The user confirmed this option,
+and Stage 61 completed the adapter dry run:
+
+```text
+candidate_rows: 266647
+samples_with_candidates: 3301 / 3301
+samples_with_gold_source_candidate: 2023 / 3301
+contract_checks_passed: 7 / 7
+stage51_candidate_run_performed: false
+```
 
 ## Split Rule
 
@@ -166,6 +175,12 @@ The current MSQA Stage 51 protocol design is recorded in:
 
 ```text
 docs/msqa_stage51_protocol.md
+```
+
+The current MSQA Stage 51 candidate adapter dry run is recorded in:
+
+```text
+docs/msqa_stage51_candidate_adapter.md
 ```
 
 ## Leakage Checks
