@@ -200,6 +200,12 @@ The current MSQA Stage 51 candidate distribution review is recorded in:
 docs/msqa_stage51_candidate_distribution.md
 ```
 
+The current Stage31-aligned MSQA candidate-pool cap is recorded in:
+
+```text
+docs/msqa_stage51_candidate_pool_cap.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:

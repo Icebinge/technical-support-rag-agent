@@ -52,12 +52,23 @@ def main(
         int,
         typer.Option("--min-sentence-chars", help="Minimum answer sentence length."),
     ] = 1,
+    max_candidates_per_source_row: Annotated[
+        int | None,
+        typer.Option(
+            "--max-candidates-per-source-row",
+            help="Optional cap after scoring answer-sentence candidates per source row.",
+        ),
+    ] = None,
     sample_limit: Annotated[
         int,
         typer.Option("--sample-limit", help="Sample summaries saved in the report."),
     ] = 20,
+    stage_name: Annotated[
+        str,
+        typer.Option("--stage-name", help="Report stage label."),
+    ] = "Stage 61",
 ) -> None:
-    """Write Stage 61 MSQA candidate adapter dry-run artifacts."""
+    """Write MSQA candidate adapter dry-run artifacts."""
 
     for path in [split_jsonl, protocol_report]:
         _ensure_file_exists(path)
@@ -67,7 +78,9 @@ def main(
         confirmed_protocol=confirmed_protocol,
         top_k=top_k,
         min_sentence_chars=min_sentence_chars,
+        max_candidates_per_source_row=max_candidates_per_source_row,
         sample_limit=sample_limit,
+        stage_name=stage_name,
     )
     write_msqa_stage51_candidate_jsonl(
         candidate_rows=dry_run.candidate_rows,
@@ -111,6 +124,12 @@ def _console_summary(report: dict[str, Any]) -> dict[str, Any]:
             "retrieval_index_text": report["adapter_contract"]["retrieval_index_text"],
             "excluded_index_text": report["adapter_contract"]["excluded_index_text"],
             "top_k": report["adapter_contract"]["top_k"],
+            "max_candidates_per_source_row": report["adapter_contract"][
+                "max_candidates_per_source_row"
+            ],
+            "effective_candidate_pool_cap": report["adapter_contract"][
+                "effective_candidate_pool_cap"
+            ],
         },
         "dry_run_summary": report["dry_run_summary"],
         "source_retrieval_summary": report["source_retrieval_summary"],

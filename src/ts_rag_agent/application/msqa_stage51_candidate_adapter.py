@@ -26,6 +26,11 @@ _RECOMMENDED_SOURCE_IDENTITY = "msqa_row_source_url"
 _RECOMMENDED_CANDIDATE_CONSTRUCTION = "processed_answer_sentence_candidates"
 _DEFAULT_TOP_K = 10
 _DEFAULT_MIN_SENTENCE_CHARS = 1
+_SUPPORTED_STAGE_NAMES = ("Stage 61", "Stage 63")
+_STAGE61_PASS_STATUS = "msqa_stage51_candidate_adapter_dry_run_passed"
+_STAGE61_BLOCKED_STATUS = "msqa_stage51_candidate_adapter_dry_run_blocked"
+_STAGE63_PASS_STATUS = "msqa_stage31_aligned_candidate_adapter_dry_run_passed"
+_STAGE63_BLOCKED_STATUS = "msqa_stage31_aligned_candidate_adapter_dry_run_blocked"
 _REQUIRED_CANDIDATE_FIELDS = (
     "question_id",
     "answer_id",
@@ -94,7 +99,9 @@ def build_msqa_stage51_candidate_adapter_dry_run(
     confirmed_protocol: bool,
     top_k: int = _DEFAULT_TOP_K,
     min_sentence_chars: int = _DEFAULT_MIN_SENTENCE_CHARS,
+    max_candidates_per_source_row: int | None = None,
     sample_limit: int = 20,
+    stage_name: str = _STAGE,
 ) -> MsqaStage51CandidateAdapterDryRun:
     """Build the confirmed MSQA row-source answer-sentence adapter dry run."""
 
@@ -104,7 +111,9 @@ def build_msqa_stage51_candidate_adapter_dry_run(
         confirmed_protocol=confirmed_protocol,
         top_k=top_k,
         min_sentence_chars=min_sentence_chars,
+        max_candidates_per_source_row=max_candidates_per_source_row,
         sample_limit=sample_limit,
+        stage_name=stage_name,
     )
     protocol_report = json.loads(protocol_report_path.read_text(encoding="utf-8"))
     _validate_protocol_report(protocol_report)
@@ -142,6 +151,7 @@ def build_msqa_stage51_candidate_adapter_dry_run(
                     retrieval_rank=result.rank,
                     retrieval_score=result.score,
                     min_sentence_chars=min_sentence_chars,
+                    max_candidates_per_source_row=max_candidates_per_source_row,
                 )
             )
         if sample_rows:
@@ -171,6 +181,8 @@ def build_msqa_stage51_candidate_adapter_dry_run(
         sample_summaries=sample_summaries,
         top_k=top_k,
         min_sentence_chars=min_sentence_chars,
+        max_candidates_per_source_row=max_candidates_per_source_row,
+        stage_name=stage_name,
     )
     return MsqaStage51CandidateAdapterDryRun(
         report=report,
@@ -242,21 +254,23 @@ def write_msqa_stage51_candidate_adapter_visualizations(
     """Write SVG charts for Stage 61 adapter dry-run results."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    stage_label = str(report.get("stage", _STAGE))
+    stage_slug = _stage_slug(stage_label)
     charts = {
-        "stage61_adapter_candidate_counts.svg": render_horizontal_bar_chart_svg(
-            title="Stage 61 MSQA candidate adapter counts",
+        f"{stage_slug}_adapter_candidate_counts.svg": render_horizontal_bar_chart_svg(
+            title=f"{stage_label} MSQA candidate adapter counts",
             bars=_candidate_count_bars(report),
             x_label="count",
             margin_left=340,
         ),
-        "stage61_adapter_source_hit_rates.svg": render_horizontal_bar_chart_svg(
-            title="Stage 61 MSQA source retrieval hit rates",
+        f"{stage_slug}_adapter_source_hit_rates.svg": render_horizontal_bar_chart_svg(
+            title=f"{stage_label} MSQA source retrieval hit rates",
             bars=_source_hit_rate_bars(report),
             x_label="rate",
             margin_left=260,
         ),
-        "stage61_adapter_contract_checks.svg": render_horizontal_bar_chart_svg(
-            title="Stage 61 MSQA adapter contract checks",
+        f"{stage_slug}_adapter_contract_checks.svg": render_horizontal_bar_chart_svg(
+            title=f"{stage_label} MSQA adapter contract checks",
             bars=_contract_check_bars(report),
             x_label="1 means pass",
             margin_left=360,
@@ -288,6 +302,7 @@ def _candidate_rows_for_source_row(
     retrieval_rank: int,
     retrieval_score: float,
     min_sentence_chars: int,
+    max_candidates_per_source_row: int | None,
 ) -> list[MsqaStage51CandidateRow]:
     rows = []
     seen_sentences = set()
@@ -328,7 +343,9 @@ def _candidate_rows_for_source_row(
                 overlap_terms=overlap_terms,
             )
         )
-    return rows
+    if max_candidates_per_source_row is None:
+        return rows
+    return sorted(rows, key=_candidate_row_priority)[:max_candidates_per_source_row]
 
 
 def _answer_sentences(text: str, min_sentence_chars: int) -> list[str]:
@@ -370,6 +387,8 @@ def _report(
     sample_summaries: Sequence[Mapping[str, Any]],
     top_k: int,
     min_sentence_chars: int,
+    max_candidates_per_source_row: int | None,
+    stage_name: str,
 ) -> dict[str, Any]:
     total_samples = len(samples)
     contract_checks = _contract_checks(
@@ -378,14 +397,17 @@ def _report(
         samples_with_candidates=samples_with_candidates,
     )
     all_contract_checks_pass = all(check["passed"] for check in contract_checks)
+    effective_candidate_pool_cap = (
+        top_k * max_candidates_per_source_row
+        if max_candidates_per_source_row is not None
+        else None
+    )
     return {
-        "stage": _STAGE,
+        "stage": stage_name,
         "created_at": _CREATED_AT,
-        "analysis_scope": (
-            "MSQA row-source answer-sentence candidate adapter dry run. This "
-            "report implements the user-confirmed Stage 60 protocol for contract "
-            "checking only. It does not run Stage 51, does not tune policies, "
-            "does not fetch external pages, and does not change the default runtime."
+        "analysis_scope": _analysis_scope(
+            stage_name=stage_name,
+            max_candidates_per_source_row=max_candidates_per_source_row,
         ),
         "source_files": {
             "split_jsonl": _fingerprint(split_jsonl_path),
@@ -411,6 +433,11 @@ def _report(
             "external_fetch_used": False,
             "top_k": top_k,
             "min_sentence_chars": min_sentence_chars,
+            "max_candidates_per_source_row": max_candidates_per_source_row,
+            "effective_candidate_pool_cap": effective_candidate_pool_cap,
+            "candidate_pool_cap_rule": _candidate_pool_cap_rule(
+                max_candidates_per_source_row
+            ),
             "required_candidate_fields": list(_REQUIRED_CANDIDATE_FIELDS),
             "candidate_score_boundary": (
                 "Dry-run adapter score only. It combines answer-only BM25 source "
@@ -432,6 +459,7 @@ def _report(
                 candidate_rows,
                 samples,
             ),
+            "max_candidates_per_sample_contract": effective_candidate_pool_cap,
             "unique_source_rows_in_candidates": len(
                 {row.source_row_id for row in candidate_rows}
             ),
@@ -445,16 +473,17 @@ def _report(
         "candidate_contract_checks": contract_checks,
         "sample_candidate_summaries": list(sample_summaries),
         "decision": {
-            "status": "msqa_stage51_candidate_adapter_dry_run_passed"
-            if all_contract_checks_pass
-            else "msqa_stage51_candidate_adapter_dry_run_blocked",
+            "status": _dry_run_status(
+                stage_name=stage_name,
+                all_contract_checks_pass=all_contract_checks_pass,
+            ),
             "can_run_stage51_candidate_now": False,
             "can_defaultize_runtime_now": False,
             "default_runtime_policy": "unchanged",
             "stage51_candidate_run_performed": False,
-            "recommended_next_stage": (
-                "Stage 62: review MSQA adapter candidate distribution and decide "
-                "whether a single Stage 51 adapter comparison is fair"
+            "recommended_next_stage": _recommended_next_stage(
+                stage_name=stage_name,
+                max_candidates_per_source_row=max_candidates_per_source_row,
             ),
         },
     }
@@ -523,6 +552,61 @@ def _check(name: str, passed: bool, evidence: str) -> dict[str, Any]:
     }
 
 
+def _analysis_scope(
+    *,
+    stage_name: str,
+    max_candidates_per_source_row: int | None,
+) -> str:
+    base = (
+        "MSQA row-source answer-sentence candidate adapter dry run. This report "
+        "implements the user-confirmed Stage 60 protocol for contract checking "
+        "only. It does not run Stage 51, does not tune policies, does not fetch "
+        "external pages, and does not change the default runtime."
+    )
+    if stage_name == "Stage 63" and max_candidates_per_source_row is not None:
+        return (
+            f"{base} Stage 63 additionally applies the user-confirmed option A "
+            "candidate-pool cap: each retrieved source row first generates all "
+            "answer-sentence candidates, then keeps the top candidates by the "
+            "existing dry-run candidate_score."
+        )
+    return base
+
+
+def _candidate_pool_cap_rule(max_candidates_per_source_row: int | None) -> str:
+    if max_candidates_per_source_row is None:
+        return "uncapped"
+    return (
+        "For each retrieved source row, generate all normalized answer-sentence "
+        "candidates, rank them by candidate_score descending, retrieval_rank "
+        "ascending, and candidate_id ascending, then keep at most "
+        f"{max_candidates_per_source_row} candidates."
+    )
+
+
+def _dry_run_status(*, stage_name: str, all_contract_checks_pass: bool) -> str:
+    if stage_name == "Stage 63":
+        return _STAGE63_PASS_STATUS if all_contract_checks_pass else _STAGE63_BLOCKED_STATUS
+    return _STAGE61_PASS_STATUS if all_contract_checks_pass else _STAGE61_BLOCKED_STATUS
+
+
+def _recommended_next_stage(
+    *,
+    stage_name: str,
+    max_candidates_per_source_row: int | None,
+) -> str:
+    if stage_name == "Stage 63" and max_candidates_per_source_row is not None:
+        return (
+            "Stage 64: review the capped candidate distribution and, only if it "
+            "is aligned, run one capped Stage 51 adapter comparison against the "
+            "same capped candidate pool"
+        )
+    return (
+        "Stage 62: review MSQA adapter candidate distribution and decide "
+        "whether a single Stage 51 adapter comparison is fair"
+    )
+
+
 def _sample_summary(
     *,
     sample: MsqaStage51AdapterSample,
@@ -558,6 +642,10 @@ def _sample_summary(
             )[:3]
         ],
     }
+
+
+def _candidate_row_priority(row: MsqaStage51CandidateRow) -> tuple[float, int, str]:
+    return (-row.candidate_score, row.retrieval_rank, row.candidate_id)
 
 
 def _median_candidates_per_sample(
@@ -632,7 +720,9 @@ def _validate_options(
     confirmed_protocol: bool,
     top_k: int,
     min_sentence_chars: int,
+    max_candidates_per_source_row: int | None,
     sample_limit: int,
+    stage_name: str,
 ) -> None:
     if not confirmed_protocol:
         raise ValueError("Stage 61 requires confirmed_protocol=True")
@@ -640,8 +730,18 @@ def _validate_options(
         raise ValueError("top_k must be positive")
     if min_sentence_chars <= 0:
         raise ValueError("min_sentence_chars must be positive")
+    if (
+        max_candidates_per_source_row is not None
+        and max_candidates_per_source_row <= 0
+    ):
+        raise ValueError("max_candidates_per_source_row must be positive")
     if sample_limit < 0:
         raise ValueError("sample_limit must be non-negative")
+    if stage_name not in _SUPPORTED_STAGE_NAMES:
+        raise ValueError(
+            "stage_name must be one of: "
+            + ", ".join(repr(stage) for stage in _SUPPORTED_STAGE_NAMES)
+        )
 
 
 def _validate_protocol_report(report: Mapping[str, Any]) -> None:
@@ -684,3 +784,7 @@ def _preview(text: str, limit: int = 160) -> str:
     if len(compact) <= limit:
         return compact
     return f"{compact[:limit]}..."
+
+
+def _stage_slug(stage_label: str) -> str:
+    return "".join(stage_label.lower().split())

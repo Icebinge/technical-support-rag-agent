@@ -154,5 +154,13 @@ These artifacts are local ignored outputs and are not committed by git policy.
 
 ## Next Step
 
-Stage 63 should design a Stage31-aligned MSQA candidate-pool cap and rerun the
-adapter dry run before any Stage 51 comparison.
+Stage 63 designed and ran a Stage31-aligned MSQA candidate-pool cap:
+
+```text
+docs/msqa_stage51_candidate_pool_cap.md
+```
+
+The capped pool is aligned on candidate-pool size, but it carries a real
+source-availability warning. Stage64 may run one capped Stage51 adapter
+comparison after user confirmation, using the same capped candidate pool and
+without changing the default runtime.

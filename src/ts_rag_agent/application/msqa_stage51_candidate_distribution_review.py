@@ -13,7 +13,13 @@ from ts_rag_agent.application.svg_charts import BarDatum, render_horizontal_bar_
 
 _STAGE = "Stage 62"
 _CREATED_AT = "2026-07-14"
+_SUPPORTED_REVIEW_STAGES = ("Stage 62", "Stage 63")
+_ADAPTER_PASS_STATUSES = {
+    "Stage 61": "msqa_stage51_candidate_adapter_dry_run_passed",
+    "Stage 63": "msqa_stage31_aligned_candidate_adapter_dry_run_passed",
+}
 _PASS = "pass"
+_WARN = "warn"
 _BLOCKED = "blocked"
 _INFO = "info"
 _BLOCKER = "blocker"
@@ -32,11 +38,13 @@ def review_msqa_stage51_candidate_distribution(
     adapter_report_path: Path,
     candidate_jsonl_path: Path,
     stage31_summary_path: Path,
+    stage_name: str = _STAGE,
 ) -> dict[str, Any]:
-    """Review whether the Stage 61 MSQA candidate pool is fair for Stage 51."""
+    """Review whether an MSQA adapter candidate pool is fair for Stage 51."""
 
     for path in [adapter_report_path, candidate_jsonl_path, stage31_summary_path]:
         _ensure_file(path)
+    _validate_stage_name(stage_name)
     adapter_report = _load_json(adapter_report_path)
     stage31_summary = _load_json(stage31_summary_path)
     _validate_adapter_report(adapter_report)
@@ -44,6 +52,7 @@ def review_msqa_stage51_candidate_distribution(
 
     candidate_stats = _scan_candidate_jsonl(candidate_jsonl_path)
     total_samples = int(adapter_report["dry_run_summary"]["evaluation_samples"])
+    adapter_stage = str(adapter_report["stage"])
     stage61_distribution = _stage61_distribution(
         candidate_stats=candidate_stats,
         total_samples=total_samples,
@@ -60,36 +69,43 @@ def review_msqa_stage51_candidate_distribution(
         stage31=stage31_distribution,
         comparison=comparison,
     )
-    decision = _decision(checks)
+    decision = _decision(
+        checks,
+        stage_name=stage_name,
+        adapter_stage=adapter_stage,
+    )
+    adapter_summary = {
+        "stage": adapter_stage,
+        "evaluation_samples": total_samples,
+        "candidate_rows": int(adapter_report["dry_run_summary"]["candidate_rows"]),
+        "samples_with_candidates": int(
+            adapter_report["dry_run_summary"]["samples_with_candidates"]
+        ),
+        "samples_with_gold_source_candidate": int(
+            adapter_report["dry_run_summary"]["samples_with_gold_source_candidate"]
+        ),
+        "adapter_contract": adapter_report.get("adapter_contract", {}),
+        "source_retrieval_summary": adapter_report["source_retrieval_summary"],
+        "stage51_candidate_run_performed": bool(
+            adapter_report["decision"]["stage51_candidate_run_performed"]
+        ),
+    }
     return {
-        "stage": _STAGE,
+        "stage": stage_name,
         "created_at": _CREATED_AT,
         "analysis_scope": (
-            "MSQA Stage 51 adapter candidate distribution review. This report "
-            "does not run Stage 51, does not tune policies, does not change "
-            "candidate rows, and does not change the default runtime."
+            f"{stage_name} MSQA Stage 51 adapter candidate distribution review "
+            f"for {adapter_stage}. This report does not run Stage 51, does not "
+            "tune policies, does not change candidate rows, and does not change "
+            "the default runtime."
         ),
         "source_files": {
             "adapter_report": _fingerprint(adapter_report_path),
             "candidate_jsonl": _fingerprint(candidate_jsonl_path),
             "stage31_summary": _fingerprint(stage31_summary_path),
         },
-        "stage61_adapter_summary": {
-            "evaluation_samples": total_samples,
-            "candidate_rows": int(adapter_report["dry_run_summary"]["candidate_rows"]),
-            "samples_with_candidates": int(
-                adapter_report["dry_run_summary"]["samples_with_candidates"]
-            ),
-            "samples_with_gold_source_candidate": int(
-                adapter_report["dry_run_summary"][
-                    "samples_with_gold_source_candidate"
-                ]
-            ),
-            "source_retrieval_summary": adapter_report["source_retrieval_summary"],
-            "stage51_candidate_run_performed": bool(
-                adapter_report["decision"]["stage51_candidate_run_performed"]
-            ),
-        },
+        "adapter_summary": adapter_summary,
+        "stage61_adapter_summary": adapter_summary,
         "stage31_training_candidate_contract": {
             "retrieval_top_k": stage31_summary["build_config"]["retrieval_top_k"],
             "max_candidates_per_document": stage31_summary["build_config"][
@@ -105,6 +121,7 @@ def review_msqa_stage51_candidate_distribution(
             "total_questions": stage31_summary["summary"]["total_questions"],
             "total_rows": stage31_summary["summary"]["total_rows"],
         },
+        "adapter_candidate_distribution": stage61_distribution,
         "stage61_candidate_distribution": stage61_distribution,
         "stage31_candidate_distribution": stage31_distribution,
         "candidate_pool_comparison": comparison,
@@ -117,12 +134,15 @@ def write_msqa_stage51_candidate_distribution_visualizations(
     report: Mapping[str, Any],
     output_dir: Path,
 ) -> list[DistributionVisualization]:
-    """Write SVG charts for Stage 62 candidate distribution review."""
+    """Write SVG charts for MSQA candidate distribution review."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    filenames = _visualization_filenames(report)
+    stage_label = str(report.get("stage", _STAGE))
+    adapter_label = str(report.get("adapter_summary", {}).get("stage", "adapter"))
     charts = {
-        "stage62_candidate_count_percentiles.svg": render_horizontal_bar_chart_svg(
-            title="Stage 62 MSQA candidate count percentiles",
+        filenames["percentiles"]: render_horizontal_bar_chart_svg(
+            title=f"{stage_label} MSQA candidate count percentiles",
             bars=_percentile_bars(
                 report["stage61_candidate_distribution"][
                     "candidate_count_per_query"
@@ -131,20 +151,20 @@ def write_msqa_stage51_candidate_distribution_visualizations(
             x_label="candidates per query",
             margin_left=180,
         ),
-        "stage62_stage31_vs_stage61_candidate_pool.svg": render_horizontal_bar_chart_svg(
-            title="Stage 62 Stage31 vs Stage61 candidate pool",
+        filenames["comparison"]: render_horizontal_bar_chart_svg(
+            title=f"{stage_label} Stage31 vs {adapter_label} candidate pool",
             bars=_comparison_bars(report),
             x_label="candidate count",
             margin_left=320,
         ),
-        "stage62_candidate_rows_by_retrieval_rank.svg": render_horizontal_bar_chart_svg(
-            title="Stage 62 MSQA candidate rows by retrieval rank",
+        filenames["retrieval_rank"]: render_horizontal_bar_chart_svg(
+            title=f"{stage_label} MSQA candidate rows by retrieval rank",
             bars=_retrieval_rank_bars(report),
             x_label="candidate row count",
             margin_left=180,
         ),
-        "stage62_fairness_checks.svg": render_horizontal_bar_chart_svg(
-            title="Stage 62 fairness checks",
+        filenames["fairness"]: render_horizontal_bar_chart_svg(
+            title=f"{stage_label} fairness checks",
             bars=_fairness_check_bars(report),
             x_label="1 means pass",
             margin_left=390,
@@ -303,7 +323,27 @@ def _compare_candidate_pools(
 ) -> dict[str, Any]:
     stage61_counts = stage61["candidate_count_per_query"]
     stage31_counts = stage31["candidate_count_per_question"]
+    adapter_average_ratio = round(
+        stage61_counts["average"] / stage31_counts["average"],
+        4,
+    )
+    adapter_median_ratio = round(
+        stage61_counts["median"] / stage31_counts["median"],
+        4,
+    )
+    adapter_median_exceeds_stage31_max = stage61_counts["median"] > stage31_counts["max"]
+    adapter_p10_exceeds_stage31_max = stage61_counts["p10"] > stage31_counts["max"]
+    gold_candidate_rate_delta = round(
+        stage61["gold_source_candidate_rate"]
+        - stage31["gold_document_candidate_rate"],
+        4,
+    )
     return {
+        "average_candidate_count_ratio_adapter_vs_stage31": adapter_average_ratio,
+        "median_candidate_count_ratio_adapter_vs_stage31": adapter_median_ratio,
+        "adapter_median_exceeds_stage31_max": adapter_median_exceeds_stage31_max,
+        "adapter_p10_exceeds_stage31_max": adapter_p10_exceeds_stage31_max,
+        "gold_candidate_rate_delta_adapter_minus_stage31": gold_candidate_rate_delta,
         "average_candidate_count_ratio_stage61_vs_stage31": round(
             stage61_counts["average"] / stage31_counts["average"],
             4,
@@ -312,17 +352,9 @@ def _compare_candidate_pools(
             stage61_counts["median"] / stage31_counts["median"],
             4,
         ),
-        "stage61_median_exceeds_stage31_max": (
-            stage61_counts["median"] > stage31_counts["max"]
-        ),
-        "stage61_p10_exceeds_stage31_max": (
-            stage61_counts["p10"] > stage31_counts["max"]
-        ),
-        "gold_candidate_rate_delta_stage61_minus_stage31": round(
-            stage61["gold_source_candidate_rate"]
-            - stage31["gold_document_candidate_rate"],
-            4,
-        ),
+        "stage61_median_exceeds_stage31_max": adapter_median_exceeds_stage31_max,
+        "stage61_p10_exceeds_stage31_max": adapter_p10_exceeds_stage31_max,
+        "gold_candidate_rate_delta_stage61_minus_stage31": gold_candidate_rate_delta,
     }
 
 
@@ -336,13 +368,29 @@ def _fairness_checks(
 ) -> list[dict[str, Any]]:
     contract_checks = adapter_report["candidate_contract_checks"]
     all_contract_checks_passed = all(check["passed"] for check in contract_checks)
+    adapter_stage = str(adapter_report["stage"])
+    samples_without_candidates = int(
+        adapter_report["dry_run_summary"]["samples_without_candidates"]
+    )
+    candidate_pool_aligned = not comparison["adapter_median_exceeds_stage31_max"]
+    candidate_volume_aligned = not comparison["adapter_p10_exceeds_stage31_max"]
+    gold_rate_aligned = (
+        abs(comparison["gold_candidate_rate_delta_adapter_minus_stage31"]) <= 0.01
+    )
+    direct_comparison_fair = (
+        all_contract_checks_passed
+        and candidate_stats["rows_with_question_key"] == 0
+        and samples_without_candidates == 0
+        and candidate_pool_aligned
+        and candidate_volume_aligned
+    )
     return [
         _check(
-            name="stage61_adapter_contract_passed",
+            name="adapter_contract_passed",
             status=_PASS if all_contract_checks_passed else _BLOCKED,
             severity=_INFO if all_contract_checks_passed else _BLOCKER,
             evidence=(
-                "Stage 61 contract checks passed: "
+                f"{adapter_stage} contract checks passed: "
                 f"{sum(check['passed'] for check in contract_checks)} / "
                 f"{len(contract_checks)}."
             ),
@@ -359,11 +407,10 @@ def _fairness_checks(
             decision_effect="Confirms the Stage 60 no-question-text boundary.",
         ),
         _check(
-            name="all_stage61_samples_have_candidates",
+            name="all_adapter_samples_have_candidates",
             status=(
                 _PASS
-                if int(adapter_report["dry_run_summary"]["samples_without_candidates"])
-                == 0
+                if samples_without_candidates == 0
                 else _BLOCKED
             ),
             severity=_INFO,
@@ -376,108 +423,181 @@ def _fairness_checks(
         ),
         _check(
             name="gold_source_candidate_rate_matches_training_pool",
-            status=(
-                _PASS
-                if abs(
-                    comparison["gold_candidate_rate_delta_stage61_minus_stage31"]
-                )
-                <= 0.01
-                else _BLOCKED
-            ),
+            status=_PASS if gold_rate_aligned else _WARN,
             severity=_INFO,
             evidence=(
-                f"Stage61 gold-source candidate rate "
+                f"{adapter_stage} gold-source candidate rate "
                 f"{stage61['gold_source_candidate_rate']} vs Stage31 "
                 f"{stage31['gold_document_candidate_rate']}."
             ),
-            decision_effect=(
-                "Gold-source availability is close to the Stage 31 training pool."
-            ),
+            decision_effect=_gold_rate_effect(gold_rate_aligned),
         ),
         _check(
             name="candidate_pool_size_aligned_with_stage31",
-            status=(
-                _BLOCKED
-                if comparison["stage61_median_exceeds_stage31_max"]
-                else _PASS
-            ),
-            severity=(
-                _BLOCKER
-                if comparison["stage61_median_exceeds_stage31_max"]
-                else _INFO
-            ),
+            status=_PASS if candidate_pool_aligned else _BLOCKED,
+            severity=_INFO if candidate_pool_aligned else _BLOCKER,
             evidence=(
-                f"Stage61 median candidates/query "
+                f"{adapter_stage} median candidates/query "
                 f"{stage61['candidate_count_per_query']['median']} vs Stage31 max "
                 f"{stage31['candidate_count_per_question']['max']}."
             ),
-            decision_effect=(
-                "Blocks direct Stage 51 comparison until the MSQA candidate pool "
-                "is aligned with the Stage 31 training candidate contract."
+            decision_effect=_candidate_pool_size_effect(
+                candidate_pool_aligned,
             ),
         ),
         _check(
-            name="stage61_candidate_volume_within_training_limit",
-            status=(
-                _BLOCKED
-                if comparison["stage61_p10_exceeds_stage31_max"]
-                else _PASS
-            ),
-            severity=(
-                _BLOCKER
-                if comparison["stage61_p10_exceeds_stage31_max"]
-                else _INFO
-            ),
+            name="adapter_candidate_volume_within_training_limit",
+            status=_PASS if candidate_volume_aligned else _BLOCKED,
+            severity=_INFO if candidate_volume_aligned else _BLOCKER,
             evidence=(
-                f"Stage61 p10 candidates/query "
+                f"{adapter_stage} p10 candidates/query "
                 f"{stage61['candidate_count_per_query']['p10']} vs Stage31 max "
                 f"{stage31['candidate_count_per_question']['max']}."
             ),
-            decision_effect=(
-                "Shows the volume mismatch affects almost all MSQA queries, not "
-                "only outliers."
+            decision_effect=_candidate_volume_effect(
+                candidate_volume_aligned,
             ),
         ),
         _check(
             name="direct_stage51_adapter_comparison_fair_now",
-            status=_BLOCKED,
-            severity=_BLOCKER,
-            evidence=(
-                "Stage61 adapter candidates are uncapped answer sentences from "
-                "top10 source rows, while Stage31 training used top5 retrieval "
-                "and max3 candidates per document."
+            status=_PASS if direct_comparison_fair else _BLOCKED,
+            severity=_INFO if direct_comparison_fair else _BLOCKER,
+            evidence=_direct_comparison_evidence(
+                adapter_report=adapter_report,
+                candidate_pool_aligned=candidate_pool_aligned,
+                candidate_volume_aligned=candidate_volume_aligned,
             ),
-            decision_effect="Rejects immediate Stage 51 adapter comparison.",
+            decision_effect=_direct_comparison_effect(direct_comparison_fair),
         ),
     ]
 
 
-def _decision(checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+def _decision(
+    checks: Sequence[Mapping[str, Any]],
+    *,
+    stage_name: str,
+    adapter_stage: str,
+) -> dict[str, Any]:
     blocker_checks = [
         check["name"]
         for check in checks
         if check["status"] == _BLOCKED and check["severity"] == _BLOCKER
     ]
+    ready_for_confirmation = not blocker_checks
     return {
         "status": "msqa_stage51_adapter_comparison_blocked_by_candidate_pool_mismatch"
         if blocker_checks
         else "msqa_stage51_adapter_comparison_ready_for_user_confirmation",
         "can_run_stage51_candidate_now": False,
+        "can_run_stage51_candidate_next_with_user_confirmation": (
+            ready_for_confirmation
+        ),
         "can_defaultize_runtime_now": False,
         "default_runtime_policy": "unchanged",
         "stage51_candidate_run_performed": False,
         "blocker_checks": blocker_checks,
-        "recommended_next_stage": (
-            "Stage 63: design a Stage31-aligned MSQA candidate-pool cap and "
-            "rerun the adapter dry run before any Stage 51 comparison"
+        "recommended_next_stage": _recommended_next_stage(
+            stage_name=stage_name,
+            adapter_stage=adapter_stage,
+            ready_for_confirmation=ready_for_confirmation,
         ),
-        "reason": (
-            "The Stage 61 adapter contract passed, but the uncapped MSQA candidate "
-            "pool is much larger than the Stage 31 training candidate pool. A "
-            "direct Stage 51 adapter comparison would mix protocol effects with "
-            "policy effects."
+        "reason": _decision_reason(
+            adapter_stage=adapter_stage,
+            ready_for_confirmation=ready_for_confirmation,
         ),
     }
+
+
+def _direct_comparison_evidence(
+    *,
+    adapter_report: Mapping[str, Any],
+    candidate_pool_aligned: bool,
+    candidate_volume_aligned: bool,
+) -> str:
+    adapter_stage = str(adapter_report["stage"])
+    contract = adapter_report.get("adapter_contract", {})
+    top_k = contract.get("top_k")
+    max_candidates = contract.get("max_candidates_per_source_row")
+    if candidate_pool_aligned and candidate_volume_aligned:
+        return (
+            f"{adapter_stage} adapter candidates use top_k={top_k} and "
+            f"max_candidates_per_source_row={max_candidates}, matching the "
+            "Stage31 effective candidate pool size boundary."
+        )
+    return (
+        f"{adapter_stage} adapter candidates are not aligned with the Stage31 "
+        "training candidate pool size boundary."
+    )
+
+
+def _direct_comparison_effect(direct_comparison_fair: bool) -> str:
+    if direct_comparison_fair:
+        return "Allows one capped Stage 51 adapter comparison after user confirmation."
+    return "Rejects immediate Stage 51 adapter comparison."
+
+
+def _gold_rate_effect(gold_rate_aligned: bool) -> str:
+    if gold_rate_aligned:
+        return "Gold-source availability is close to the Stage31 training pool."
+    return (
+        "Records a source-retrieval availability tradeoff; this does not block "
+        "candidate-pool size fairness."
+    )
+
+
+def _candidate_pool_size_effect(candidate_pool_aligned: bool) -> str:
+    if candidate_pool_aligned:
+        return "Confirms candidate-pool median is within the Stage31 size boundary."
+    return (
+        "Blocks direct Stage 51 comparison until the MSQA candidate pool is "
+        "aligned with the Stage31 training candidate contract."
+    )
+
+
+def _candidate_volume_effect(candidate_volume_aligned: bool) -> str:
+    if candidate_volume_aligned:
+        return "Confirms lower-tail candidate volume is within the Stage31 limit."
+    return (
+        "Shows the volume mismatch affects almost all MSQA queries, not only "
+        "outliers."
+    )
+
+
+def _recommended_next_stage(
+    *,
+    stage_name: str,
+    adapter_stage: str,
+    ready_for_confirmation: bool,
+) -> str:
+    if ready_for_confirmation:
+        return (
+            "Stage 64: run one capped Stage 51 adapter comparison against the "
+            "same capped candidate pool after user confirmation"
+        )
+    if stage_name == "Stage 63" or adapter_stage == "Stage 63":
+        return (
+            "Stage 64: inspect the capped candidate distribution blockers before "
+            "running any Stage 51 comparison"
+        )
+    return (
+        "Stage 63: design a Stage31-aligned MSQA candidate-pool cap and rerun "
+        "the adapter dry run before any Stage 51 comparison"
+    )
+
+
+def _decision_reason(*, adapter_stage: str, ready_for_confirmation: bool) -> str:
+    if ready_for_confirmation:
+        return (
+            f"The {adapter_stage} adapter contract passed and the candidate pool "
+            "is aligned with the Stage31 training candidate size boundary. Stage "
+            "51 still has not been run and the default runtime is unchanged."
+        )
+    return (
+        f"The {adapter_stage} adapter contract passed, but the candidate pool is "
+        "not yet aligned with the Stage31 training candidate pool. A direct "
+        "Stage 51 adapter comparison would mix protocol effects with policy "
+        "effects."
+    )
 
 
 def _distribution(values: Sequence[float | int]) -> dict[str, float]:
@@ -584,7 +704,11 @@ def _check(
 
 def _percentile_bars(distribution: Mapping[str, Any]) -> list[BarDatum]:
     return [
-        BarDatum(label=key, value=float(distribution[key]), value_label=str(distribution[key]))
+        BarDatum(
+            label=key,
+            value=float(distribution[key]),
+            value_label=str(distribution[key]),
+        )
         for key in ("p10", "p25", "median", "p75", "p90", "p95", "p99", "max")
     ]
 
@@ -596,9 +720,9 @@ def _comparison_bars(report: Mapping[str, Any]) -> list[BarDatum]:
         BarDatum("Stage31 average", float(stage31["average"]), str(stage31["average"])),
         BarDatum("Stage31 median", float(stage31["median"]), str(stage31["median"])),
         BarDatum("Stage31 max", float(stage31["max"]), str(stage31["max"])),
-        BarDatum("Stage61 average", float(stage61["average"]), str(stage61["average"])),
-        BarDatum("Stage61 median", float(stage61["median"]), str(stage61["median"])),
-        BarDatum("Stage61 p10", float(stage61["p10"]), str(stage61["p10"])),
+        BarDatum("Adapter average", float(stage61["average"]), str(stage61["average"])),
+        BarDatum("Adapter median", float(stage61["median"]), str(stage61["median"])),
+        BarDatum("Adapter p10", float(stage61["p10"]), str(stage61["p10"])),
     ]
 
 
@@ -621,13 +745,43 @@ def _fairness_check_bars(report: Mapping[str, Any]) -> list[BarDatum]:
     ]
 
 
+def _visualization_filenames(report: Mapping[str, Any]) -> dict[str, str]:
+    stage_label = str(report.get("stage", _STAGE))
+    if stage_label == "Stage 62":
+        return {
+            "percentiles": "stage62_candidate_count_percentiles.svg",
+            "comparison": "stage62_stage31_vs_stage61_candidate_pool.svg",
+            "retrieval_rank": "stage62_candidate_rows_by_retrieval_rank.svg",
+            "fairness": "stage62_fairness_checks.svg",
+        }
+    stage_slug = _stage_slug(stage_label)
+    return {
+        "percentiles": f"{stage_slug}_candidate_count_percentiles.svg",
+        "comparison": f"{stage_slug}_stage31_vs_adapter_candidate_pool.svg",
+        "retrieval_rank": f"{stage_slug}_candidate_rows_by_retrieval_rank.svg",
+        "fairness": f"{stage_slug}_fairness_checks.svg",
+    }
+
+
 def _validate_adapter_report(report: Mapping[str, Any]) -> None:
-    if report.get("stage") != "Stage 61":
-        raise ValueError(f"Expected Stage 61 adapter report, got: {report.get('stage')!r}")
+    adapter_stage = str(report.get("stage"))
+    if adapter_stage not in _ADAPTER_PASS_STATUSES:
+        raise ValueError(
+            "Expected Stage 61 or Stage 63 adapter report, got: "
+            f"{report.get('stage')!r}"
+        )
     if report["decision"].get("stage51_candidate_run_performed") is not False:
-        raise ValueError("Stage 62 expects Stage 61 not to have run Stage 51")
-    if report["decision"].get("status") != "msqa_stage51_candidate_adapter_dry_run_passed":
-        raise ValueError("Stage 61 adapter dry run must have passed")
+        raise ValueError("Distribution review expects adapter not to have run Stage 51")
+    if report["decision"].get("status") != _ADAPTER_PASS_STATUSES[adapter_stage]:
+        raise ValueError(f"{adapter_stage} adapter dry run must have passed")
+
+
+def _validate_stage_name(stage_name: str) -> None:
+    if stage_name not in _SUPPORTED_REVIEW_STAGES:
+        raise ValueError(
+            "stage_name must be one of: "
+            + ", ".join(repr(stage) for stage in _SUPPORTED_REVIEW_STAGES)
+        )
 
 
 def _validate_stage31_summary(report: Mapping[str, Any]) -> None:
@@ -664,3 +818,7 @@ def _ensure_file(path: Path) -> None:
         raise FileNotFoundError(f"File does not exist: {path}")
     if not path.is_file():
         raise ValueError(f"Path is not a file: {path}")
+
+
+def _stage_slug(stage_label: str) -> str:
+    return "".join(stage_label.lower().split())

@@ -15544,3 +15544,307 @@ svg visualizations: 4 generated
   3. 保持 no question text、no fallback、no external fetch；
   4. rerun adapter dry-run；
   5. 再判断是否允许一次 Stage51 adapter comparison。
+
+## 2026-07-14 - Stage 63：Stage31-aligned MSQA candidate-pool cap dry-run
+
+### 背景
+
+Stage 62 证明 Stage 61 adapter contract 已通过，但 uncapped top10 answer-sentence
+candidate pool 与 Stage31 训练候选池严重不一致：
+
+```text
+Stage61 median candidates/query: 79
+Stage31 max candidates/question: 15
+Stage61 p10 candidates/query: 51
+```
+
+所以 Stage 63 的目标不是跑 Stage51，而是把 MSQA adapter 候选池先对齐
+Stage31 训练候选池形状，再判断是否可以进入一次 capped comparison。
+
+### 用户确认的特殊处理
+
+Stage31 只给出了“每 document 最多 3 个 candidates”的训练契约，没有直接规定
+MSQA answer sentences 应取哪 3 个。因此本阶段先向用户列出选项并确认：
+
+```text
+A. 按现有 dry-run candidate_score 取每个 source row 的 top3
+B. 按答案句原始顺序取前 3 句
+C. 先找 Stage31 evidence selector 逻辑并复用它取 top3
+```
+
+用户确认选择 A。
+
+本阶段真实采用的 cap rule：
+
+```text
+top_k: 5
+max_candidates_per_source_row: 3
+effective_candidate_pool_cap: 15
+candidate selection: generate all answer-sentence candidates, rank by dry-run
+candidate_score descending, retrieval_rank ascending, candidate_id ascending,
+then keep top3 per source row
+```
+
+注意：`candidate_score` 仍然只是 adapter dry-run score，不是 tuned Stage51 model score。
+
+### 新增能力
+
+- `build_msqa_stage51_candidate_adapter_dry_run` 新增：
+  - `max_candidates_per_source_row`
+  - `stage_name`
+  - `candidate_pool_cap_rule`
+  - `effective_candidate_pool_cap`
+- CLI `scripts/dry_run_msqa_stage51_candidate_adapter.py` 新增：
+  - `--max-candidates-per-source-row`
+  - `--stage-name`
+- `review_msqa_stage51_candidate_distribution` 现在同时接受 Stage61 和 Stage63
+  adapter report。
+- distribution review 新增通用字段：
+  - `adapter_summary`
+  - `adapter_candidate_distribution`
+  - `average_candidate_count_ratio_adapter_vs_stage31`
+  - `median_candidate_count_ratio_adapter_vs_stage31`
+  - `adapter_median_exceeds_stage31_max`
+  - `adapter_p10_exceeds_stage31_max`
+  - `gold_candidate_rate_delta_adapter_minus_stage31`
+- Stage63 可视化会使用 `stage63_*` 文件名。
+
+### Stage 63 运行命令
+
+Adapter dry-run：
+
+```powershell
+python scripts\dry_run_msqa_stage51_candidate_adapter.py `
+  --split-jsonl artifacts\msqa_evaluation_split_stage57.jsonl `
+  --protocol-report artifacts\msqa_stage51_protocol_stage60.json `
+  --output artifacts\msqa_stage51_candidate_adapter_stage63_capped.json `
+  --candidate-output artifacts\msqa_stage51_candidate_adapter_stage63_capped_candidates.jsonl `
+  --visualization-dir artifacts\msqa_stage51_candidate_adapter_stage63_capped_visuals `
+  --confirmed-protocol `
+  --top-k 5 `
+  --max-candidates-per-source-row 3 `
+  --min-sentence-chars 1 `
+  --sample-limit 20 `
+  --stage-name "Stage 63"
+```
+
+Distribution review：
+
+```powershell
+python scripts\review_msqa_stage51_candidate_distribution.py `
+  --adapter-report artifacts\msqa_stage51_candidate_adapter_stage63_capped.json `
+  --candidate-jsonl artifacts\msqa_stage51_candidate_adapter_stage63_capped_candidates.jsonl `
+  --stage31-summary artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid_summary.json `
+  --output artifacts\msqa_stage51_candidate_distribution_stage63_capped.json `
+  --visualization-dir artifacts\msqa_stage51_candidate_distribution_stage63_capped_visuals `
+  --stage-name "Stage 63"
+```
+
+### Stage 63 adapter dry-run 结果
+
+```text
+evaluation_samples: 3301
+candidate_rows: 47342
+samples_with_candidates: 3301
+samples_without_candidates: 0
+samples_with_gold_source_candidate: 1850
+average_candidates_per_sample: 14.3417
+median_candidates_per_sample: 15.0
+max_candidates_per_sample_contract: 15
+unique_source_rows_in_candidates: 2624
+```
+
+Source retrieval：
+
+```text
+hit@1: 0.4147
+hit@5: 0.5604
+mrr: 0.4692
+gold_source_missing_at_5: 1451
+```
+
+Contract checks：
+
+```text
+passed: 7 / 7
+rows_with_question_key: 0
+no_answer_field_fallback_used: true
+no_external_fetch_used: true
+stage51_candidate_run_performed: false
+default_runtime_policy: unchanged
+```
+
+### Stage 63 distribution review 结果
+
+Stage63 candidate count per query：
+
+```text
+count: 3301
+min: 7.0
+p10: 13.0
+p25: 14.0
+median: 15.0
+p75: 15.0
+p90: 15.0
+p95: 15.0
+p99: 15.0
+max: 15.0
+average: 14.3417
+```
+
+Stage31 candidate count per question：
+
+```text
+count: 610
+min: 2.0
+p10: 5.0
+p25: 15.0
+median: 15.0
+p75: 15.0
+p90: 15.0
+p95: 15.0
+p99: 15.0
+max: 15.0
+average: 13.2131
+```
+
+Comparison：
+
+```text
+average_candidate_count_ratio_adapter_vs_stage31: 1.0854
+median_candidate_count_ratio_adapter_vs_stage31: 1.0
+adapter_median_exceeds_stage31_max: false
+adapter_p10_exceeds_stage31_max: false
+gold_candidate_rate_delta_adapter_minus_stage31: -0.0593
+```
+
+Fairness checks：
+
+```text
+adapter_contract_passed: pass
+candidate_jsonl_has_no_question_text_field: pass
+all_adapter_samples_have_candidates: pass
+gold_source_candidate_rate_matches_training_pool: warn
+candidate_pool_size_aligned_with_stage31: pass
+adapter_candidate_volume_within_training_limit: pass
+direct_stage51_adapter_comparison_fair_now: pass
+```
+
+Decision：
+
+```text
+status: msqa_stage51_adapter_comparison_ready_for_user_confirmation
+can_run_stage51_candidate_now: false
+can_run_stage51_candidate_next_with_user_confirmation: true
+can_defaultize_runtime_now: false
+default_runtime_policy: unchanged
+stage51_candidate_run_performed: false
+blocker_checks: []
+```
+
+### 可视化结果
+
+本阶段生成：
+
+```text
+artifacts/msqa_stage51_candidate_adapter_stage63_capped_visuals/stage63_adapter_candidate_counts.svg
+artifacts/msqa_stage51_candidate_adapter_stage63_capped_visuals/stage63_adapter_source_hit_rates.svg
+artifacts/msqa_stage51_candidate_adapter_stage63_capped_visuals/stage63_adapter_contract_checks.svg
+artifacts/msqa_stage51_candidate_distribution_stage63_capped_visuals/stage63_candidate_count_percentiles.svg
+artifacts/msqa_stage51_candidate_distribution_stage63_capped_visuals/stage63_stage31_vs_adapter_candidate_pool.svg
+artifacts/msqa_stage51_candidate_distribution_stage63_capped_visuals/stage63_candidate_rows_by_retrieval_rank.svg
+artifacts/msqa_stage51_candidate_distribution_stage63_capped_visuals/stage63_fairness_checks.svg
+```
+
+Stage 63 artifacts：
+
+```text
+artifacts/msqa_stage51_candidate_adapter_stage63_capped.json
+artifacts/msqa_stage51_candidate_adapter_stage63_capped_candidates.jsonl
+artifacts/msqa_stage51_candidate_distribution_stage63_capped.json
+```
+
+Checksums：
+
+```text
+adapter report: 56bef0e0f78365dc18c8ee1f2c63d25a2c17015123c6a78d0014e05669e0934a
+candidate JSONL: 317c4502edb7a34eba97b5b5045fed63f05228a82e271bee0804af74467248d2
+distribution report: c036e67c48f3dbd800fc8fbb81e174d830f9785080146ddd99cc62f8b5df69cf
+```
+
+以上 artifacts 位于本地 `artifacts/`，按 `.gitignore` 不纳入 git。
+
+### 问题、原因与修正
+
+- 问题 1：Stage62 阻塞的 candidate-pool mismatch 需要被工程化成显式参数，而不是临时脚本逻辑。
+  - 原因：如果 cap 不进入 adapter contract，后续 Stage64 很容易误用 uncapped candidates。
+  - 修正：新增 `max_candidates_per_source_row`、`effective_candidate_pool_cap` 和
+    `candidate_pool_cap_rule`，并写入 report。
+- 问题 2：Stage63 top5 会降低 gold-source candidate rate。
+  - 证据：Stage63 0.5604 vs Stage31 0.6197，delta -0.0593。
+  - 原因：Stage63 为了对齐 Stage31 top5 训练边界，从 Stage61 top10 缩到 top5；
+    source availability 因此下降。
+  - 处理：该项记录为 `warn`，不是 candidate-size blocker；Stage64 解释结果时必须保留这个 warning。
+- 问题 3：首次生成 distribution review 后，gold-source warning 的 `decision_effect`
+  文案仍写成接近 Stage31。
+  - 真实处理：本轮发现后立即修改为 source-retrieval availability tradeoff，
+    并重跑 distribution review；adapter JSONL 没有重生成。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src/ts_rag_agent/application/msqa_stage51_candidate_adapter.py src/ts_rag_agent/application/msqa_stage51_candidate_distribution_review.py scripts/dry_run_msqa_stage51_candidate_adapter.py scripts/review_msqa_stage51_candidate_distribution.py tests/test_msqa_stage51_candidate_adapter.py tests/test_msqa_stage51_candidate_distribution_review.py
+pytest -q tests/test_msqa_stage51_candidate_adapter.py tests/test_msqa_stage51_candidate_distribution_review.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 10 passed
+```
+
+Stage 63 真实 artifact 生成：
+
+```text
+adapter dry-run: generated
+candidate JSONL rows: 47342
+adapter visualizations: 3 generated
+distribution review: generated
+distribution visualizations: 4 generated
+```
+
+### 结论
+
+- Stage63 完成 Stage31-aligned MSQA candidate-pool cap dry-run。
+- Candidate pool size 已对齐 Stage31 训练边界：
+  - median 15.0 vs Stage31 max 15.0；
+  - p10 13.0 vs Stage31 max 15.0；
+  - max 15.0。
+- Stage63 没有运行 Stage51。
+- Stage63 没有 defaultize。
+- 默认 runtime 不变。
+- Source availability 存在 warning：gold-source candidate rate 比 Stage31 低 0.0593。
+- 现在可以在用户确认后进入一次 capped Stage51 adapter comparison，但只能使用同一个
+  Stage63 capped candidate pool。
+
+### 我学到的
+
+- 候选池对齐不能只看平均值；p10、median、max 都要看，否则可能把 outlier 和整体结构混在一起。
+- top5/max3 能对齐 candidate-size boundary，但会带来 source availability tradeoff；
+  这两个事实必须同时记录。
+- 将 cap rule 写进 adapter contract 比只写在命令行里更可靠；后续 Stage64 才能审计自己是否使用同一个候选池。
+- 报告文案也是实验事实的一部分；发现 warning 文案不准确时，应如实标记并重跑报告，而不是只在口头解释里修正。
+
+### 下一步
+
+- 做 Stage64：在用户确认后，使用同一个 Stage63 capped candidate pool 跑一次
+  Stage51 adapter comparison。
+- Stage64 必须：
+  1. 不重建或改写 capped candidate pool；
+  2. 不 defaultize；
+  3. 对比同一 capped candidate pool 下的 baseline 与 Stage51 adapter；
+  4. 单独记录 top5 source availability warning；
+  5. 输出可视化和完整学习记录。

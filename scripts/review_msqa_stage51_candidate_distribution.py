@@ -32,12 +32,16 @@ def main(
         Path,
         typer.Option("--output", help="Output Stage 62 distribution report JSON."),
     ],
+    stage_name: Annotated[
+        str,
+        typer.Option("--stage-name", help="Distribution review stage label."),
+    ] = "Stage 62",
     visualization_dir: Annotated[
         Path | None,
         typer.Option("--visualization-dir", help="Optional output directory for SVG charts."),
     ] = None,
 ) -> None:
-    """Write Stage 62 MSQA candidate distribution review artifacts."""
+    """Write MSQA candidate distribution review artifacts."""
 
     for path in [adapter_report, candidate_jsonl, stage31_summary]:
         _ensure_file_exists(path)
@@ -45,6 +49,7 @@ def main(
         adapter_report_path=adapter_report,
         candidate_jsonl_path=candidate_jsonl,
         stage31_summary_path=stage31_summary,
+        stage_name=stage_name,
     )
     visualizations = []
     if visualization_dir is not None:
@@ -67,6 +72,7 @@ def main(
 def _console_summary(report: dict[str, Any]) -> dict[str, Any]:
     return {
         "stage61_adapter_summary": report["stage61_adapter_summary"],
+        "adapter_summary": report["adapter_summary"],
         "stage31_training_candidate_contract": (
             report["stage31_training_candidate_contract"]
         ),

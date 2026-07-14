@@ -64,6 +64,39 @@ def test_candidate_distribution_review_reports_counts_and_gold_coverage(tmp_path
     }
 
 
+def test_candidate_distribution_review_accepts_stage63_capped_pool(tmp_path):
+    adapter_report = tmp_path / "stage63.json"
+    candidate_jsonl = tmp_path / "candidates.jsonl"
+    stage31_summary = tmp_path / "stage31.json"
+    _write_stage61_report(
+        adapter_report,
+        stage="Stage 63",
+        status="msqa_stage31_aligned_candidate_adapter_dry_run_passed",
+        top_k=1,
+        max_candidates_per_source_row=3,
+    )
+    _write_candidate_jsonl(candidate_jsonl, candidate_counts=(3, 3))
+    _write_stage31_summary(stage31_summary, candidate_counts=(3, 3))
+
+    report = review_msqa_stage51_candidate_distribution(
+        adapter_report_path=adapter_report,
+        candidate_jsonl_path=candidate_jsonl,
+        stage31_summary_path=stage31_summary,
+        stage_name="Stage 63",
+    )
+
+    assert report["stage"] == "Stage 63"
+    assert report["adapter_summary"]["stage"] == "Stage 63"
+    assert report["decision"]["status"] == (
+        "msqa_stage51_adapter_comparison_ready_for_user_confirmation"
+    )
+    assert report["decision"][
+        "can_run_stage51_candidate_next_with_user_confirmation"
+    ] is True
+    assert report["decision"]["can_run_stage51_candidate_now"] is False
+    assert report["decision"]["blocker_checks"] == []
+
+
 def test_candidate_distribution_review_visualizations_are_written(tmp_path):
     adapter_report = tmp_path / "stage61.json"
     candidate_jsonl = tmp_path / "candidates.jsonl"
@@ -108,10 +141,17 @@ def test_candidate_distribution_review_requires_stage61_passed_report(tmp_path):
         )
 
 
-def _write_stage61_report(path: Path, *, status: str | None = None) -> None:
+def _write_stage61_report(
+    path: Path,
+    *,
+    stage: str = "Stage 61",
+    status: str | None = None,
+    top_k: int = 2,
+    max_candidates_per_source_row: int | None = None,
+) -> None:
     status = status or "msqa_stage51_candidate_adapter_dry_run_passed"
     report = {
-        "stage": "Stage 61",
+        "stage": stage,
         "dry_run_summary": {
             "evaluation_samples": 2,
             "candidate_rows": 9,
@@ -123,6 +163,10 @@ def _write_stage61_report(path: Path, *, status: str | None = None) -> None:
             "hit@1": 0.5,
             "hit@2": 1.0,
             "mrr": 0.75,
+        },
+        "adapter_contract": {
+            "top_k": top_k,
+            "max_candidates_per_source_row": max_candidates_per_source_row,
         },
         "candidate_contract_checks": [
             {"name": "a", "passed": True},

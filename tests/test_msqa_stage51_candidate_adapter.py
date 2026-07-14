@@ -1,4 +1,5 @@
 import json
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -62,6 +63,37 @@ def test_msqa_stage51_candidate_adapter_requires_confirmation(tmp_path):
             protocol_report_path=protocol_report,
             confirmed_protocol=False,
         )
+
+
+def test_msqa_stage51_candidate_adapter_caps_candidates_per_source_row(tmp_path):
+    split_jsonl = tmp_path / "split.jsonl"
+    protocol_report = tmp_path / "protocol.json"
+    _write_split_jsonl(split_jsonl)
+    _write_protocol_report(protocol_report)
+
+    dry_run = build_msqa_stage51_candidate_adapter_dry_run(
+        split_jsonl_path=split_jsonl,
+        protocol_report_path=protocol_report,
+        confirmed_protocol=True,
+        top_k=2,
+        min_sentence_chars=1,
+        max_candidates_per_source_row=1,
+        stage_name="Stage 63",
+    )
+
+    report = dry_run.report
+    assert report["stage"] == "Stage 63"
+    assert report["decision"]["status"] == (
+        "msqa_stage31_aligned_candidate_adapter_dry_run_passed"
+    )
+    assert report["adapter_contract"]["max_candidates_per_source_row"] == 1
+    assert report["adapter_contract"]["effective_candidate_pool_cap"] == 2
+    counts = Counter(
+        (row.query_question_id, row.source_row_id) for row in dry_run.candidate_rows
+    )
+    assert counts
+    assert max(counts.values()) == 1
+    assert report["dry_run_summary"]["candidate_rows"] <= 4
 
 
 def test_msqa_stage51_candidate_adapter_rejects_wrong_protocol(tmp_path):

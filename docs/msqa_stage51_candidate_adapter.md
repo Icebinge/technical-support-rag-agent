@@ -161,10 +161,27 @@ These artifacts are local ignored outputs and are not committed by git policy.
 
 ## Next Step
 
-Stage 62 reviewed the MSQA adapter candidate distribution and blocked direct
-Stage 51 comparison because the uncapped candidate pool is much larger than the
-Stage 31 training candidate pool. The current distribution record is:
+Stage 62 reviewed the uncapped MSQA adapter candidate distribution and blocked
+direct Stage 51 comparison because the candidate pool was much larger than the
+Stage 31 training candidate pool. The distribution record is:
 
 ```text
 docs/msqa_stage51_candidate_distribution.md
 ```
+
+Stage 63 added an optional Stage31-aligned cap to this adapter:
+
+```text
+top_k: 5
+max_candidates_per_source_row: 3
+candidate selection: score all answer-sentence candidates, then keep top3 per source row
+```
+
+The Stage63 capped dry run is recorded in:
+
+```text
+docs/msqa_stage51_candidate_pool_cap.md
+```
+
+The default Stage61 behavior remains uncapped unless
+`--max-candidates-per-source-row` is provided.

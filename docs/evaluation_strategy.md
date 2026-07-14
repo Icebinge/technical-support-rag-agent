@@ -180,8 +180,10 @@ Stage 62 result:
 
 Required next step:
 
-1. Design a Stage31-aligned MSQA candidate-pool cap and rerun the adapter dry
-   run before any Stage 51 comparison.
+1. Run one capped Stage51 adapter comparison against the same Stage63 capped
+   candidate pool after user confirmation.
+2. Preserve the Stage63 source-availability warning in the interpretation.
+3. Do not defaultize from the capped comparison alone.
 
 ## Parked Paths
 
@@ -220,8 +222,9 @@ leakage checks:
 - Do not tune the Stage 51 candidate.
 - Do not use NVIDIA `train.json` as held-out evidence.
 - Do not treat MSQA as a held-out test set.
-- Do not compare top-k against Stage 51 on MSQA until an MSQA source/citation
-  adapter candidate-pool cap has been designed, dry-run checked, and reviewed.
+- Do not compare top-k against Stage 51 on MSQA except for the next approved
+  single capped Stage64 comparison against the same Stage63 capped candidate
+  pool.
 - Do not reuse MSQA `test_id.txt` as this project's final split until the
   missing ID and upstream filtering assumptions are handled explicitly.
 - Do not use an answer-field fallback for MSQA evaluation samples.
@@ -257,4 +260,9 @@ artifacts/msqa_stage51_candidate_adapter_stage61_candidates.jsonl
 artifacts/msqa_stage51_candidate_adapter_stage61_visuals/
 artifacts/msqa_stage51_candidate_distribution_stage62.json
 artifacts/msqa_stage51_candidate_distribution_stage62_visuals/
+artifacts/msqa_stage51_candidate_adapter_stage63_capped.json
+artifacts/msqa_stage51_candidate_adapter_stage63_capped_candidates.jsonl
+artifacts/msqa_stage51_candidate_adapter_stage63_capped_visuals/
+artifacts/msqa_stage51_candidate_distribution_stage63_capped.json
+artifacts/msqa_stage51_candidate_distribution_stage63_capped_visuals/
 ```
