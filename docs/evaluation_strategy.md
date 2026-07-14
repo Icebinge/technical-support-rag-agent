@@ -2,7 +2,8 @@
 
 This document records the current evaluation strategy after Stage 53 blocked the
 previously intended NVIDIA held-out path, Stage 55 completed external dataset
-discovery, and Stage 56 probed MSQA locally.
+discovery, Stage 56 probed MSQA locally, and Stage 57 froze the MSQA evaluation
+split for baseline evaluation.
 
 ## Current Facts
 
@@ -26,6 +27,15 @@ discovery, and Stage 56 probed MSQA locally.
   - row-level Microsoft Learn Q&A URL coverage: 32,236 / 32,236
   - PrimeQA train/dev exact normalized question overlaps: 0
   - `test_id.txt` IDs found in CSV: 587 / 588
+- Stage 57 defined the adapter contract and froze
+  `msqa_stage57_project_eval_v1`:
+  - answer field: `ProcessedAnswerText`
+  - source URL field: `Url`
+  - no answer-field fallback
+  - near-duplicate leakage threshold: token Jaccard `0.9`
+  - exact overlaps against PrimeQA train/dev: 0
+  - near-duplicate overlaps against PrimeQA train/dev: 0
+  - selected evaluation rows: 3,301
 - Default runtime remains unchanged.
 
 ## Rejected Path
@@ -39,7 +49,8 @@ train/dev, so any quality metric reported as held-out would be misleading.
 ### External Independent Evaluation Set
 
 Status: user-confirmed on 2026-07-14; Stage 55 discovery complete; Stage 56
-local MSQA schema probe complete.
+local MSQA schema probe complete; Stage 57 project-owned MSQA split frozen for
+baseline evaluation.
 
 This is still the cleanest path to a real defaultization decision. It preserves
 the Stage 51 candidate as frozen and looks for an evaluation source that was not
@@ -65,14 +76,21 @@ Stage 56 result:
 - Exact normalized overlap with PrimeQA train/dev is 0, but near-duplicate
   leakage has not been run.
 
+Stage 57 result:
+
+- Adapter contract version: `msqa_eval_adapter_v1`.
+- Frozen split: `msqa_stage57_project_eval_v1`.
+- Selected question count: 3,301.
+- Selected question ID checksum:
+  `26cab0b636845cd321a48c12e8bcbeb5b563e5eb234e63383bbc9d0a9d8cb93b`.
+- The split is frozen for the next top-k baseline step only.
+
 Required next steps:
 
-1. Define the MSQA adapter contract, including the chosen answer field and
-   citation/source field.
-2. Run near-duplicate leakage audit against PrimeQA train/dev.
-3. Freeze a project-owned MSQA evaluation split instead of blindly reusing the
-   repository `test_id.txt`.
-4. Only after those checks pass, compare top-k and Stage 51 on MSQA.
+1. Run top-k baseline on `msqa_stage57_project_eval_v1`.
+2. Record baseline quality and failure modes.
+3. Only after that, run the Stage 51 candidate once against the same frozen
+   split.
 
 ## Parked Paths
 
@@ -111,9 +129,11 @@ leakage checks:
 - Do not tune the Stage 51 candidate.
 - Do not use NVIDIA `train.json` as held-out evidence.
 - Do not treat MSQA as a held-out test set.
-- Do not compare top-k against Stage 51 on MSQA.
+- Do not compare top-k against Stage 51 on MSQA before the frozen-split top-k
+  baseline is recorded.
 - Do not reuse MSQA `test_id.txt` as this project's final split until the
   missing ID and upstream filtering assumptions are handled explicitly.
+- Do not use an answer-field fallback for MSQA evaluation samples.
 
 ## Artifacts
 
@@ -126,4 +146,7 @@ artifacts/external_eval_dataset_discovery_stage55.json
 artifacts/external_eval_dataset_discovery_stage55_visuals/
 artifacts/msqa_schema_probe_stage56.json
 artifacts/msqa_schema_probe_stage56_visuals/
+artifacts/msqa_evaluation_split_stage57.json
+artifacts/msqa_evaluation_split_stage57.jsonl
+artifacts/msqa_evaluation_split_stage57_visuals/
 ```

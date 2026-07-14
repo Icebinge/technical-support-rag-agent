@@ -199,6 +199,12 @@ These artifacts are local ignored outputs and are not committed by git policy.
 
 ## Next Step
 
-Stage 57 should implement the MSQA adapter contract, run near-duplicate leakage
-audit, and freeze a project-owned evaluation split before any top-k or Stage 51
-comparison is attempted.
+Stage 57 completed the MSQA adapter contract, near-duplicate leakage audit, and
+project-owned evaluation split freeze. The current split record is:
+
+```text
+docs/msqa_evaluation_split.md
+```
+
+Stage 58 should run the top-k baseline only on the frozen project split before
+any Stage 51 comparison is attempted.

@@ -13859,3 +13859,293 @@ python -m json.tool artifacts\msqa_schema_probe_stage56.json > $null
   3. 明确 citation/source field 使用 row-level `Url` 的方式；
   4. 运行 near-duplicate leakage audit；
   5. 冻结本项目自己的 MSQA eval split。
+
+## 2026-07-14 Stage 57：MSQA adapter contract、near-duplicate leakage audit 与 project-owned split freeze
+
+### 目标
+
+在 Stage 56 已完成 MSQA 本地 schema/source-link probe 的基础上，继续推进到可评估前的最后准备步骤：
+
+- 明确 MSQA row 到本项目 evaluation sample 的字段映射；
+- 明确 answer field，不做任何字段兜底；
+- 明确 source/citation 边界；
+- 对 MSQA 和 PrimeQA train/dev 做 near-duplicate leakage audit；
+- 冻结本项目自己的 MSQA evaluation split；
+- 仍然不运行 RAG answer-quality 指标；
+- 仍然不比较 top-k 和 Stage 51；
+- 仍然不改变默认 runtime。
+
+### 新增与修改
+
+新增 Stage 57 模块：
+
+```text
+src/ts_rag_agent/application/msqa_evaluation_split.py
+```
+
+新增 CLI：
+
+```text
+scripts/freeze_msqa_evaluation_split.py
+```
+
+新增测试：
+
+```text
+tests/test_msqa_evaluation_split.py
+```
+
+新增文档：
+
+```text
+docs/msqa_evaluation_split.md
+```
+
+更新文档：
+
+```text
+docs/data_strategy.md
+docs/evaluation_strategy.md
+docs/external_eval_datasets.md
+docs/msqa_schema_probe.md
+```
+
+### Adapter contract
+
+Contract version：
+
+```text
+msqa_eval_adapter_v1
+```
+
+字段映射：
+
+```text
+sample id: QuestionId
+answer id: AnswerId
+question: QuestionText
+gold answer: ProcessedAnswerText
+source URL: Url
+source split: Split
+metadata: Tags, IsAzure, IsM365, IsOther, isShort, isLong
+```
+
+明确禁止兜底：
+
+```text
+Do not fall back to AnswerText or DoubleProcessedAnswerText.
+```
+
+原因：
+
+- Stage 56 已确认 `ProcessedAnswerText` 在 32,236 行中 0 缺失；
+- `DoubleProcessedAnswerText` 有 76 行缺失；
+- 使用多个 answer field 自动切换会让评估语义不稳定；
+- 本项目 AGENTS 规则要求不能擅自加入兜底策略。
+
+Citation/source 边界：
+
+- 使用 row-level `Url` 作为 source URL；
+- 不宣称 answer text 中的文档链接等于完整 documentation-span citation coverage；
+- 不支持 native unanswerable/refusal evaluation；
+- 不支持 document-span exact citation evaluation。
+
+### Near-duplicate leakage audit
+
+第一次尝试：
+
+```text
+使用现有通用 heldout leakage 函数对 32,236 * 910 做多阈值 near-duplicate 预跑。
+```
+
+实际情况：
+
+```text
+124 秒超时，没有形成有效 artifact。
+```
+
+处理：
+
+- 没有把超时输出当作结论；
+- 新增 MSQA 专用审计实现；
+- 仍然使用相同的归一化规则与 token Jaccard 定义；
+- 使用 development token inverted index；
+- 使用 Jaccard 0.9 的长度上下界剪枝；
+- 真实 artifact 由新实现生成。
+
+最终运行命令：
+
+```powershell
+python scripts\freeze_msqa_evaluation_split.py --msqa-csv data\raw\msqa_repo\data\msqa-32k.csv --primeqa-train-questions data\raw\primeqa_techqa\TechQA\training_and_dev\training_Q_A.json --primeqa-dev-questions data\raw\primeqa_techqa\TechQA\training_and_dev\dev_Q_A.json --output artifacts\msqa_evaluation_split_stage57.json --split-output artifacts\msqa_evaluation_split_stage57.jsonl --visualization-dir artifacts\msqa_evaluation_split_stage57_visuals --near-duplicate-threshold 0.9
+```
+
+运行耗时：
+
+```text
+24.5 seconds
+```
+
+Leakage audit 结果：
+
+```text
+MSQA questions: 32236
+PrimeQA train/dev questions: 910
+PrimeQA train: 600
+PrimeQA dev: 310
+exact_overlap_count: 0
+exact_overlap_pair_count: 0
+near_duplicate_overlap_count: 0
+near_duplicate_overlap_pair_count: 0
+unhandled_overlap_count: 0
+MSQA questions without detected overlap: 32236
+```
+
+### Project-owned split freeze
+
+Split name：
+
+```text
+msqa_stage57_project_eval_v1
+```
+
+Protocol version：
+
+```text
+msqa_project_eval_split_v1
+```
+
+Selection rule：
+
+```text
+Use MSQA rows whose CSV Split is 'test', then exclude rows with invalid row-level Microsoft Learn Q&A URLs, internal normalized-question duplicates, or detected PrimeQA exact/near-duplicate leakage.
+```
+
+过滤结果：
+
+```text
+loaded_contract_rows: 32236
+source_split_candidates: 3301
+excluded_invalid_source_url: 0
+excluded_internal_normalized_duplicates: 0
+excluded_primeqa_leakage: 0
+selected_question_count: 3301
+```
+
+Selected domain counts：
+
+```text
+IsAzure=True: 3301
+IsM365=True: 490
+IsOther=True: 0
+isShort=True: 285
+isLong=True: 0
+```
+
+Selected question IDs checksum：
+
+```text
+26cab0b636845cd321a48c12e8bcbeb5b563e5eb234e63383bbc9d0a9d8cb93b
+```
+
+Frozen split JSONL checksum：
+
+```text
+b2beb8f20351999ee38c8679e37619da2a005d635d116ff0dedabf14f9600e54
+```
+
+JSONL 行数：
+
+```text
+3301
+```
+
+### 可视化结果
+
+```text
+artifacts/msqa_evaluation_split_stage57_visuals/stage57_msqa_leakage_counts.svg
+artifacts/msqa_evaluation_split_stage57_visuals/stage57_msqa_split_filter_counts.svg
+artifacts/msqa_evaluation_split_stage57_visuals/stage57_msqa_selected_domain_flags.svg
+artifacts/msqa_evaluation_split_stage57_visuals/stage57_msqa_adapter_field_coverage.svg
+```
+
+完整 artifacts：
+
+```text
+artifacts/msqa_evaluation_split_stage57.json
+artifacts/msqa_evaluation_split_stage57.jsonl
+```
+
+以上 artifacts 位于本地 `artifacts/`，按 `.gitignore` 不纳入 git。
+
+### 问题与原因
+
+- 问题 1：朴素 near-duplicate 审计超时。
+  - 原因：32,236 个 MSQA rows 与 910 个 PrimeQA rows 做全量 token-set 比较，且多阈值预跑导致成本过高。
+  - 处理：不记录无效超时结果；实现等价定义下的 inverted-index + length-bound pruning。
+- 问题 2：split freeze 不能直接使用 `test_id.txt`。
+  - 原因：Stage 56 已发现 `test_id.txt` 有 1 个 ID 不在 CSV，且上游 split 流程有额外过滤假设。
+  - 处理：本项目冻结自己的 split：以 CSV `Split == test` 为候选池，再应用本项目字段、URL、重复和泄漏过滤。
+- 问题 3：是否排除 MSQA 全局内部重复需要定义清楚。
+  - 原因：评估 split 只使用 `Split == test`，本阶段不使用 MSQA train 做训练。
+  - 处理：内部 normalized duplicate 过滤限定在 evaluation candidate pool 内部，而不是全 MSQA。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\msqa_evaluation_split.py scripts\freeze_msqa_evaluation_split.py tests\test_msqa_evaluation_split.py
+pytest -q tests\test_msqa_evaluation_split.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+artifact 校验：
+
+```powershell
+python -m json.tool artifacts\msqa_evaluation_split_stage57.json > $null
+(Get-Content artifacts\msqa_evaluation_split_stage57.jsonl | Measure-Object -Line).Lines
+Get-FileHash -Algorithm SHA256 artifacts\msqa_evaluation_split_stage57.jsonl
+```
+
+结果：
+
+```text
+json: passed
+jsonl lines: 3301
+jsonl sha256: b2beb8f20351999ee38c8679e37619da2a005d635d116ff0dedabf14f9600e54
+```
+
+### 结论
+
+- Stage 57 完成 MSQA adapter contract。
+- Stage 57 完成 PrimeQA train/dev near-duplicate leakage audit。
+- Stage 57 冻结项目自有 MSQA evaluation split：`msqa_stage57_project_eval_v1`。
+- 近重复泄漏审计结果为 0 exact overlap、0 near-duplicate overlap。
+- 冻结 split 有 3,301 行。
+- 下一步可以在该 frozen split 上跑 top-k baseline。
+- 仍然不能运行 Stage 51 comparison。
+- 仍然不能 defaultize runtime。
+
+### 我学到的
+
+- “跑完整审计”不等于用最朴素实现硬跑；只要定义不变，工程化索引和剪枝是必要的，否则超时本身会污染实验流程。
+- Split freeze 必须写清楚候选池、过滤项和 checksum，否则后续跑指标时很容易滑回“临时抽样”。
+- 适配器字段选择是一种评估协议决定，不能在 evaluator 内部偷偷兜底。
+- 外部测试集进入指标前至少要经历 source fingerprint、adapter contract、leakage audit、split freeze 四道门。
+
+### 下一步
+
+- 做 Stage 58：在 `msqa_stage57_project_eval_v1` 上运行 top-k baseline。
+- Stage 58 只跑 baseline，不跑 Stage 51 comparison，不改默认 runtime。
+- Stage 58 需要记录：
+  1. baseline 使用的 frozen split checksum；
+  2. top-k baseline 的 answer/citation 可评估字段边界；
+  3. baseline 指标；
+  4. baseline failure modes；
+  5. 是否允许下一阶段对同一 frozen split 运行 Stage 51 candidate。

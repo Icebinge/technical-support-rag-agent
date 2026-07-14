@@ -77,11 +77,21 @@ Current boundary:
 - Stage 56 did not run near-duplicate leakage search.
 - Stage 56 did not implement the MSQA adapter contract.
 - Stage 56 did not run top-k or Stage 51 metrics on MSQA.
-- MSQA is not yet a held-out test set for this project.
+- Stage 57 defined the MSQA adapter contract:
+  - question: `QuestionText`;
+  - answer: `ProcessedAnswerText`;
+  - source URL: `Url`;
+  - no fallback to `AnswerText` or `DoubleProcessedAnswerText`.
+- Stage 57 ran near-duplicate leakage audit against PrimeQA train/dev at token
+  Jaccard threshold `0.9` and found 0 exact or near-duplicate overlaps.
+- Stage 57 froze `msqa_stage57_project_eval_v1` with 3,301 selected rows from
+  the MSQA CSV `Split == test` source split.
+- MSQA is now frozen for the next baseline evaluation step, but it is not yet
+  evidence for changing the default runtime.
 
-Before MSQA can become a real held-out evaluation source, the next stage must
-implement an explicit adapter contract, run near-duplicate leakage checks
-against PrimeQA train/dev, and freeze a project-owned evaluation split.
+Before MSQA can support a defaultization decision, the next stage must run the
+top-k baseline on the frozen split and record the baseline quality and failure
+modes. Stage 51 comparison must wait until that baseline is recorded.
 
 ## Split Rule
 
@@ -116,6 +126,12 @@ The current MSQA local schema probe is recorded in:
 
 ```text
 docs/msqa_schema_probe.md
+```
+
+The current MSQA adapter and frozen split are recorded in:
+
+```text
+docs/msqa_evaluation_split.md
 ```
 
 ## Leakage Checks

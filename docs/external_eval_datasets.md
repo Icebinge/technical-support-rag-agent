@@ -114,8 +114,26 @@ Key local findings:
 | `test_id.txt` IDs found in CSV | 587 / 588 |
 | PrimeQA train/dev exact overlaps | 0 |
 
-Stage 56 still does not approve final metrics because near-duplicate leakage,
-adapter contract, and a project-owned MSQA split are not complete.
+Stage 56 still did not approve final metrics because near-duplicate leakage,
+adapter contract, and a project-owned MSQA split were not complete.
+
+## Stage 57 MSQA Adapter And Split Freeze
+
+Stage 57 completed the next audit step:
+
+| Check | Result |
+| --- | ---: |
+| Adapter contract version | `msqa_eval_adapter_v1` |
+| Answer field | `ProcessedAnswerText` |
+| Source URL field | `Url` |
+| Answer-field fallback | none |
+| PrimeQA exact overlaps | 0 |
+| PrimeQA near-duplicate overlaps at Jaccard 0.9 | 0 |
+| Frozen split | `msqa_stage57_project_eval_v1` |
+| Selected rows | 3,301 |
+
+The frozen split is approved for the next top-k baseline step only. It does not
+approve Stage 51 comparison or default runtime changes yet.
 
 ## Source Snapshot
 
@@ -154,6 +172,12 @@ artifacts/msqa_schema_probe_stage56_visuals/stage56_msqa_source_link_coverage.sv
 artifacts/msqa_schema_probe_stage56_visuals/stage56_msqa_domain_flags.svg
 artifacts/msqa_schema_probe_stage56_visuals/stage56_msqa_test_id_coverage.svg
 artifacts/msqa_schema_probe_stage56_visuals/stage56_msqa_primeqa_exact_overlap.svg
+artifacts/msqa_evaluation_split_stage57.json
+artifacts/msqa_evaluation_split_stage57.jsonl
+artifacts/msqa_evaluation_split_stage57_visuals/stage57_msqa_leakage_counts.svg
+artifacts/msqa_evaluation_split_stage57_visuals/stage57_msqa_split_filter_counts.svg
+artifacts/msqa_evaluation_split_stage57_visuals/stage57_msqa_selected_domain_flags.svg
+artifacts/msqa_evaluation_split_stage57_visuals/stage57_msqa_adapter_field_coverage.svg
 ```
 
 These artifacts are local outputs under `artifacts/` and are not committed by
