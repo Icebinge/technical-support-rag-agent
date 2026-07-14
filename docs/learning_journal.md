@@ -13312,3 +13312,267 @@ python -m json.tool artifacts\evaluation_strategy_stage54_review.json > $null
   - 不改默认 runtime；
   - 不跑伪 held-out；
   - 不调 Stage 51 candidate。
+
+## 2026-07-14 Stage 55：external evaluation dataset discovery 与 MSQA 候选冻结
+
+### 本阶段目标
+
+Stage 54 已经把下一步分成三条路径，并要求用户先确认。用户确认走推荐路线：
+
+```text
+external_independent_eval_set
+```
+
+因此本阶段目标不是跑指标，而是找新的外部独立测试集候选，并完成第一轮 schema/license/citation/leakage 风险审计。
+
+本阶段必须遵守的边界：
+
+1. 不把任何候选数据集直接当作 held-out test；
+2. 不运行 Stage 51 candidate 指标；
+3. 不运行 top-k baseline 对比；
+4. 不改默认 runtime；
+5. 不调 Stage 51 candidate；
+6. 所有数据集结论必须基于公开来源或本地真实产物，不能臆造。
+
+### 新增内容
+
+新增 Stage 55 发现与审计模块：
+
+```text
+src/ts_rag_agent/application/external_eval_dataset_discovery.py
+```
+
+新增命令行脚本：
+
+```text
+scripts/discover_external_eval_datasets.py
+```
+
+新增测试：
+
+```text
+tests/test_external_eval_dataset_discovery.py
+```
+
+新增文档：
+
+```text
+docs/external_eval_datasets.md
+```
+
+更新文档：
+
+```text
+docs/evaluation_strategy.md
+docs/data_strategy.md
+docs/learning_journal.md
+```
+
+### 外部来源检查
+
+本阶段通过公开来源检查了以下候选：
+
+```text
+microsoft_msqa
+multidoc2dial
+doc2dial
+stackexchange_dumps
+natural_questions
+msdialog
+```
+
+主要来源包括：
+
+```text
+https://github.com/microsoft/Microsoft-Q-A-MSQA-
+https://aclanthology.org/2023.emnlp-industry.29/
+https://cdla.dev/permissive-2-0/
+https://huggingface.co/datasets/IBM/doc2dial
+https://huggingface.co/datasets/IBM/multidoc2dial
+https://ciir.cs.umass.edu/downloads/msdialog/
+https://archive.org/download/stackexchange
+https://stackoverflow.blog/2014/01/23/stack-exchange-cc-data-now-hosted-by-the-internet-archive/
+https://github.com/google-research-datasets/natural-questions
+```
+
+事实边界：
+
+- 本阶段查阅了公开网页、GitHub API 和少量公开 raw 文本。
+- 本阶段没有把 MSQA `msqa-32k.csv` 下载到 `data/raw/`。
+- 本阶段没有解析 MSQA 32k 行数据。
+- 本阶段没有运行任何模型质量评估。
+- 本阶段没有运行任何 leakage audit。
+- 本阶段没有产生 held-out 分数。
+
+### 审计规则
+
+新增的 `fit_score` 是我根据项目目标生成的审计适配分，不是模型效果分。
+
+计算规则：
+
+```text
+domain_fit * 2
++ schema_fit
++ citation_fit
++ answerability_fit
++ license_fit
++ independence_fit
+```
+
+其中 `domain_fit` 加权两倍，因为当前项目目标是技术支持 RAG 默认化判断，不是泛化 QA benchmark。
+
+### Stage 55 结果
+
+脚本命令：
+
+```powershell
+python scripts\discover_external_eval_datasets.py --output artifacts\external_eval_dataset_discovery_stage55.json --visualization-dir artifacts\external_eval_dataset_discovery_stage55_visuals
+```
+
+结果摘要：
+
+```text
+recommended_candidate: microsoft_msqa
+recommended_candidate_name: Microsoft Q&A (MSQA)
+fit_score: 17
+can_run_final_metrics_now: false
+default_runtime_policy: unchanged
+recommended_next_stage: Stage 56: MSQA local schema probe, source-link coverage audit, and PrimeQA leakage audit protocol
+```
+
+候选排序：
+
+```text
+microsoft_msqa: fit_score 17, status recommended_for_stage56_schema_probe
+multidoc2dial: fit_score 15, status secondary_document_grounded_reference
+natural_questions: fit_score 15, status control_benchmark_only
+doc2dial: fit_score 14, status secondary_document_grounded_reference
+stackexchange_dumps: fit_score 11, status manual_derivation_candidate_only
+msdialog: fit_score 10, status blocked_until_access_and_license_confirmation
+```
+
+结论：
+
+MSQA 是当前最好的外部测试集候选，但还不是可直接使用的 held-out test set。
+
+原因：
+
+- 优点：
+  - 技术支持 / 企业 IT QA 域匹配最好；
+  - 来源是 Microsoft Q&A；
+  - README 记录为 32,252 行；
+  - 有 question、accepted answer、tags、URL 和 `test_id.txt`；
+  - 数据集许可证公开列为 CDLA-Permissive-2.0。
+- 风险：
+  - accepted-answer-only 过滤导致没有原生 unanswerable rows；
+  - source-link/citation 覆盖率还没有本地统计；
+  - 还没有下载并解析 CSV；
+  - 还没有与 PrimeQA train/dev 做 exact/near-duplicate leakage audit。
+
+因此本阶段只把 MSQA 冻结为 Stage 56 schema probe 候选，不允许直接跑指标。
+
+### 可视化结果
+
+本阶段生成：
+
+```text
+artifacts/external_eval_dataset_discovery_stage55_visuals/stage55_candidate_fit_score.svg
+artifacts/external_eval_dataset_discovery_stage55_visuals/stage55_candidate_domain_fit.svg
+artifacts/external_eval_dataset_discovery_stage55_visuals/stage55_candidate_citation_fit.svg
+artifacts/external_eval_dataset_discovery_stage55_visuals/stage55_candidate_effort_score.svg
+```
+
+完整 JSON artifact：
+
+```text
+artifacts/external_eval_dataset_discovery_stage55.json
+```
+
+以上 artifacts 位于本地 `artifacts/`，按 `.gitignore` 不纳入 git。
+
+### 问题与原因
+
+- 问题 1：新的测试集候选不能只看是否“技术支持相关”。
+  - 原因：当前 runtime 选择依赖 citation 与 answerability 行为；
+  - 只有问答对不等于可做 citation-preserving RAG 评估。
+- 问题 2：MSQA 虽然域匹配强，但没有原生 no-answer rows。
+  - 原因：MSQA README 说明过滤掉没有 accepted answer 的样本；
+  - 所以后续如果使用 MSQA，不能直接复用当前 unanswerable refusal 指标。
+- 问题 3：MSDialog 域也匹配，但当前不能直接用。
+  - 原因：公开页要求联系 CIIR 获取访问权限，且公开页未确认可再分发许可证；
+  - 因此必须标记为 blocked，而不是当成可用测试集。
+
+### 修正与处理
+
+- 新增结构化候选审计模型，避免后续只凭人工印象选择测试集。
+- 把 MSQA 标为 `recommended_for_stage56_schema_probe`，不是 held-out。
+- 把 MSDialog 标为 `blocked_until_access_and_license_confirmation`。
+- 把 Natural Questions 标为 `control_benchmark_only`，避免把通用 QA 当技术支持测试。
+- 把 Stack Exchange dumps 标为 `manual_derivation_candidate_only`，因为它需要额外构造协议和署名处理。
+- 在 `docs/evaluation_strategy.md` 中把 Stage 54 的“等待用户确认”更新为“外部路线已确认，但指标仍阻断”。
+- 在 `docs/data_strategy.md` 中新增 MSQA 候选边界。
+- 新增 `docs/external_eval_datasets.md` 保存外部数据集发现快照。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\external_eval_dataset_discovery.py scripts\discover_external_eval_datasets.py tests\test_external_eval_dataset_discovery.py
+pytest -q tests\test_external_eval_dataset_discovery.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 4 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 147 passed
+```
+
+artifact JSON 校验：
+
+```powershell
+python -m json.tool artifacts\external_eval_dataset_discovery_stage55.json > $null
+```
+
+结果：通过。
+
+### 结论
+
+- Stage 55 完成 external evaluation dataset discovery。
+- 新测试集候选是 MSQA，但只进入 Stage 56 schema/source-link/leakage probe。
+- 本阶段没有使用 MSQA 作为测试集。
+- 本阶段没有运行 held-out 指标。
+- 默认 runtime 不变。
+- Stage 51 candidate 继续保持 frozen non-default candidate。
+
+### 我学到的
+
+- 找测试集不是找“看起来像”的数据，而是要同时满足域、schema、citation、license、leakage 与 answerability 边界。
+- 外部数据集即使域匹配，也不能跳过 source-link coverage audit；否则 citation-preserving policy 仍然无法诚实评估。
+- MSQA 的 accepted-answer 设计适合技术支持 QA，但对 refusal/unanswerable 测试不够，需要后续单独处理。
+- 审计分可以帮助排序，但必须明确它是生成的适配分，不是模型效果。
+
+### 下一步
+
+- 做 Stage 56：MSQA local schema probe、source-link coverage audit 与 PrimeQA leakage audit protocol。
+- Stage 56 仍然不直接跑最终质量指标，先完成：
+  1. 记录 MSQA 下载 URL、文件大小和 checksum；
+  2. 采样解析 CSV header 与少量样本；
+  3. 统计 URL/source-link 覆盖率；
+  4. 统计 `learn.microsoft.com` 文档链接覆盖率；
+  5. 设计 MSQA 与 PrimeQA train/dev 的 exact/near-duplicate leakage audit。
