@@ -12537,3 +12537,307 @@ artifact JSON 校验：8 个 Stage 51 JSON artifacts 均可正常解析。
   3. 决定是否把 Stage 51 policy 作为“唯一待测候选”；
   4. 在使用 held-out test set 前冻结命令、参数、候选策略和验收标准；
   5. 继续不在未冻结协议前使用 held-out test set。
+
+## 2026-07-14 Stage 52：默认化前评审与 held-out test 协议冻结
+
+### 本阶段目标
+
+Stage 51 已经把 rank-contained preservation guard 做成非默认 runtime 参数，并在 dev/train 上通过 end-to-end verified RAG 检查。本阶段目标是做默认化前评审，而不是直接默认化：
+
+1. 汇总 Stage 46-51 的 dev/train 证据；
+2. 明确 Stage 51 是否可以作为唯一 held-out test 候选；
+3. 固定 held-out test 前的候选策略、参数和验收标准；
+4. 明确禁止在看到 held-out 结果后继续调参；
+5. 不加载、不评估 held-out 数据。
+
+### 新增内容
+
+新增评审模块：
+
+```text
+src/ts_rag_agent/application/defaultization_readiness_review.py
+```
+
+新增 CLI：
+
+```text
+scripts/review_defaultization_readiness.py
+```
+
+新增测试：
+
+```text
+tests/test_defaultization_readiness_review.py
+```
+
+模块能力：
+
+- 读取 dev/train top-k baseline、rank-contained candidate、Stage 51 candidate 和 changed-answer risk report；
+- 使用完整 `samples` 精确计算 verified gold citation count；
+- 生成候选 readiness checks；
+- 生成 rank-contained safety checks；
+- 写入 held-out test protocol；
+- 输出 SVG 可视化。
+
+### 事实边界
+
+- 本阶段没有使用 held-out test set。
+- 本阶段只读取已有 dev/train artifacts 和项目文档中的数据策略。
+- 本阶段没有读取 `data/raw/nvidia_techqa_rag_eval/train.json` 的样本内容。
+- 本阶段没有改变默认 runtime。
+- 本阶段没有新增任何调参。
+
+项目已有数据策略确认：
+
+```text
+PrimeQA/TechQA: training and development source
+nvidia/TechQA-RAG-Eval: final evaluation set
+```
+
+因此 Stage 52 将 NVIDIA TechQA-RAG-Eval 固定为后续 held-out evaluation 来源，而不是把 PrimeQA validation 当成默认化测试集。
+
+### 评审命令
+
+```powershell
+python scripts\review_defaultization_readiness.py `
+  --dev-topk-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage46_topk_report.json `
+  --dev-rank-contained-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage48_rank_contained_reranker_report.json `
+  --dev-candidate-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage51_rank_contained_preserve_out_of_rank_report.json `
+  --dev-candidate-risk-report artifacts\verified_rag_stage51_dev_preserve_changed_answer_risk_analysis.json `
+  --train-topk-report artifacts\verified_rag_train_hybrid_routing_mcpd3_stage49_topk_report.json `
+  --train-rank-contained-report artifacts\verified_rag_train_hybrid_routing_mcpd3_stage49_rank_contained_reranker_report.json `
+  --train-candidate-report artifacts\verified_rag_train_hybrid_routing_mcpd3_stage51_rank_contained_preserve_out_of_rank_report.json `
+  --train-candidate-risk-report artifacts\verified_rag_stage51_train_preserve_changed_answer_risk_analysis.json `
+  --output artifacts\verified_rag_stage52_defaultization_readiness_review.json `
+  --visualization-dir artifacts\verified_rag_stage52_defaultization_readiness_visuals
+```
+
+### 评审结果
+
+总体结论：
+
+```text
+candidate_passes_dev_train_readiness: true
+rank_contained_passes_dev_train_safety: false
+unique_heldout_candidate:
+  candidate_score_gte_60_rank_contained_preserve_baseline_out_of_rank_guarded_reranker
+default_runtime_change:
+  not_allowed_before_heldout_evaluation
+status:
+  stage51_is_unique_candidate_for_single_heldout_evaluation
+```
+
+dev readiness：
+
+```text
+candidate checks: 8 / 8 passed
+F1 delta vs top-k: +0.0005
+gold citation delta vs top-k: 0
+generated answerable delta: 0
+answerable refusal delta: 0
+unanswerable refusal delta: 0
+newly refused delta: 0
+unanswerable refusal regressions: 0
+candidate out-of-rank citation: 0
+changed verified answers: 13
+```
+
+train readiness：
+
+```text
+candidate checks: 8 / 8 passed
+F1 delta vs top-k: +0.0008
+gold citation delta vs top-k: 0
+generated answerable delta: 0
+answerable refusal delta: 0
+unanswerable refusal delta: 0
+newly refused delta: 0
+unanswerable refusal regressions: 0
+candidate out-of-rank citation: 0
+changed verified answers: 33
+```
+
+rank-contained candidate safety：
+
+```text
+dev rank-contained vs top-k:
+  F1 delta: +0.0008
+  gold citation delta: 0
+
+train rank-contained vs top-k:
+  F1 delta: +0.0008
+  gold citation delta: -1
+```
+
+因此 Stage 48/49 的 rank-contained candidate 被排除为 held-out 候选，原因是 train gold citation safety check 未通过。
+
+### 冻结的 held-out test 协议
+
+held-out dataset：
+
+```text
+nvidia/TechQA-RAG-Eval
+```
+
+本地路径：
+
+```text
+data/raw/nvidia_techqa_rag_eval/train.json
+data/raw/nvidia_techqa_rag_eval/corpus.zip
+```
+
+冻结候选策略：
+
+```text
+candidate_score_gte_60_rank_contained_preserve_baseline_out_of_rank_guarded_reranker
+```
+
+冻结 runtime 参数：
+
+```text
+retrieval_top_k: 5
+evidence_selector: hybrid-routing
+max_candidates_per_document: 3
+max_sentences: 3
+min_sentence_score: 2.0
+min_evidence_score: 15
+max_citation_rank: 3
+min_citations: 1
+composition_policy: candidate-score-rank-contained-preserve-baseline-out-of-rank-reranker
+candidate_reranker_dataset: artifacts/candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl
+candidate_reranker_model: logistic_best_candidate
+candidate_reranker_train_split: train
+```
+
+held-out 前必须完成：
+
+```text
+1. 实现或复用 NVIDIA TechQA-RAG-Eval evaluator，且不能改变冻结 runtime 参数。
+2. 运行并保存 NVIDIA questions 与 PrimeQA train/dev 调参数据的 leakage report。
+3. 在同一个 evaluator 下只运行一次 top-k baseline 和一次冻结 Stage 51 candidate。
+```
+
+held-out 验收标准：
+
+```text
+heldout verified F1 delta vs top-k >= 0
+heldout verified gold citation delta vs top-k >= 0
+heldout newly refused delta vs top-k <= 0
+heldout answerable refusal delta vs top-k <= 0
+heldout unanswerable refusal delta vs top-k <= 0
+heldout unanswerable refusal regressions == 0
+heldout candidate out-of-rank citation count == 0
+leakage report has no unhandled train/dev overlap with the held-out rows
+```
+
+冻结后禁止：
+
+```text
+1. 看到 held-out 结果后继续调阈值、prompt、selector、reranker model 或 guard logic。
+2. 在 held-out 上比较多个新候选后挑最好者。
+3. 用 NVIDIA TechQA-RAG-Eval 训练或重新拟合 candidate reranker。
+4. held-out 验收标准通过前修改默认 runtime。
+```
+
+### 可视化结果
+
+本阶段生成：
+
+```text
+artifacts/verified_rag_stage52_defaultization_readiness_visuals/stage52_verified_f1_by_policy.svg
+artifacts/verified_rag_stage52_defaultization_readiness_visuals/stage52_gold_citation_delta_vs_topk.svg
+artifacts/verified_rag_stage52_defaultization_readiness_visuals/stage52_changed_answer_risk.svg
+artifacts/verified_rag_stage52_defaultization_readiness_visuals/stage52_readiness_pass_count.svg
+```
+
+完整 JSON artifact：
+
+```text
+artifacts/verified_rag_stage52_defaultization_readiness_review.json
+```
+
+以上 artifacts 均在本地 `artifacts/` 下，按 `.gitignore` 规则不纳入 git。
+
+### 问题与原因
+
+- 问题 1：rank-contained candidate 有 F1 收益，但 train gold citation delta 为 `-1`。
+  - 原因是 Stage 49 中 `TRAIN_Q496` 的 gold doc 被 rank 内相似文档替换；
+  - Stage 52 因此不允许 rank-contained 直接进入 held-out。
+- 问题 2：Stage 51 candidate 虽然通过 dev/train readiness，但仍不能默认化。
+  - 原因是 dev/train 不是最终 held-out evaluation；
+  - Stage 51 只能成为唯一待测候选，不能成为默认策略。
+- 问题 3：当前 verified RAG evaluator 主要围绕 PrimeQA train/dev split。
+  - 下一步需要实现或复用 NVIDIA evaluator；
+  - 但实现 evaluator 不能改变已冻结 runtime 参数。
+
+### 修正与处理
+
+- 将默认化前评审工程化为可复跑脚本，而不是手写一次性结论。
+- 将 held-out test protocol 写入 JSON artifact，后续不能随意改参数。
+- 将 default runtime change 明确标记为 `not_allowed_before_heldout_evaluation`。
+- 将 Stage 51 明确为唯一 held-out candidate。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\defaultization_readiness_review.py scripts\review_defaultization_readiness.py tests\test_defaultization_readiness_review.py
+pytest -q tests\test_defaultization_readiness_review.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 4 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 134 passed
+```
+
+artifact JSON 校验：
+
+```powershell
+python -m json.tool artifacts\verified_rag_stage52_defaultization_readiness_review.json > $null
+```
+
+结果：通过。
+
+### 结论
+
+- Stage 52 完成默认化前评审。
+- Stage 51 policy 是唯一进入 held-out evaluation 的候选。
+- Stage 48/49 rank-contained policy 因 train gold citation delta `-1` 被排除。
+- held-out test 协议已经冻结。
+- 默认 runtime 仍然不变。
+- 本阶段没有使用 held-out test set。
+
+### 我学到的
+
+- “可以进入 held-out”与“可以默认化”是两个不同门槛，中间必须有协议冻结。
+- 对最终测试集，最重要的不是多跑几次，而是在第一次运行前固定候选、参数、验收标准和禁止事项。
+- 评审脚本应该使用 exact sample-level gold citation count，而不是用四舍五入后的 citation rate 反推。
+- NVIDIA TechQA-RAG-Eval 在本项目里是 held-out evaluation 来源；PrimeQA validation 不应被临时替代成默认化测试集。
+
+### 下一步
+
+- 做 Stage 53：NVIDIA held-out evaluator 与 leakage report。
+- 目标：
+  1. 不改变 Stage 52 冻结的 runtime 参数；
+  2. 实现或复用 NVIDIA TechQA-RAG-Eval evaluator；
+  3. 先生成 train/dev 与 NVIDIA held-out 的 leakage report；
+  4. 若 leakage 无未处理重叠，再按冻结协议运行 top-k baseline 和 Stage 51 candidate；
+  5. 只运行冻结候选，不新增候选、不调参；
+  6. 根据 Stage 52 验收标准判断是否允许进入默认化决策。
