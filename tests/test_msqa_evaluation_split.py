@@ -74,6 +74,12 @@ def test_msqa_split_outputs_jsonl_and_visualizations(tmp_path):
         for line in split_output.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+    split_text = split_output.read_text(encoding="utf-8")
+    assert "\u2028" not in split_text
+    assert "\\u2028" in split_text
+    for line in split_text.splitlines():
+        if line.strip():
+            json.loads(line)
     assert [row["question_id"] for row in rows] == report["frozen_split"][
         "selected_question_ids"
     ]
@@ -137,7 +143,7 @@ def _write_msqa_csv(path: Path) -> None:
             "IsOther": "True",
             "QuestionText": "How do I install a storage driver?",
             "Url": "https://learn.microsoft.com/en-us/answers/questions/4/example.html",
-            "ProcessedAnswerText": "Install the storage driver package.",
+            "ProcessedAnswerText": "Install the storage\u2028driver package.",
             "Split": "test",
         },
         {

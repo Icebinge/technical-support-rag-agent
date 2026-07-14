@@ -135,6 +135,21 @@ Stage 57 completed the next audit step:
 The frozen split is approved for the next top-k baseline step only. It does not
 approve Stage 51 comparison or default runtime changes yet.
 
+## Stage 58 MSQA Top-K Baseline
+
+Stage 58 recorded the frozen-split MSQA answer-source BM25 baseline.
+
+| Variant | hit@1 | hit@10 | MRR | avg top1 token F1 | Decision |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `answer_only` | 0.4147 | 0.6128 | 0.4762 | 0.5138 | primary baseline |
+| `question_answer_page_text` | 1.0 | 1.0 | 1.0 | 1.0 | diagnostic only |
+
+The diagnostic variant indexes the question text and therefore makes retrieval
+nearly trivial. The primary answer-only result is the meaningful baseline for
+future compatibility review.
+
+Stage 58 still does not approve Stage 51 comparison or default runtime changes.
+
 ## Source Snapshot
 
 Sources checked on 2026-07-14:
@@ -178,6 +193,11 @@ artifacts/msqa_evaluation_split_stage57_visuals/stage57_msqa_leakage_counts.svg
 artifacts/msqa_evaluation_split_stage57_visuals/stage57_msqa_split_filter_counts.svg
 artifacts/msqa_evaluation_split_stage57_visuals/stage57_msqa_selected_domain_flags.svg
 artifacts/msqa_evaluation_split_stage57_visuals/stage57_msqa_adapter_field_coverage.svg
+artifacts/msqa_topk_baseline_stage58.json
+artifacts/msqa_topk_baseline_stage58_visuals/stage58_msqa_hit_at_1.svg
+artifacts/msqa_topk_baseline_stage58_visuals/stage58_msqa_hit_at_10.svg
+artifacts/msqa_topk_baseline_stage58_visuals/stage58_msqa_mrr.svg
+artifacts/msqa_topk_baseline_stage58_visuals/stage58_msqa_top1_answer_f1.svg
 ```
 
 These artifacts are local outputs under `artifacts/` and are not committed by

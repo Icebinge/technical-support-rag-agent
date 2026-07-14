@@ -14149,3 +14149,294 @@ jsonl sha256: b2beb8f20351999ee38c8679e37619da2a005d635d116ff0dedabf14f9600e54
   3. baseline 指标；
   4. baseline failure modes；
   5. 是否允许下一阶段对同一 frozen split 运行 Stage 51 candidate。
+
+## 2026-07-14 Stage 58：MSQA frozen-split top-k answer-source baseline
+
+### 目标
+
+在 Stage 57 冻结的 `msqa_stage57_project_eval_v1` 上运行第一个 MSQA top-k baseline，并记录 baseline quality 与 failure modes。
+
+本阶段边界：
+
+- 只运行 MSQA frozen split baseline；
+- 不运行 Stage 51 candidate；
+- 不做默认 runtime 修改；
+- 不把 MSQA answer-source 指标伪装成 PrimeQA-style document-grounded verified RAG 指标；
+- 如实记录 artifact 修复和超时尝试。
+
+### 新增与修改
+
+新增 Stage 58 baseline 模块：
+
+```text
+src/ts_rag_agent/application/msqa_baseline_evaluation.py
+```
+
+新增 CLI：
+
+```text
+scripts/evaluate_msqa_topk_baseline.py
+```
+
+新增测试：
+
+```text
+tests/test_msqa_baseline_evaluation.py
+```
+
+更新 Stage 57 split writer：
+
+```text
+src/ts_rag_agent/application/msqa_evaluation_split.py
+```
+
+更新文档：
+
+```text
+docs/msqa_topk_baseline.md
+docs/msqa_evaluation_split.md
+docs/data_strategy.md
+docs/evaluation_strategy.md
+docs/external_eval_datasets.md
+```
+
+### Stage 57 JSONL artifact 修复
+
+运行 Stage 58 时首先发现：
+
+```text
+artifacts/msqa_evaluation_split_stage57.jsonl
+```
+
+不能被逐物理行稳定解析。
+
+原因：
+
+- 少数 MSQA 字符串包含 Unicode line separator `U+2028`；
+- JSON 对象本身可解析，但 Python `splitlines()` 会把 `U+2028` 当作物理换行；
+- Stage 57 只校验了 JSON report 和 JSONL 行数，没有逐 JSON object 校验。
+
+处理：
+
+- 修改 Stage 57 JSONL writer，把 `U+2028` 和 `U+2029` 显式转义；
+- 修改 Stage 58 loader，用 `\n` 做物理行切分；
+- 重跑 Stage 57 artifact；
+- selected question ID checksum 没有变化；
+- JSONL artifact checksum 发生变化，这是真实的 Stage 58 过程修正。
+
+新的 JSONL checksum：
+
+```text
+a60db5be5b1a6bfbf24d32ffc99c5482f57ad3462c39cd7b8510cc3c8d569bb3
+```
+
+逐对象校验：
+
+```text
+jsonl objects: 3301
+physical splitlines: 3301
+```
+
+### Baseline 定义
+
+MSQA 没有 PrimeQA technotes 那种独立文档语料，只有 Q&A rows 和 row-level URL。
+
+因此 Stage 58 运行的是 answer-source retrieval baseline：
+
+```text
+query: frozen MSQA question
+gold source: same frozen MSQA Q&A row
+gold answer: ProcessedAnswerText
+```
+
+指标边界：
+
+- hit@k / MRR：gold MSQA Q&A source row 是否进入 top-k；
+- top1 token F1：top1 source row answer 与 gold `ProcessedAnswerText` 的 token F1；
+- oracle@k token F1：top-k 中最佳 answer 与 gold answer 的 token F1；
+- 这些不是 document-span citation metrics。
+
+Baseline variants：
+
+```text
+primary: answer_only
+diagnostic: question_answer_page_text
+```
+
+`answer_only` 只索引 `ProcessedAnswerText`，不索引 question text。
+
+`question_answer_page_text` 索引 `QuestionText + ProcessedAnswerText`，模拟 Q&A 页面文本；这个版本预期更容易，只作为诊断。
+
+### 真实运行过程
+
+第一次真实运行尝试：
+
+```text
+corpus_scope: all_contract_rows
+corpus rows: 32236
+eval rows: 3301
+```
+
+结果：
+
+```text
+304 seconds timeout
+no valid Stage 58 artifact produced
+```
+
+处理：
+
+- 不把这次超时当指标；
+- 改为 `corpus_scope=frozen_split_only`，与 Stage 57 “在 frozen split 上跑 baseline” 的边界一致；
+- 记录全量 corpus scope 作为未来单独实验，不混入 Stage 58。
+
+正式运行命令：
+
+```powershell
+python scripts\evaluate_msqa_topk_baseline.py --msqa-csv data\raw\msqa_repo\data\msqa-32k.csv --split-jsonl artifacts\msqa_evaluation_split_stage57.jsonl --output artifacts\msqa_topk_baseline_stage58.json --visualization-dir artifacts\msqa_topk_baseline_stage58_visuals --top-k 1,3,5,10 --corpus-modes answer_only,question_answer_page_text --corpus-scope frozen_split_only
+```
+
+### Stage 58 结果
+
+输入：
+
+```text
+corpus_scope: frozen_split_only
+corpus rows: 3301
+frozen split samples: 3301
+```
+
+Primary baseline：`answer_only`
+
+```text
+evaluated_questions: 3301
+hit@1: 0.4147
+hit@3: 0.5159
+hit@5: 0.5604
+hit@10: 0.6128
+MRR: 0.4762
+median_gold_rank_when_found: 1
+gold_source_missing_at_10: 1278
+top1_wrong_source: 1932
+average_top1_token_f1: 0.5138
+oracle@1 token_f1: 0.5138
+oracle@3 token_f1: 0.6137
+oracle@5 token_f1: 0.6541
+oracle@10 token_f1: 0.7024
+top1_token_f1_below_0.3: 1758
+```
+
+Diagnostic baseline：`question_answer_page_text`
+
+```text
+evaluated_questions: 3301
+hit@1: 1.0
+hit@3: 1.0
+hit@5: 1.0
+hit@10: 1.0
+MRR: 1.0
+average_top1_token_f1: 1.0
+```
+
+解释：
+
+- `question_answer_page_text` 达到 1.0，说明只要把原问题文本放入索引，source-row retrieval 会变得过于容易；
+- 因此 primary evidence 应看 `answer_only`；
+- `answer_only` hit@10 只有 0.6128，说明仅靠答案文本从问题检索 accepted-answer source row 仍有明显困难；
+- Stage 51 comparison 不能自动运行，因为 Stage 51 是围绕 PrimeQA document-grounded verified RAG 设计的，而 Stage 58 是 MSQA answer-source retrieval task。
+
+### 可视化结果
+
+```text
+artifacts/msqa_topk_baseline_stage58_visuals/stage58_msqa_hit_at_1.svg
+artifacts/msqa_topk_baseline_stage58_visuals/stage58_msqa_hit_at_10.svg
+artifacts/msqa_topk_baseline_stage58_visuals/stage58_msqa_mrr.svg
+artifacts/msqa_topk_baseline_stage58_visuals/stage58_msqa_top1_answer_f1.svg
+```
+
+完整 artifact：
+
+```text
+artifacts/msqa_topk_baseline_stage58.json
+```
+
+artifact checksum：
+
+```text
+d114f5f3ad1a4e9680a6296c59d66150770d94605c652fea4e2e8e9039897234
+```
+
+以上 artifacts 位于本地 `artifacts/`，按 `.gitignore` 不纳入 git。
+
+### 问题与原因
+
+- 问题 1：Stage 57 JSONL 起初不能逐物理行稳定解析。
+  - 原因：`U+2028` / `U+2029` line separator 没有额外转义；
+  - 处理：更新 writer 并重跑 ignored artifact。
+- 问题 2：全量 32,236 source-row corpus baseline 超时。
+  - 原因：当前 Python BM25 对 3,301 queries 与 32k source rows 的 answer-source 检索成本过高；
+  - 处理：Stage 58 改为 frozen-split-only corpus，符合“在 frozen split 上跑 baseline”的阶段边界；全量 corpus 作为未来单独性能/检索实验。
+- 问题 3：answer-only 和 page-text 的指标差异极大。
+  - 原因：page-text 索引包含原始 question，source row 自匹配太强；
+  - 处理：只把 answer-only 作为 primary baseline，page-text 标记为 diagnostic。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\msqa_baseline_evaluation.py src\ts_rag_agent\application\msqa_evaluation_split.py scripts\evaluate_msqa_topk_baseline.py tests\test_msqa_baseline_evaluation.py tests\test_msqa_evaluation_split.py
+pytest -q tests\test_msqa_baseline_evaluation.py tests\test_msqa_evaluation_split.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 5 passed
+```
+
+artifact 校验：
+
+```powershell
+python -m json.tool artifacts\msqa_topk_baseline_stage58.json > $null
+python -m json.tool artifacts\msqa_evaluation_split_stage57.json > $null
+```
+
+结果：
+
+```text
+json: passed
+```
+
+JSONL 校验：
+
+```text
+jsonl objects: 3301
+physical splitlines: 3301
+jsonl sha256: a60db5be5b1a6bfbf24d32ffc99c5482f57ad3462c39cd7b8510cc3c8d569bb3
+```
+
+### 结论
+
+- Stage 58 完成 MSQA frozen-split top-k answer-source baseline。
+- Primary answer-only baseline：hit@10 0.6128，MRR 0.4762，average top1 token F1 0.5138。
+- Diagnostic question+answer page-text baseline 达到 1.0，但这是因为索引包含原问题文本，不能作为主判断依据。
+- Stage 51 candidate 仍然不能直接运行。
+- 默认 runtime 不变。
+
+### 我学到的
+
+- JSONL 不只是“看起来一行一个对象”；还要考虑 `U+2028/U+2029` 这类 line separator 对 line-oriented tools 的影响。
+- 外部 QA 数据集如果没有独立文档语料，baseline 语义会从 document-grounded RAG 变成 answer-source retrieval，必须在指标名前写清楚。
+- 把 question text 放入 source-row index 会造成强自匹配，能作为诊断上限，但不能作为主 baseline。
+- 在跑 candidate 之前先看 baseline failure modes 是必要的，否则很容易拿不可比任务强行做模型选择。
+
+### 下一步
+
+- 做 Stage 59：MSQA baseline failure mode review 与 Stage 51 compatibility gate。
+- Stage 59 先判断：
+  1. Stage 51 的 evidence-selection / candidate-score 机制是否能公平迁移到 MSQA answer-source task；
+  2. 是否需要先设计 MSQA document/corpus construction，而不是直接跑 Stage 51；
+  3. 如果可以比较，应该比较 answer-only corpus 还是 page-text corpus；
+  4. 是否需要先优化 BM25 performance，再考虑全量 32k corpus baseline。

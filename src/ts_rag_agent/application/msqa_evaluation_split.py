@@ -187,6 +187,13 @@ def write_msqa_project_split_jsonl(
             handle.write("\n")
 
 
+def load_msqa_contract_rows(msqa_csv_path: Path) -> tuple[list[MsqaEvaluationRow], dict[str, int]]:
+    """Load MSQA rows that satisfy the Stage 57 adapter contract."""
+
+    _ensure_file(msqa_csv_path)
+    return _load_msqa_rows(msqa_csv_path)
+
+
 def write_msqa_evaluation_split_visualizations(
     report: Mapping[str, Any],
     output_dir: Path,
@@ -721,7 +728,11 @@ def _numeric_sort_key(value: str) -> tuple[int, int | str]:
 def _json_dumps(value: Mapping[str, Any]) -> str:
     import json
 
-    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return (
+        json.dumps(value, ensure_ascii=False, sort_keys=True)
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
 
 
 def math_ceil(value: float) -> int:

@@ -132,8 +132,12 @@ Selected question ID checksum:
 Frozen split JSONL checksum:
 
 ```text
-b2beb8f20351999ee38c8679e37619da2a005d635d116ff0dedabf14f9600e54
+a60db5be5b1a6bfbf24d32ffc99c5482f57ad3462c39cd7b8510cc3c8d569bb3
 ```
+
+Note: Stage 58 regenerated this ignored JSONL artifact after escaping Unicode
+line separators `U+2028` and `U+2029` for stable line-oriented parsing. The
+selected question ID checksum above did not change.
 
 First selected question IDs:
 
@@ -179,6 +183,12 @@ These artifacts are local ignored outputs and are not committed by git policy.
 
 ## Next Step
 
-Stage 58 should run the top-k baseline only on
-`msqa_stage57_project_eval_v1`, then record baseline quality and failure modes
-before any Stage 51 candidate comparison.
+Stage 58 ran the top-k baseline on `msqa_stage57_project_eval_v1`. The current
+baseline record is:
+
+```text
+docs/msqa_topk_baseline.md
+```
+
+Stage 59 should review MSQA baseline failure modes and decide whether Stage 51
+can be adapted fairly to the MSQA answer-source task.

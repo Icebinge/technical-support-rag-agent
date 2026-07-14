@@ -2,8 +2,8 @@
 
 This document records the current evaluation strategy after Stage 53 blocked the
 previously intended NVIDIA held-out path, Stage 55 completed external dataset
-discovery, Stage 56 probed MSQA locally, and Stage 57 froze the MSQA evaluation
-split for baseline evaluation.
+discovery, Stage 56 probed MSQA locally, Stage 57 froze the MSQA evaluation
+split, and Stage 58 recorded the MSQA answer-source baseline.
 
 ## Current Facts
 
@@ -36,6 +36,12 @@ split for baseline evaluation.
   - exact overlaps against PrimeQA train/dev: 0
   - near-duplicate overlaps against PrimeQA train/dev: 0
   - selected evaluation rows: 3,301
+- Stage 58 ran MSQA answer-source BM25 baselines on the frozen split:
+  - primary answer-only hit@1: 0.4147
+  - primary answer-only hit@10: 0.6128
+  - primary answer-only MRR: 0.4762
+  - primary answer-only average top1 token F1: 0.5138
+  - diagnostic question+answer page-text hit@1: 1.0
 - Default runtime remains unchanged.
 
 ## Rejected Path
@@ -49,8 +55,8 @@ train/dev, so any quality metric reported as held-out would be misleading.
 ### External Independent Evaluation Set
 
 Status: user-confirmed on 2026-07-14; Stage 55 discovery complete; Stage 56
-local MSQA schema probe complete; Stage 57 project-owned MSQA split frozen for
-baseline evaluation.
+local MSQA schema probe complete; Stage 57 project-owned MSQA split frozen;
+Stage 58 top-k answer-source baseline recorded.
 
 This is still the cleanest path to a real defaultization decision. It preserves
 the Stage 51 candidate as frozen and looks for an evaluation source that was not
@@ -85,12 +91,23 @@ Stage 57 result:
   `26cab0b636845cd321a48c12e8bcbeb5b563e5eb234e63383bbc9d0a9d8cb93b`.
 - The split is frozen for the next top-k baseline step only.
 
+Stage 58 result:
+
+- Baseline task: answer-source retrieval over frozen MSQA Q&A rows.
+- Primary variant: `answer_only`.
+- Diagnostic variant: `question_answer_page_text`.
+- The diagnostic variant reaches 1.0 because it indexes the question text, so
+  it is not the primary evidence for defaultization.
+- Stage 51 comparison remains blocked because Stage 51 is PrimeQA
+  document-grounded verified RAG logic, while Stage 58 is an MSQA answer-source
+  retrieval baseline.
+
 Required next steps:
 
-1. Run top-k baseline on `msqa_stage57_project_eval_v1`.
-2. Record baseline quality and failure modes.
-3. Only after that, run the Stage 51 candidate once against the same frozen
-   split.
+1. Review Stage 58 failure modes.
+2. Decide whether Stage 51 can be adapted fairly to the MSQA answer-source task.
+3. Only after that compatibility decision, run or reject a Stage 51 candidate
+   comparison.
 
 ## Parked Paths
 
@@ -130,10 +147,12 @@ leakage checks:
 - Do not use NVIDIA `train.json` as held-out evidence.
 - Do not treat MSQA as a held-out test set.
 - Do not compare top-k against Stage 51 on MSQA before the frozen-split top-k
-  baseline is recorded.
+  baseline compatibility review is recorded.
 - Do not reuse MSQA `test_id.txt` as this project's final split until the
   missing ID and upstream filtering assumptions are handled explicitly.
 - Do not use an answer-field fallback for MSQA evaluation samples.
+- Do not treat Stage 58 MSQA answer-source metrics as PrimeQA-style verified
+  RAG document-citation metrics.
 
 ## Artifacts
 
@@ -149,4 +168,6 @@ artifacts/msqa_schema_probe_stage56_visuals/
 artifacts/msqa_evaluation_split_stage57.json
 artifacts/msqa_evaluation_split_stage57.jsonl
 artifacts/msqa_evaluation_split_stage57_visuals/
+artifacts/msqa_topk_baseline_stage58.json
+artifacts/msqa_topk_baseline_stage58_visuals/
 ```
