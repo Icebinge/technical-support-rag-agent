@@ -157,5 +157,13 @@ default_runtime_policy: unchanged
 
 ## Next Step
 
-Stage 71 should run train/dev candidate-reranker policy development on
-`primeqa_hybrid_stage68_v1`, keeping the frozen test split locked.
+Stage 71 completed train/dev candidate-reranker policy development on
+`primeqa_hybrid_stage68_v1`. The current follow-up is Stage 72: review Stage 71
+train/dev candidate-reranker changed cases before considering any final-test
+evaluation gate.
+
+Stage 71 is recorded in:
+
+```text
+docs/primeqa_hybrid_candidate_reranker_development.md
+```

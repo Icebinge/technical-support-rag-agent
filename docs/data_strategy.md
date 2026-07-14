@@ -39,8 +39,10 @@ The Stage 68 frozen split:
 Stage 68 materialized local ignored train/dev/test JSONL artifacts. Stage 69
 then rebuilt PrimeQA-compatible question files and train/dev candidate-reranker
 artifacts from this frozen boundary. Stage 70 ran train/dev BM25 development
-baselines and audited the Stage 69 train/dev candidate artifact. The frozen test
-split remains locked and must not be used for tuning.
+baselines and audited the Stage 69 train/dev candidate artifact. Stage 71 then
+ran train-only candidate-reranker cross-validation and train-to-dev guarded
+policy validation. The frozen test split remains locked and must not be used for
+tuning.
 
 ### nvidia/TechQA-RAG-Eval
 
@@ -280,6 +282,13 @@ The current PrimeQA/TechQA hybrid train/dev development checks are recorded in:
 
 ```text
 docs/primeqa_hybrid_development_checks.md
+```
+
+The current PrimeQA/TechQA hybrid candidate-reranker development run is recorded
+in:
+
+```text
+docs/primeqa_hybrid_candidate_reranker_development.md
 ```
 
 ## Leakage Checks

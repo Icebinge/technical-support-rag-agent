@@ -17375,3 +17375,223 @@ total: 113.047s
 `primeqa_hybrid_stage68_v1`。
 
 Stage71 只能使用 train/dev candidate artifact 做开发检查，继续保持 frozen test split locked，不运行 final test metrics，不改变默认 runtime。
+
+## Stage 71: PrimeQA hybrid candidate-reranker development
+
+### 阶段目标
+
+本阶段基于 Stage68 冻结的 `primeqa_hybrid_stage68_v1` 和 Stage69 生成的
+train/dev candidate artifact，做候选 reranker 开发实验：
+
+1. 只在 train split 上做 grouped cross-validation；
+2. 同时比较 `logistic_best_candidate` 和 `ridge_candidate_token_f1`；
+3. 对两个模型都做 train-to-dev guarded policy validation；
+4. 使用 frozen train/dev JSONL 读取 gold answers，按 `split::sample_id` 对齐 Stage69 candidate `question_id`；
+5. 不读取 test split，不运行 final metrics，不改变默认 runtime。
+
+### 新增与修改
+
+- 新增应用模块：
+  - `src/ts_rag_agent/application/primeqa_hybrid_candidate_reranker_development.py`
+- 新增脚本：
+  - `scripts/run_primeqa_hybrid_candidate_reranker_development.py`
+- 新增测试：
+  - `tests/test_primeqa_hybrid_candidate_reranker_development.py`
+- 新增文档：
+  - `docs/primeqa_hybrid_candidate_reranker_development.md`
+- 更新文档：
+  - `docs/data_strategy.md`
+  - `docs/evaluation_strategy.md`
+  - `docs/primeqa_hybrid_development_checks.md`
+  - `docs/learning_journal.md`
+
+### Stage71 运行命令
+
+```powershell
+python scripts\run_primeqa_hybrid_candidate_reranker_development.py `
+  --output artifacts\primeqa_hybrid_candidate_reranker_development_stage71.json `
+  --visualization-dir artifacts\primeqa_hybrid_candidate_reranker_development_stage71_visuals `
+  --fold-count 5 `
+  --models logistic_best_candidate,ridge_candidate_token_f1 `
+  --max-answer-candidates 3
+```
+
+### 真实 train-only grouped CV 结果
+
+```text
+logistic_best_candidate:
+  baseline_average_token_f1: 0.2269
+  selected_average_token_f1: 0.2523
+  average_delta_vs_top_candidate: +0.0254
+  oracle_gap_closed_rate: 0.1344
+  improved: 120
+  regressed: 88
+  tied: 162
+
+ridge_candidate_token_f1:
+  baseline_average_token_f1: 0.2269
+  selected_average_token_f1: 0.2652
+  average_delta_vs_top_candidate: +0.0383
+  oracle_gap_closed_rate: 0.2025
+  improved: 120
+  regressed: 87
+  tied: 163
+```
+
+train-only CV 中 `ridge_candidate_token_f1` 更强，但这仍然只是 train split 内的开发证据。
+
+### 真实 train-to-dev guarded policy validation
+
+Dev holdout top3 proxy：
+
+```text
+logistic_best_candidate:
+  best top3 policy: candidate_score_gte_60
+  best top3 delta: +0.0004
+  best top3 regressions: 0
+  best top3 gold citation delta: +0
+
+ridge_candidate_token_f1:
+  best top3 policy: stage36_main
+  best top3 delta: +0.0003
+  best top3 regressions: 1
+  best top3 gold citation delta: +0
+```
+
+Dev holdout single-candidate proxy：
+
+```text
+logistic stage36_main:
+  delta: +0.0436
+  replacements: 21
+  regressions: 4
+  gold citation delta: +7
+
+logistic candidate_score_gte_60:
+  delta: +0.0337
+  replacements: 17
+  regressions: 4
+  gold citation delta: +6
+
+ridge stage36_main:
+  delta: +0.0144
+  replacements: 8
+  regressions: 0
+  gold citation delta: +3
+
+ridge candidate_score_gte_60:
+  delta: +0.0027
+  replacements: 3
+  regressions: 0
+  gold citation delta: +2
+```
+
+结论要谨慎：single-candidate proxy 的增益明显，但 top3 rewrite proxy 几乎不动，所以还不能进入 final test 或 runtime 默认化。
+
+### Guard checks
+
+```text
+candidate_artifact_splits_are_train_dev_only: passed
+candidate_summary_splits_are_train_dev_only: passed
+candidate_rows_have_no_test_split: passed
+gold_answer_splits_are_train_dev_only: passed
+train_cv_uses_train_only: passed
+split_validations_are_train_to_dev: passed
+candidate_artifact_checks_passed: passed
+final_test_metrics_not_run: passed
+default_runtime_policy_unchanged: passed
+```
+
+### 生成的本地 artifacts
+
+这些 artifacts 位于 `artifacts/`，被 git ignore，不随提交进入仓库。
+
+Report：
+
+```text
+artifacts/primeqa_hybrid_candidate_reranker_development_stage71.json
+sha256: bb5c665295a7cd0768e8c69d805c0dd60c5fdfb5839aba4cd77f7161c35a4573
+```
+
+可视化目录：
+
+```text
+artifacts/primeqa_hybrid_candidate_reranker_development_stage71_visuals/
+svg files: 20
+```
+
+重点可视化：
+
+```text
+candidate_reranker_model_delta.svg
+sha256: ef1bdf5408b008360ba1beeeb9015dbad1d289a62cdd62998b21d9887ed0e19f
+
+candidate_reranker_model_gap_closed.svg
+sha256: 1ea1fca9730233a86aecd321840b11c788332a41b88039fb55c063769f6bce97
+
+stage71_logistic_best_candidate_dev_holdout_top3_policy_delta.svg
+sha256: 56b1fb622bf6ca7ad82e0071442241c3b193bae44d11d6fa2075f11e7eedb689
+
+stage71_ridge_candidate_token_f1_dev_holdout_top3_policy_delta.svg
+sha256: 79bb7896fe2d7df4ebe01e77d25baeb1c7a7a12f5b1d6c97bb9bdfd7aa8f23a8
+```
+
+### 问题、原因与修正
+
+- 问题 1：旧的 split-validation 脚本从原始 PrimeQA train/dev 读取 gold answers，不能直接适配 Stage68 的 `source_split:QUESTION_ID` 新 ID。
+  - 原因：Stage69 candidate row 的 `question_id` 是 `sample_id`，例如 `primeqa_dev:DEV_Q000`，而旧脚本的 gold answer key 只使用原始 dev/train question ID。
+  - 修正：新增 Stage71 专用封装，从 frozen train/dev JSONL 读取 answer，并用 `split::sample_id` 构建 gold answer key。
+- 问题 2：第一次真实运行只对 logistic 做 policy validation，但 train-only CV 显示 ridge 更强。
+  - 原因：沿用了旧 Stage39/40 的 logistic policy lineage，覆盖不够完整。
+  - 修正：扩展 Stage71，让 policy validation 默认跟随 `--models`，对 logistic 和 ridge 都做 train-to-dev validation。
+- 问题 3：top3 proxy 和 single-candidate proxy 给出的信号强度不一致。
+  - 原因：single-candidate proxy 只看 leading candidate，而 top3 rewrite proxy 会保留多个候选句子，更接近组合答案风险。
+  - 修正：结论中明确只允许进入 changed-case review，不允许直接 runtime/defaultization。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_candidate_reranker_development.py scripts\run_primeqa_hybrid_candidate_reranker_development.py tests\test_primeqa_hybrid_candidate_reranker_development.py
+pytest -q tests\test_primeqa_hybrid_candidate_reranker_development.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+真实运行耗时：
+
+```text
+load_candidates: 0.052s
+load_train_dev_splits: 0.038s
+train_only_cv: 0.635s
+train_to_dev_policy_validation: 1.473s
+candidate_checks: 0.002s
+total: 2.200s
+```
+
+### 结论
+
+- Stage71 已完成 train/dev-only candidate-reranker development。
+- Stage71 没有读取 frozen test split。
+- Stage71 没有运行 final test metrics。
+- Stage71 没有改变默认 runtime policy。
+- ridge 在 train-only CV 上优于 logistic，但 dev top3 proxy 的收益非常小。
+- 当前只能进入 Stage72 changed-case review，不能直接进入 final test gate。
+
+### 我学到的
+
+- 当 split ID contract 变了，gold answer loader 也必须一起变；否则评估脚本看似能跑，实际 key 对不齐。
+- CV 最优模型和 holdout policy 最优信号可能不一致，必须把 model-level 和 policy-level 证据分开记录。
+- single-candidate proxy 容易显得乐观，top-k rewrite proxy 更能暴露组合答案层面的收益变小问题。
+
+### 下一步
+
+做 Stage72：review Stage71 train/dev candidate-reranker changed cases。
+
+Stage72 应该检查 logistic/ridge 在 dev 上改变了哪些问题、哪些是 top3 proxy 微弱收益或潜在风险，再决定是否存在值得进入 final-test evaluation gate 的候选策略。test split 继续 locked。
