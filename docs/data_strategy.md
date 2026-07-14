@@ -218,6 +218,12 @@ The current MSQA Stage51 changed-case review is recorded in:
 docs/msqa_stage51_changed_case_review.md
 ```
 
+The current second external dataset rediscovery snapshot is recorded in:
+
+```text
+docs/external_eval_dataset_rediscovery.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:

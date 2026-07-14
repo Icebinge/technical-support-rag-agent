@@ -6,6 +6,13 @@ held-out source after NVIDIA TechQA-RAG-Eval `train.json` was blocked by leakage
 The scores below are generated audit-rubric scores, not model quality metrics.
 No dataset metrics were run in this stage.
 
+Stage66 later performed a second source-backed rediscovery after MSQA Stage65
+blocked Stage51 defaultization. That later snapshot is recorded in:
+
+```text
+docs/external_eval_dataset_rediscovery.md
+```
+
 ## Recommendation
 
 Recommended next candidate:

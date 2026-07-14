@@ -193,12 +193,25 @@ decision: msqa_stage51_changed_case_review_blocks_defaultization
 
 Required next step:
 
-1. Choose the Stage66 evaluation route explicitly.
-2. Treat Stage64 and Stage65 as external-adapter risk evidence, not a
-   defaultization result.
-3. Either find another external dataset, design one frozen MSQA-specific
-   rank-4/5 leading-source guard experiment, or freeze Stage51 as non-default
-   research evidence.
+Stage66 followed the user-confirmed route to find another external dataset. It
+recommends HQA-Data from Ubuntu Dialogue Corpus for the next schema probe:
+
+```text
+recommended_candidate: hqa_data_ubuntu_dialogue
+recommended_next_stage: Stage 67 HQA-Data local schema probe, file checksum capture,
+  context-span coverage audit, and PrimeQA/MSQA leakage protocol
+can_run_final_metrics_now: false
+can_download_without_user_confirmation: false
+default_runtime_policy: unchanged
+```
+
+Required next step:
+
+1. Confirm whether to download HQA-Data for Stage67 schema probing.
+2. Treat Stage64/65 MSQA and Stage66 HQA rediscovery as external-risk evidence,
+   not defaultization evidence.
+3. Do not run HQA metrics before schema, checksum, span coverage, and leakage
+   checks pass.
 
 ## Parked Paths
 
@@ -283,4 +296,6 @@ artifacts/msqa_stage51_adapter_comparison_stage64.json
 artifacts/msqa_stage51_adapter_comparison_stage64_visuals/
 artifacts/msqa_stage51_changed_case_review_stage65.json
 artifacts/msqa_stage51_changed_case_review_stage65_visuals/
+artifacts/external_eval_dataset_rediscovery_stage66.json
+artifacts/external_eval_dataset_rediscovery_stage66_visuals/
 ```

@@ -16358,3 +16358,228 @@ candidate_pool_rebuilt: false
 3. 冻结 Stage51 为 non-default research evidence，继续保持 top-k 为默认 runtime。
 
 在 Stage66 路线明确前，继续不 defaultize Stage51。
+
+## Stage 66：第二轮 external evaluation dataset rediscovery
+
+### 本阶段目标
+
+接着 Stage65，用户选择“再找一个数据集”。本阶段目标是做第二轮外部数据集发现：
+
+1. 在线核查新的或此前未作为主候选的数据集；
+2. 优先寻找技术支持、企业 IT、操作系统排障、软件支持相关 QA 数据集；
+3. 检查 public source、schema、license、citation/context 适配可能性；
+4. 推荐一个下一步 schema probe 候选；
+5. 不下载数据、不跑指标、不修改默认 runtime。
+
+### 在线来源
+
+本阶段核查了这些公开页面：
+
+```text
+https://data.mendeley.com/datasets/p85z3v45xk/1
+https://www.sciencedirect.com/science/article/pii/S2352340923003645
+https://huggingface.co/datasets/sedthh/ubuntu_dialogue_qa
+https://ciir.cs.umass.edu/downloads/msdialog/
+https://archive.org/download/stackexchange
+https://stackoverflow.com/help/data-dumps
+```
+
+### 新增与修改
+
+- 新增应用模块：
+  - `src/ts_rag_agent/application/external_eval_dataset_rediscovery.py`
+- 新增脚本：
+  - `scripts/rediscover_external_eval_datasets.py`
+- 新增测试：
+  - `tests/test_external_eval_dataset_rediscovery.py`
+- 新增文档：
+  - `docs/external_eval_dataset_rediscovery.md`
+- 更新文档：
+  - `docs/data_strategy.md`
+  - `docs/evaluation_strategy.md`
+  - `docs/external_eval_datasets.md`
+  - `docs/learning_journal.md`
+
+### Stage66 运行命令
+
+```powershell
+python scripts\rediscover_external_eval_datasets.py `
+  --output artifacts\external_eval_dataset_rediscovery_stage66.json `
+  --visualization-dir artifacts\external_eval_dataset_rediscovery_stage66_visuals
+```
+
+### 真实运行结果
+
+推荐候选：
+
+```text
+recommended_candidate: hqa_data_ubuntu_dialogue
+recommended_candidate_name: HQA-Data from Ubuntu Dialogue Corpus
+recommended_next_stage: Stage 67: HQA-Data local schema probe, file checksum capture, context-span coverage audit, and PrimeQA/MSQA leakage protocol
+can_run_final_metrics_now: false
+can_download_without_user_confirmation: false
+default_runtime_policy: unchanged
+```
+
+候选排名：
+
+```text
+hqa_data_ubuntu_dialogue:
+  status: recommended_for_stage67_schema_probe
+  fit_score: 15
+  domain_fit_score: 2
+  citation_fit_score: 3
+  license_fit_score: 2
+  adapter_effort_score: 2
+
+multidoc2dial:
+  status: strong_document_grounding_reference_not_new_primary
+  fit_score: 15
+  domain_fit_score: 1
+  citation_fit_score: 3
+  license_fit_score: 3
+  adapter_effort_score: 3
+
+msdialog:
+  status: blocked_until_access_and_license_boundary_confirmation
+  fit_score: 14
+  domain_fit_score: 3
+  citation_fit_score: 1
+  license_fit_score: 0
+  adapter_effort_score: 4
+
+askubuntu_stackexchange_dump:
+  status: derivation_candidate_blocked_by_size_access_and_attribution_plan
+  fit_score: 11
+  domain_fit_score: 2
+  citation_fit_score: 1
+  license_fit_score: 1
+  adapter_effort_score: 4
+
+hf_ubuntu_dialogue_qa:
+  status: blocked_by_license_metadata_mismatch
+  fit_score: 10
+  domain_fit_score: 2
+  citation_fit_score: 1
+  license_fit_score: 0
+  adapter_effort_score: 2
+```
+
+### HQA-Data source-backed facts
+
+Mendeley 页面记录：
+
+```text
+published date: 2022-12-15
+DOI: 10.17632/p85z3v45xk.1
+source: Ubuntu Dialogue Corpus conversations by dialogueID
+formats: CSV and JSON
+train QA pairs: 29,150
+test QA pairs: 7,288
+total contexts: 9,364
+total QA pairs: 36,438
+license: CC BY 4.0
+```
+
+ScienceDirect 文章补充说明：
+
+```text
+questions and answers are contained within the context
+original data source: Mendeley Data
+keywords include Ubuntu dialogue corpus and question answering generation
+```
+
+### 可视化结果
+
+本阶段生成 4 个 SVG：
+
+```text
+artifacts/external_eval_dataset_rediscovery_stage66_visuals/stage66_candidate_fit_score.svg
+artifacts/external_eval_dataset_rediscovery_stage66_visuals/stage66_candidate_domain_fit.svg
+artifacts/external_eval_dataset_rediscovery_stage66_visuals/stage66_candidate_citation_fit.svg
+artifacts/external_eval_dataset_rediscovery_stage66_visuals/stage66_candidate_effort_score.svg
+```
+
+Stage66 report：
+
+```text
+artifacts/external_eval_dataset_rediscovery_stage66.json
+```
+
+Stage66 report checksum：
+
+```text
+a357e2b466d102c1b30a374e87aca3b895f906ef8d5de6b7ea386741f5f6ace3
+```
+
+以上 artifacts 位于本地 `artifacts/`，按 `.gitignore` 不纳入 git。
+
+### 问题、原因与修正
+
+- 问题 1：MSDialog 的领域匹配非常强，但不能作为下一步直接使用。
+  - 原因：CIIR 页面要求联系获取访问权限，并写明 internal research only、不能分享数据集。
+  - 处理：标记为 `blocked_until_access_and_license_boundary_confirmation`，除非用户明确批准访问与非再分发边界，否则不下载、不做 artifact。
+- 问题 2：Ask Ubuntu StackExchange dump 领域相关，但不是现成 evaluation set。
+  - 原因：需要从 StackExchange XML 中派生 QA 样本，并处理 CC BY-SA attribution/share-alike；当前最新 dump 访问还涉及账户设置和 non-LLM-training affirmation。
+  - 处理：标记为 `derivation_candidate_blocked_by_size_access_and_attribution_plan`，暂不推荐下一步。
+- 问题 3：Hugging Face `sedthh/ubuntu_dialogue_qa` 页面许可信息不一致。
+  - 原因：页面 metadata 显示 MIT，但 dataset card 文本写 Apache License 2.0。
+  - 处理：标记为 `blocked_by_license_metadata_mismatch`，在许可不清楚前不用它。
+- 问题 4：HQA-Data 虽然最适合下一步 probe，但不是最终测试集。
+  - 原因：问题和答案是从 Ubuntu dialogue context 生成的，不是自然用户问题配人工 accepted answer。
+  - 处理：只推荐为 Stage67 schema probe 候选，不下载、不跑指标、不 defaultize。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\external_eval_dataset_rediscovery.py scripts\rediscover_external_eval_datasets.py tests\test_external_eval_dataset_rediscovery.py
+pytest -q tests\test_external_eval_dataset_rediscovery.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+真实 artifact 生成：
+
+```text
+Stage66 report: generated
+visualizations: 4 generated
+recommended_candidate: hqa_data_ubuntu_dialogue
+can_run_final_metrics_now: false
+can_download_without_user_confirmation: false
+```
+
+### 结论
+
+- Stage66 完成第二轮外部数据集发现。
+- HQA-Data 是当前最适合进入下一步 schema probe 的第二外部数据集候选。
+- HQA-Data 的优势是：Ubuntu 技术支持对话来源、CSV/JSON、train/test、context/span、CC BY 4.0。
+- HQA-Data 的核心风险是：QA 是生成的，不是自然用户问题与人工 accepted answer。
+- 当前不能跑最终指标，不能下载前置确认之外的数据，不能 defaultize。
+
+### 我学到的
+
+- “再找一个数据集”不等于“马上下载和跑指标”；数据源、许可、schema、citation/context 和 leakage 都要先过关。
+- 技术支持领域的数据集常常在 domain fit 与 license/artifact boundary 之间取舍：MSDialog domain 最强，但访问和再分发限制太硬；HQA domain 稍弱但更适合公开 schema probe。
+- 镜像数据集不能只看名字像；Hugging Face metadata 与 card 文字冲突时，必须把 license mismatch 当成 blocker。
+- StackExchange 类数据源看起来丰富，但其实是派生数据集工程，不是轻量外部评估集。
+
+### 下一步
+
+做 Stage67：HQA-Data local schema probe。
+
+Stage67 只能在用户确认后下载 HQA-Data，并需要记录：
+
+1. 文件 URL、大小、checksum；
+2. CSV/JSON schema；
+3. context 与 answer span coverage；
+4. 与 PrimeQA/MSQA 的 exact/near-duplicate leakage audit；
+5. 是否能冻结项目自有 HQA evaluation split。
+
+在 Stage67 通过前，不能运行 HQA baseline 或 Stage51 comparison。
