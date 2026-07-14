@@ -46,7 +46,10 @@ visualized the remaining train/dev-only risk. Stage 73 ran a train/dev-only
 top10 answer proxy diagnostic for the candidate-reranker policies. Stage 74
 stopped the current candidate-reranker policy route as non-actionable for now.
 Stage 75 then analyzed BM25 top10 misses on train/dev only and showed that
-retrieval recall is the next blocking issue.
+retrieval recall is the next blocking issue. Stage 76 designed train/dev-only
+retrieval-recall candidate experiments and explicitly blocked source `DOC_IDS`
+oracle union because those IDs are dataset metadata rather than runtime
+user-query evidence.
 The frozen test split remains locked and must not be used for tuning.
 
 ### nvidia/TechQA-RAG-Eval
@@ -321,6 +324,13 @@ The current PrimeQA/TechQA hybrid BM25 top10 miss analysis is recorded in:
 
 ```text
 docs/primeqa_hybrid_bm25_top10_miss_analysis.md
+```
+
+The current PrimeQA/TechQA hybrid retrieval-recall candidate design is recorded
+in:
+
+```text
+docs/primeqa_hybrid_retrieval_recall_candidate_design.md
 ```
 
 ## Leakage Checks

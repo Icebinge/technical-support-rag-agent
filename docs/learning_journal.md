@@ -18328,3 +18328,203 @@ git diff --check: passed
 Stage76：基于 Stage75 miss drivers，设计 train/dev-only 的 retrieval-recall improvement candidates。
 
 Stage76 仍然不能使用 test 做评估或 tuning，也不能运行 final test metrics。
+
+## Stage76：设计 retrieval-recall 改进候选
+
+时间：2026-07-15
+
+### 目标
+
+承接 Stage75 的结论：当前关键问题不是 reranker，而是 BM25 top10 没召回。
+
+本阶段把 Stage75 的 miss drivers 转成可执行的 retrieval-recall candidate design，给下一阶段直接跑 train/dev 实验。
+
+边界：
+
+- 只读取 Stage75 的 public-safe JSON 报告；
+- 不读取 frozen test split；
+- 不运行 final test metrics；
+- 不用 test 做 tuning；
+- 不改变默认 runtime policy；
+- 不把 source `DOC_IDS` 作为可用 runtime retrieval evidence。
+
+### 本次新增
+
+- 新增 `src/ts_rag_agent/application/primeqa_hybrid_retrieval_recall_candidate_design.py`。
+- 新增 `scripts/design_primeqa_hybrid_retrieval_recall_candidates.py`。
+- 新增 `tests/test_primeqa_hybrid_retrieval_recall_candidate_design.py`。
+- 新增 `docs/primeqa_hybrid_retrieval_recall_candidate_design.md`。
+- 更新 `docs/evaluation_strategy.md`。
+- 更新 `docs/data_strategy.md`。
+- 更新 `docs/primeqa_hybrid_bm25_top10_miss_analysis.md`。
+- 更新 `docs/learning_journal.md`。
+
+### 真实运行命令
+
+```text
+python scripts\design_primeqa_hybrid_retrieval_recall_candidates.py `
+  --output artifacts\primeqa_hybrid_retrieval_recall_candidate_design_stage76.json `
+  --visualization-dir artifacts\primeqa_hybrid_retrieval_recall_candidate_design_stage76_visuals
+```
+
+### 输入
+
+```text
+artifacts\primeqa_hybrid_bm25_top10_miss_analysis_stage75.json
+sha256: 45272301a177a275c3489b176abb5f307cd3e809151e31760c36f6168e38a116
+```
+
+### 真实结果
+
+Stage76 推荐的执行顺序：
+
+```text
+1. query_view_ablation_full_title_dedup
+2. fielded_title_text_bm25_score_fusion
+3. section_bm25_doc_rollup_train_dev_probe
+4. dense_sparse_rrf_train_dev_probe
+5. bm25_k1_b_grid_train_to_dev
+```
+
+候选覆盖情况：
+
+```text
+query_view_ablation_full_title_dedup:
+  priority_score: 196
+  target_miss_count: 143
+  dev_targets: 22
+
+fielded_title_text_bm25_score_fusion:
+  priority_score: 195
+  target_miss_count: 143
+  dev_targets: 23
+
+section_bm25_doc_rollup_train_dev_probe:
+  priority_score: 163
+  target_miss_count: 119
+  dev_targets: 17
+
+dense_sparse_rrf_train_dev_probe:
+  priority_score: 134
+  target_miss_count: 111
+  dev_targets: 17
+
+bm25_k1_b_grid_train_to_dev:
+  priority_score: 69
+  target_miss_count: 38
+  dev_targets: 6
+
+source_doc_ids_oracle_union_blocked:
+  priority_score: 0
+  target_miss_count: 148
+  dev_targets: 23
+  status: blocked_from_train_dev_experiment
+```
+
+### 可视化产物
+
+```text
+artifacts\primeqa_hybrid_retrieval_recall_candidate_design_stage76_visuals\stage76_candidate_priority_scores.svg
+artifacts\primeqa_hybrid_retrieval_recall_candidate_design_stage76_visuals\stage76_candidate_target_misses.svg
+artifacts\primeqa_hybrid_retrieval_recall_candidate_design_stage76_visuals\stage76_candidate_dev_targets.svg
+artifacts\primeqa_hybrid_retrieval_recall_candidate_design_stage76_visuals\stage76_allowed_vs_blocked_candidates.svg
+```
+
+Stage76 JSON SHA256：
+
+```text
+DDEBD276B3C70B33A0B8445622BBD0B5BA9C46C1B79DE08068B8AC7326692BFF
+```
+
+### Guard checks
+
+```text
+source_report_is_stage75: passed
+source_development_splits_are_train_dev_only: passed
+source_forbidden_final_splits_include_test: passed
+source_candidate_rows_have_no_test_split: passed
+source_final_test_metrics_not_run: passed
+source_default_runtime_policy_unchanged: passed
+stage76_design_only_no_runtime_default_change: passed
+stage76_uses_public_safe_stage75_report_only: passed
+```
+
+额外 raw-text 检查：
+
+```text
+Select-String over Stage76 JSON for question_title, question_text, gold_answer,
+candidate_sentence, document_title, document_text, and known raw-text snippets:
+no matches
+```
+
+artifact 忽略状态：
+
+```text
+.gitignore:19:artifacts/* artifacts\primeqa_hybrid_retrieval_recall_candidate_design_stage76.json
+.gitignore:19:artifacts/* artifacts\primeqa_hybrid_retrieval_recall_candidate_design_stage76_visuals\stage76_candidate_priority_scores.svg
+```
+
+### 问题、原因与修正
+
+- 问题 1：`source DOC_IDS` 看起来可以覆盖全部 miss，但不能作为 retrieval 方案。
+  - 原因：这些 ID 是数据集源 metadata，不是实际用户查询时可见的 runtime signal。
+  - 修正：Stage76 把 `source_doc_ids_oracle_union_blocked` 明确标成 blocked diagnostic，不允许进入 train/dev experiment 或 runtime defaultization。
+- 问题 2：最初测试断言把首位推荐候选写死。
+  - 原因：小 fixture 中低风险 BM25 grid 会因为优先级公式排到第一，测试不应依赖这个局部排序。
+  - 修正：改成验证关键候选存在、blocked 约束存在、目标计数正确。
+- 问题 3：现有 `SectionBM25Retriever` 可用，但不是最高优先级。
+  - 原因：Stage76 的 priority score 结合了 target miss count、dev target count、readiness 和 risk。query view / fielded BM25 覆盖了更多 Stage75 miss case。
+  - 修正：把 section BM25 保留为第三优先候选，并在文档中说明下一步先跑最高优先 allowed candidate。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_retrieval_recall_candidate_design.py scripts\design_primeqa_hybrid_retrieval_recall_candidates.py tests\test_primeqa_hybrid_retrieval_recall_candidate_design.py
+pytest -q tests\test_primeqa_hybrid_retrieval_recall_candidate_design.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+提交前完整验证：
+
+```text
+ruff check .
+pytest -q
+git diff --check
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 201 passed
+git diff --check: passed
+```
+
+### 结论
+
+- Stage76 已完成 retrieval-recall candidate design。
+- Stage76 没有读取测试集。
+- Stage76 没有运行 final test metrics。
+- 默认 runtime policy 保持 unchanged。
+- `source DOC_IDS` oracle union 已明确 blocked。
+- 下一步不应该回到 reranker-policy 路线，而应该先跑 query view ablation 的 train/dev 实验。
+
+### 我学到的
+
+- “全部 miss 都在 source DOC_IDS 里”不等于可以用它补召回；如果 runtime 不可见，就只能作为诊断证据。
+- 召回改进候选需要同时看覆盖面、dev 覆盖、实现就绪度和风险；不是只按某一个指标贪心排序。
+- Stage75 的 public-safe 报告足够支撑 Stage76 设计，不需要再次读取原始问题、答案或文档正文。
+
+### 下一步
+
+Stage77：运行 `query_view_ablation_full_title_dedup` 的 train/dev-only retrieval-recall 实验。
+
+Stage77 仍然不能使用 test 做评估或 tuning，也不能运行 final test metrics。

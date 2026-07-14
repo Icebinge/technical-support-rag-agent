@@ -178,6 +178,9 @@ default_runtime_policy: unchanged
 
 ## Next Step
 
-Stage 76 should design train/dev-only retrieval-recall improvement candidates
-from the Stage75 miss drivers. It must keep the frozen test split locked and
-must not run final test metrics.
+Stage 76 completed train/dev-only retrieval-recall candidate design from the
+Stage75 miss drivers. The current next step is Stage 77:
+`query_view_ablation_full_title_dedup` train/dev experiment.
+
+Stage 77 must keep the frozen test split locked and must not run final test
+metrics.

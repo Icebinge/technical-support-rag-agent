@@ -1,6 +1,6 @@
 # Evaluation Strategy
 
-This document records the current evaluation strategy after Stage 75.
+This document records the current evaluation strategy after Stage 76.
 
 The active route is now the project-owned PrimeQA/TechQA hybrid split
 `primeqa_hybrid_stage68_v1`. Stage 68 froze local split artifacts, and Stage 69
@@ -11,8 +11,9 @@ guarded policy validation. Stage 72 reviewed the candidate-reranker dev changed
 cases and generated visualization artifacts. Stage 73 ran a train/dev-only
 top10 answer proxy diagnostic. Stage 74 stopped the current reranker-policy
 development route as non-actionable for now. Stage 75 analyzed BM25 top10
-misses and showed that retrieval recall is now the blocking issue. The frozen
-test split remains locked for future final evaluation.
+misses and showed that retrieval recall is now the blocking issue. Stage 76
+designed train/dev-only retrieval-recall candidate experiments from those miss
+drivers. The frozen test split remains locked for future final evaluation.
 
 ## Current Facts
 
@@ -154,6 +155,40 @@ final test metrics: not run
 default runtime policy: unchanged
 ```
 
+- Stage 76 designed retrieval-recall candidates on top of the public-safe
+  Stage75 report:
+
+```text
+recommended execution order:
+  1. query_view_ablation_full_title_dedup
+  2. fielded_title_text_bm25_score_fusion
+  3. section_bm25_doc_rollup_train_dev_probe
+  4. dense_sparse_rrf_train_dev_probe
+  5. bm25_k1_b_grid_train_to_dev
+
+query_view_ablation_full_title_dedup:
+  priority score: 196
+  target misses: 143
+  dev targets: 22
+
+fielded_title_text_bm25_score_fusion:
+  priority score: 195
+  target misses: 143
+  dev targets: 23
+
+section_bm25_doc_rollup_train_dev_probe:
+  priority score: 163
+  target misses: 119
+  dev targets: 17
+
+source_doc_ids_oracle_union_blocked:
+  blocked target misses: 148
+  reason: source DOC_IDS are dataset metadata, not runtime user-query evidence
+
+final test metrics: not run
+default runtime policy: unchanged
+```
+
 - Stage 71 ran train-only candidate-reranker grouped CV and train-to-dev guarded
   policy validation for both `logistic_best_candidate` and
   `ridge_candidate_token_f1`:
@@ -188,8 +223,8 @@ train/dev, so any quality metric reported as held-out would be misleading.
 
 ### Project-Owned PrimeQA/TechQA Hybrid Split
 
-Status: Stage 75 completed BM25 top10 miss analysis on train/dev only;
-final metrics not run.
+Status: Stage 76 completed retrieval-recall candidate design from the Stage75
+miss drivers; final metrics not run.
 
 This route preserves the final target: document-style RAG over TechQA technotes.
 It accepts that old Stage 31-66 model-selection evidence cannot be treated as
@@ -260,8 +295,9 @@ default_runtime_policy: unchanged
 
 Required next step:
 
-Stage 76 should design train/dev-only retrieval-recall improvement candidates
-from the Stage75 miss drivers. Do not use test for evaluation or tuning.
+Stage 77 should run a train/dev-only retrieval-recall experiment for
+`query_view_ablation_full_title_dedup`, the highest-priority allowed Stage76
+candidate. Do not use test for evaluation or tuning.
 
 ## Parked Paths
 
@@ -300,16 +336,19 @@ completed train/dev development checks. Stage 71 completed candidate-reranker
 development on train/dev. Stage 72 completed changed-case review on dev only.
 Stage 73 completed a train/dev-only top10 diagnostic. Stage 74 stopped the
 current candidate-reranker policy route. Stage 75 completed BM25 top10 miss
-analysis and identified retrieval recall as the next blocking issue. Until a
-future stage explicitly opens final evaluation:
+analysis and identified retrieval recall as the next blocking issue. Stage 76
+designed allowed train/dev retrieval-recall candidates and blocked source
+`DOC_IDS` oracle union as non-deployable. Until a future stage explicitly opens
+final evaluation:
 
 - do not run final metrics;
 - do not change the default runtime;
 - do not defaultize the current candidate-reranker policy;
 - do not continue the current reranker-policy route without a new user-confirmed
   train/dev-only plan;
-- do not use the frozen test split while designing Stage 76 retrieval-recall
-  candidates;
+- do not use the frozen test split while running Stage 77 retrieval-recall
+  experiments;
+- do not use source `DOC_IDS` as runtime retrieval evidence;
 - do not tune Stage 51 against the frozen test split;
 - do not use NVIDIA `train.json` as held-out evidence;
 - do not treat PrimeQA validation rows as independent held-out evidence;
@@ -375,6 +414,8 @@ artifacts/primeqa_hybrid_candidate_reranker_top10_diagnostic_stage73.json
 artifacts/primeqa_hybrid_candidate_reranker_top10_diagnostic_stage73_visuals/
 artifacts/primeqa_hybrid_bm25_top10_miss_analysis_stage75.json
 artifacts/primeqa_hybrid_bm25_top10_miss_analysis_stage75_visuals/
+artifacts/primeqa_hybrid_retrieval_recall_candidate_design_stage76.json
+artifacts/primeqa_hybrid_retrieval_recall_candidate_design_stage76_visuals/
 ```
 
 The current Stage 67 protocol is recorded in:
@@ -429,4 +470,10 @@ The current Stage 75 BM25 top10 miss analysis is recorded in:
 
 ```text
 docs/primeqa_hybrid_bm25_top10_miss_analysis.md
+```
+
+The current Stage 76 retrieval-recall candidate design is recorded in:
+
+```text
+docs/primeqa_hybrid_retrieval_recall_candidate_design.md
 ```
