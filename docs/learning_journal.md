@@ -16770,3 +16770,195 @@ git check-ignore artifacts/primeqa_hybrid_split_stage67*: passed
 做 Stage68：review and freeze PrimeQA/TechQA hybrid split。
 
 Stage68 需要先确认是否接受 Stage67 dry-run 分布；如果接受，再把 dry-run plan materialize 成正式 train/dev/test artifacts。冻结前仍不能跑 final metrics，冻结后才可以从新 train/dev/test 边界重新开始训练、开发和最终测试流程。
+
+## Stage 68: Freeze PrimeQA/TechQA hybrid split
+
+### 阶段目标
+
+本阶段承接 Stage67 的 dry-run split plan，把它冻结成项目自己的 PrimeQA/TechQA train/dev/test 边界：
+
+```text
+split_name: primeqa_hybrid_stage68_v1
+protocol_version: primeqa_hybrid_split_v1
+```
+
+本阶段只冻结 split artifacts，不重建检索索引，不训练或调参，不运行 final metrics，不改变默认 runtime。
+
+### 新增与修改
+
+- 新增应用模块：
+  - `src/ts_rag_agent/application/primeqa_hybrid_split_freeze.py`
+- 新增脚本：
+  - `scripts/freeze_primeqa_hybrid_split.py`
+- 新增测试：
+  - `tests/test_primeqa_hybrid_split_freeze.py`
+- 新增文档：
+  - `docs/primeqa_hybrid_split_freeze.md`
+- 更新文档：
+  - `docs/data_strategy.md`
+  - `docs/dataset_snapshot.md`
+  - `docs/evaluation_strategy.md`
+  - `docs/primeqa_hybrid_split.md`
+  - `docs/learning_journal.md`
+
+### Stage68 运行命令
+
+```powershell
+python scripts\freeze_primeqa_hybrid_split.py `
+  --train-questions data\raw\primeqa_techqa\TechQA\training_and_dev\training_Q_A.json `
+  --dev-questions data\raw\primeqa_techqa\TechQA\training_and_dev\dev_Q_A.json `
+  --validation-reference data\raw\primeqa_techqa\TechQA\validation\validation_reference.json `
+  --output artifacts\primeqa_hybrid_split_stage68_freeze.json `
+  --split-output-dir artifacts\primeqa_hybrid_split_stage68_splits `
+  --visualization-dir artifacts\primeqa_hybrid_split_stage68_visuals `
+  --document-disjoint-answer-doc-ratio 0.10 `
+  --remainder-train-ratio 0.70 `
+  --remainder-dev-ratio 0.15 `
+  --remainder-test-ratio 0.15 `
+  --seed 20260714
+```
+
+### 真实冻结结果
+
+```text
+split_name: primeqa_hybrid_stage68_v1
+protocol_version: primeqa_hybrid_split_v1
+total rows: 930
+sample_id_sha256: 4adca87e4c2537b38d6fed1b36bebdd77a7fa89ba9ff5577b7421acb6ec67bff
+
+train:
+  rows: 562
+  groups: 534
+  answerable: 370
+  unanswerable: 192
+  answerable_rate: 0.6584
+  sample_id_sha256: 8d632a9f7bb88240f6136259ce039155bd9ffbc42727d91a9e75d676707ff0e5
+
+dev:
+  rows: 121
+  groups: 117
+  answerable: 76
+  unanswerable: 45
+  answerable_rate: 0.6281
+  sample_id_sha256: 3bafd55fc4a604c1dc08c63f67da99a4d5f8872fa7683e9fdb3272c636329e63
+
+test:
+  rows: 247
+  groups: 238
+  answerable: 175
+  unanswerable: 72
+  answerable_rate: 0.7085
+  sample_id_sha256: 8eb92ba16e4066903bf6255850665ce24ac9a525abeed892179ff2fdc48a029f
+  document_disjoint rows: 126
+  group_random_test rows: 121
+```
+
+### 泄漏检查与冻结检查
+
+继承 Stage67 的 leakage checks：
+
+```text
+normalized_question_answer_doc_groups_do_not_cross_splits: passed
+selected_document_answer_docs_only_in_document_disjoint_test: passed
+selected_document_candidate_doc_ids_only_in_document_disjoint_test: passed
+```
+
+Stage68 freeze checks：
+
+```text
+all_stage67_leakage_checks_passed: passed
+all_raw_rows_have_assignments: passed
+frozen_row_count_matches_input: passed
+train_dev_test_are_nonempty: passed
+document_disjoint_test_rows_materialized: passed
+```
+
+### 生成的本地 artifacts
+
+Report：
+
+```text
+artifacts/primeqa_hybrid_split_stage68_freeze.json
+sha256: 9d6873ccbf9ae5d23882c68b64d264b8e957725f5e1ad03c7a3534158df59525
+```
+
+Frozen split JSONL：
+
+```text
+artifacts/primeqa_hybrid_split_stage68_splits/primeqa_hybrid_split_stage68_train.jsonl
+rows: 562
+sha256: cabd93e0b972c47384c4bf5cc2cd215a7fc519b2df4f81fba61db73c931aa155
+
+artifacts/primeqa_hybrid_split_stage68_splits/primeqa_hybrid_split_stage68_dev.jsonl
+rows: 121
+sha256: 071c54f80657592bda7f8e4095afc8800a2be112362c3a275191a0fc8e28bd5f
+
+artifacts/primeqa_hybrid_split_stage68_splits/primeqa_hybrid_split_stage68_test.jsonl
+rows: 247
+sha256: f2479cf636bd40f6d066e1c9be03431f9b37460a8b489a37222523f2d902b1c1
+```
+
+这 3 个 JSONL 包含真实 question/answer/candidate docs，原因是后续本地 rebuild loader 和 derived candidate artifacts 需要这些字段；它们位于 ignored `artifacts/`，不会进入 git。
+
+可视化：
+
+```text
+artifacts/primeqa_hybrid_split_stage68_visuals/stage68_primeqa_frozen_split_rows.svg
+artifacts/primeqa_hybrid_split_stage68_visuals/stage68_primeqa_frozen_answerable_rows.svg
+artifacts/primeqa_hybrid_split_stage68_visuals/stage68_primeqa_frozen_test_subtypes.svg
+artifacts/primeqa_hybrid_split_stage68_visuals/stage68_primeqa_frozen_source_rows.svg
+```
+
+### 问题、原因与修正
+
+- 问题 1：Stage67 只输出 assignment artifact，没有正式 train/dev/test JSONL。
+  - 原因：Stage67 设计为 dry-run，只验证分布与泄漏边界。
+  - 修正：Stage68 新增 freeze module，把同一 split 边界 materialize 成 3 个本地 JSONL。
+- 问题 2：冻结 report 不应包含 raw question/answer text。
+  - 原因：公开提交需要保持 public-safe；raw 数据应该只留在 ignored artifacts。
+  - 修正：`freeze_primeqa_hybrid_split` 返回 report + samples bundle；report 只保存统计、检查和 checksum，writer 单独把 raw samples 写入 ignored JSONL。
+- 问题 3：JSONL 需要保持 line-oriented 稳定。
+  - 原因：raw answer/text 里可能出现 Unicode line separator。
+  - 修正：JSONL writer 对 `U+2028` 和 `U+2029` 做转义，测试覆盖该行为。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_split_freeze.py scripts\freeze_primeqa_hybrid_split.py tests\test_primeqa_hybrid_split_freeze.py
+pytest -q tests\test_primeqa_hybrid_split_freeze.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 185 passed
+```
+
+### 结论
+
+- Stage68 已冻结 `primeqa_hybrid_stage68_v1`。
+- 冻结边界有 report、train/dev/test JSONL、4 个 SVG 可视化、文档和测试。
+- 当前可以进入 rebuild 阶段，但仍不能运行 final metrics。
+- 默认 runtime 仍然 unchanged。
+
+### 我学到的
+
+- “冻结 split” 与“跑指标”必须分开；冻结只是定义边界，不代表模型质量已经验证。
+- report 和 raw split artifacts 应该分层：report 负责可公开审计，raw JSONL 负责本地可执行重建。
+- 只要 split 边界变了，后续训练/验证必须从新 train/dev/test 边界重新构建，不能沿用旧 Stage31-66 的调参产物当最终证据。
+
+### 下一步
+
+做 Stage69：rebuild PrimeQA train/dev/test loaders and derived candidate artifacts。
+
+Stage69 应该让后续训练和开发流程读取 `primeqa_hybrid_stage68_v1`，并明确阻止 test split 参与调参。只有 rebuild 完成后，才可以重新跑 train/dev 上的基线、候选 reranker 或 verified RAG 流程。

@@ -80,9 +80,11 @@ TechQA/evaluation.py
 
 Original intended use: training and development experiments.
 
-Current boundary: Stage 67 uses the extracted PrimeQA/TechQA train, dev, and
+Current boundary: Stage 67 used the extracted PrimeQA/TechQA train, dev, and
 validation reference rows to plan a project-owned hybrid train/dev/test split.
-That split is still a dry run and is not yet frozen.
+Stage 68 froze that split as `primeqa_hybrid_stage68_v1`; final metrics still
+must wait until derived loaders and artifacts are rebuilt from the frozen
+boundary.
 
 ## Verification Boundary
 

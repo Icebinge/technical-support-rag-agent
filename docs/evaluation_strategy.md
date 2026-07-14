@@ -1,10 +1,11 @@
 # Evaluation Strategy
 
-This document records the current evaluation strategy after Stage 67.
+This document records the current evaluation strategy after Stage 68.
 
-The active route is now a project-owned PrimeQA/TechQA hybrid split. Stage 67
-only produced a dry-run plan; it did not freeze final split files, run metrics,
-or change runtime defaults.
+The active route is now the project-owned PrimeQA/TechQA hybrid split
+`primeqa_hybrid_stage68_v1`. Stage 68 froze local split artifacts, but it did
+not rebuild derived training/evaluation artifacts, run metrics, or change
+runtime defaults.
 
 ## Current Facts
 
@@ -44,6 +45,7 @@ decision: msqa_stage51_changed_case_review_blocks_defaultization
   a project-owned PrimeQA/TechQA split instead of continuing with a new external
   dataset.
 - Stage 67 planned that split as a dry run from local PrimeQA/TechQA files.
+- Stage 68 froze the split as `primeqa_hybrid_stage68_v1`.
 
 ## Rejected Path
 
@@ -55,7 +57,7 @@ train/dev, so any quality metric reported as held-out would be misleading.
 
 ### Project-Owned PrimeQA/TechQA Hybrid Split
 
-Status: Stage 67 dry-run complete; not frozen.
+Status: Stage 68 frozen for rebuild; final metrics not run.
 
 This route preserves the final target: document-style RAG over TechQA technotes.
 It accepts that old Stage 31-66 model-selection evidence cannot be treated as
@@ -83,7 +85,7 @@ If any row in a group has candidate DOC_IDS intersecting a selected answer
 document, the whole group goes to test/document_disjoint.
 ```
 
-Stage 67 result:
+Stage 67/68 split result:
 
 ```text
 input rows: 930
@@ -104,7 +106,7 @@ test/document_disjoint rows: 126
 test/group_random_test rows: 121
 ```
 
-Stage 67 leakage checks:
+Stage 67 leakage checks preserved by Stage 68:
 
 ```text
 normalized_question_answer_doc_groups_do_not_cross_splits: passed
@@ -112,21 +114,23 @@ selected_document_answer_docs_only_in_document_disjoint_test: passed
 selected_document_candidate_doc_ids_only_in_document_disjoint_test: passed
 ```
 
-Stage 67 decision:
+Stage 68 decision:
 
 ```text
-status: primeqa_hybrid_split_dry_run_ready_for_review
-split_files_finalized: false
+split_name: primeqa_hybrid_stage68_v1
+protocol_version: primeqa_hybrid_split_v1
+status: primeqa_hybrid_split_frozen_for_rebuild
+split_files_finalized: true
 can_run_final_metrics_now: false
+can_rebuild_training_and_dev_artifacts_next: true
 default_runtime_policy: unchanged
 ```
 
 Required next step:
 
-Stage 68 should review the Stage 67 dry-run distribution and confirm whether to
-freeze the hybrid split. If frozen, rebuild train/dev/test artifacts from this
-new split boundary before rerunning retrieval, reranker, or answer-composition
-metrics.
+Stage 69 should rebuild PrimeQA train/dev/test data loaders and derived
+candidate artifacts from `primeqa_hybrid_stage68_v1`, without using test rows
+for tuning.
 
 ## Parked Paths
 
@@ -159,12 +163,12 @@ top-k as the default runtime. It cannot support a defaultization decision.
 
 ## Current Decision Boundary
 
-The PrimeQA/TechQA hybrid split route is selected, but Stage 67 is a dry run.
-Until Stage 68 freezes and materializes the split:
+The PrimeQA/TechQA hybrid split route is selected and Stage 68 has frozen local
+split JSONL files. Until Stage 69 rebuilds loaders and derived artifacts:
 
 - do not run final metrics;
 - do not change the default runtime;
-- do not tune Stage 51 against the future test split;
+- do not tune Stage 51 against the frozen test split;
 - do not use NVIDIA `train.json` as held-out evidence;
 - do not treat PrimeQA validation rows as independent held-out evidence;
 - do not treat MSQA answer-source metrics as PrimeQA-style document-citation
@@ -211,10 +215,19 @@ artifacts/external_eval_dataset_rediscovery_stage66_visuals/
 artifacts/primeqa_hybrid_split_stage67.json
 artifacts/primeqa_hybrid_split_stage67_assignments.jsonl
 artifacts/primeqa_hybrid_split_stage67_visuals/
+artifacts/primeqa_hybrid_split_stage68_freeze.json
+artifacts/primeqa_hybrid_split_stage68_splits/
+artifacts/primeqa_hybrid_split_stage68_visuals/
 ```
 
 The current Stage 67 protocol is recorded in:
 
 ```text
 docs/primeqa_hybrid_split.md
+```
+
+The current Stage 68 freeze is recorded in:
+
+```text
+docs/primeqa_hybrid_split_freeze.md
 ```

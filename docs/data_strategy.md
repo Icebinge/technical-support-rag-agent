@@ -16,14 +16,14 @@ Local path:
 data/raw/primeqa_techqa/TechQA.tar.gz
 ```
 
-Current project-owned split direction:
+Current project-owned split:
 
-Stage 67 plans a PrimeQA/TechQA hybrid split dry run from local
+Stage 67 planned a PrimeQA/TechQA hybrid split dry run from local
 `training_Q_A.json`, `dev_Q_A.json`, and `validation_reference.json`. This is
-now the active route because the final target is document-style RAG over
-technotes.
+the active route because the final target is document-style RAG over technotes.
+Stage 68 then froze the split as `primeqa_hybrid_stage68_v1`.
 
-The Stage 67 dry run:
+The Stage 68 frozen split:
 
 - selects 10% of unique answer documents for strict document-disjoint test
   isolation;
@@ -36,9 +36,9 @@ The Stage 67 dry run:
 - includes validation reference rows in the planning pool only, not as
   independent held-out evidence.
 
-Stage 67 is not frozen and cannot support final metrics yet. The current next
-data step is Stage 68: review the dry-run distribution and confirm whether to
-freeze and materialize the new train/dev/test artifacts.
+Stage 68 materialized local ignored train/dev/test JSONL artifacts. It still
+cannot support final metrics until Stage 69 rebuilds loaders and derived
+candidate artifacts from this frozen boundary.
 
 ### nvidia/TechQA-RAG-Eval
 
@@ -259,6 +259,12 @@ The current PrimeQA/TechQA hybrid split dry run is recorded in:
 
 ```text
 docs/primeqa_hybrid_split.md
+```
+
+The current PrimeQA/TechQA hybrid split freeze is recorded in:
+
+```text
+docs/primeqa_hybrid_split_freeze.md
 ```
 
 ## Leakage Checks

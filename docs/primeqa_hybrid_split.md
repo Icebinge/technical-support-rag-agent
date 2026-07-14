@@ -7,6 +7,15 @@ Stage 67 is a generated split plan based on real local PrimeQA/TechQA files. It
 does not freeze final split files, does not rebuild retrieval indexes, does not
 run model metrics, and does not change the default runtime.
 
+Post-Stage67 update:
+
+Stage 68 accepted this dry-run boundary and froze local split artifacts as
+`primeqa_hybrid_stage68_v1`. The freeze record is:
+
+```text
+docs/primeqa_hybrid_split_freeze.md
+```
+
 ## Route
 
 After reviewing external dataset limits, the user chose to keep the final target
@@ -197,12 +206,13 @@ can_run_final_metrics_now: false
 default_runtime_policy: unchanged
 ```
 
-Stage 67 is ready for review. It is not final evidence for quality or
-defaultization.
+Stage 67 was ready for review. Stage 68 later froze this boundary for local
+artifact rebuilds. It is still not final evidence for quality or defaultization.
 
 ## Next Step
 
-Stage 68 should review the Stage 67 dry-run distribution and confirm whether to
-freeze this hybrid split. If it is frozen, the next implementation stage should
-rebuild train/dev/test artifacts from the new split boundary before rerunning
-training, retrieval, or answer-composition metrics.
+Stage 68 froze this boundary as `primeqa_hybrid_stage68_v1`.
+
+The current next implementation stage is Stage 69: rebuild data loaders and
+derived candidate artifacts from the frozen split before rerunning training,
+retrieval, or answer-composition metrics.
