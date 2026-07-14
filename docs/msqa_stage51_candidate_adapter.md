@@ -161,6 +161,10 @@ These artifacts are local ignored outputs and are not committed by git policy.
 
 ## Next Step
 
-Stage 62 should review the MSQA adapter candidate distribution and decide
-whether one single Stage 51 adapter comparison is fair. It should still not
-defaultize anything.
+Stage 62 reviewed the MSQA adapter candidate distribution and blocked direct
+Stage 51 comparison because the uncapped candidate pool is much larger than the
+Stage 31 training candidate pool. The current distribution record is:
+
+```text
+docs/msqa_stage51_candidate_distribution.md
+```

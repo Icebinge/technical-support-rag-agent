@@ -15285,3 +15285,262 @@ svg visualizations: 3 generated
   3. 检查 candidate_score / retrieval_rank 分布是否异常；
   4. 判断是否允许一次 Stage 51 adapter comparison；
   5. 即使允许，也仍不 defaultize。
+
+## 2026-07-14 Stage 62：MSQA adapter candidate distribution review
+
+### 本阶段目标
+
+Stage 61 证明 adapter contract 可以生成完整 candidate rows，但还不能说明直接跑 Stage 51 是公平的。本阶段目标是分析 candidate distribution，并与 Stage 31 的 Stage 51 训练候选池契约对照：
+
+1. 读取 Stage 61 adapter report；
+2. 流式分析 Stage 61 candidate JSONL；
+3. 读取 Stage 31 candidate-reranker summary；
+4. 对比每题 candidate 数量、gold-source candidate 覆盖、retrieval rank 分布；
+5. 判断是否允许一次 direct Stage 51 adapter comparison；
+6. 继续不运行 Stage 51，不改默认 runtime。
+
+### 新增与修改
+
+新增 Stage 62 distribution review 模块：
+
+```text
+src/ts_rag_agent/application/msqa_stage51_candidate_distribution_review.py
+```
+
+新增能力：
+
+- 读取 Stage 61 report；
+- 读取 Stage 61 full candidate JSONL；
+- 读取 Stage 31 summary；
+- 计算 Stage 61 candidate count per query 分布；
+- 计算 Stage 61 candidate score 分布；
+- 计算 retrieval rank candidate row count；
+- 统计 gold-source candidate coverage；
+- 与 Stage 31 candidate pool 做对照；
+- 输出 fairness checks；
+- 明确 decision 是否允许 Stage 51 adapter comparison；
+- 生成 SVG 可视化。
+
+新增 CLI：
+
+```text
+scripts/review_msqa_stage51_candidate_distribution.py
+```
+
+新增测试：
+
+```text
+tests/test_msqa_stage51_candidate_distribution_review.py
+```
+
+新增文档：
+
+```text
+docs/msqa_stage51_candidate_distribution.md
+```
+
+同步更新：
+
+```text
+docs/msqa_stage51_candidate_adapter.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+docs/external_eval_datasets.md
+docs/learning_journal.md
+```
+
+### Stage 62 运行命令
+
+```powershell
+python scripts\review_msqa_stage51_candidate_distribution.py `
+  --adapter-report artifacts\msqa_stage51_candidate_adapter_stage61.json `
+  --candidate-jsonl artifacts\msqa_stage51_candidate_adapter_stage61_candidates.jsonl `
+  --stage31-summary artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid_summary.json `
+  --output artifacts\msqa_stage51_candidate_distribution_stage62.json `
+  --visualization-dir artifacts\msqa_stage51_candidate_distribution_stage62_visuals
+```
+
+### Stage 62 结果
+
+Stage 61 candidate count per query：
+
+```text
+count: 3301
+min: 14
+p10: 51
+p25: 64
+median: 79
+p75: 95
+p90: 113
+p95: 125
+p99: 151
+max: 189
+average: 80.7776
+```
+
+Stage 31 candidate count per question：
+
+```text
+count: 610
+min: 2
+p10: 5
+p25: 15
+median: 15
+p75: 15
+p90: 15
+p95: 15
+p99: 15
+max: 15
+average: 13.2131
+```
+
+Stage 31 training candidate contract：
+
+```text
+retrieval_top_k: 5
+max_candidates_per_document: 3
+candidate_limit: 25
+effective_max_candidates: 15
+evidence_selector: hybrid_routing_answer_aware_mcpd3_section_span_mcpd1
+```
+
+candidate-pool comparison：
+
+```text
+average_candidate_count_ratio_stage61_vs_stage31: 6.1134
+median_candidate_count_ratio_stage61_vs_stage31: 5.2667
+stage61_median_exceeds_stage31_max: true
+stage61_p10_exceeds_stage31_max: true
+gold_candidate_rate_delta_stage61_minus_stage31: -0.0069
+```
+
+gold-source coverage：
+
+```text
+Stage61 gold-source candidate rate: 0.6128
+Stage31 gold-document candidate rate: 0.6197
+delta: -0.0069
+```
+
+fairness checks：
+
+```text
+stage61_adapter_contract_passed: pass
+candidate_jsonl_has_no_question_text_field: pass
+all_stage61_samples_have_candidates: pass
+gold_source_candidate_rate_matches_training_pool: pass
+candidate_pool_size_aligned_with_stage31: blocked
+stage61_candidate_volume_within_training_limit: blocked
+direct_stage51_adapter_comparison_fair_now: blocked
+```
+
+decision：
+
+```text
+status: msqa_stage51_adapter_comparison_blocked_by_candidate_pool_mismatch
+can_run_stage51_candidate_now: false
+can_defaultize_runtime_now: false
+default_runtime_policy: unchanged
+stage51_candidate_run_performed: false
+```
+
+阻塞项：
+
+```text
+candidate_pool_size_aligned_with_stage31
+stage61_candidate_volume_within_training_limit
+direct_stage51_adapter_comparison_fair_now
+```
+
+### 可视化结果
+
+本阶段生成：
+
+```text
+artifacts/msqa_stage51_candidate_distribution_stage62_visuals/stage62_candidate_count_percentiles.svg
+artifacts/msqa_stage51_candidate_distribution_stage62_visuals/stage62_stage31_vs_stage61_candidate_pool.svg
+artifacts/msqa_stage51_candidate_distribution_stage62_visuals/stage62_candidate_rows_by_retrieval_rank.svg
+artifacts/msqa_stage51_candidate_distribution_stage62_visuals/stage62_fairness_checks.svg
+```
+
+Stage 62 report：
+
+```text
+artifacts/msqa_stage51_candidate_distribution_stage62.json
+```
+
+Stage 62 report checksum：
+
+```text
+1948ddf4101a35c5229fe6c79e50a21d956d8dabaa6dfeed029b83afe4629c79
+```
+
+以上 artifacts 位于本地 `artifacts/`，按 `.gitignore` 不纳入 git。
+
+### 问题与原因
+
+- 问题 1：Stage 61 contract passed，但直接跑 Stage 51 仍不公平。
+  - 原因：Stage 61 candidate pool 是 uncapped top10 source-row answer sentences；Stage 31 训练候选池是 top5 retrieval、每 document 最多 3 个 candidates；
+  - 证据：Stage61 median 79 candidates/query，而 Stage31 max 15 candidates/question。
+- 问题 2：candidate pool mismatch 不是少数 outlier。
+  - 证据：Stage61 p10 已经是 51 candidates/query，仍高于 Stage31 max 15；
+  - 处理：阻塞 direct Stage 51 adapter comparison。
+- 问题 3：gold-source coverage 接近 Stage31，但这不足以放行。
+  - 证据：Stage61 gold-source candidate rate 0.6128，Stage31 gold-document candidate rate 0.6197；
+  - 原因：coverage 接近只能说明 source availability 相近，不能抵消候选池规模和候选排序空间的巨大差异。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\msqa_stage51_candidate_distribution_review.py scripts\review_msqa_stage51_candidate_distribution.py tests\test_msqa_stage51_candidate_distribution_review.py
+pytest -q tests\test_msqa_stage51_candidate_distribution_review.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 4 passed
+```
+
+Stage 62 真实 artifact 生成：
+
+```text
+python scripts\review_msqa_stage51_candidate_distribution.py --adapter-report artifacts\msqa_stage51_candidate_adapter_stage61.json --candidate-jsonl artifacts\msqa_stage51_candidate_adapter_stage61_candidates.jsonl --stage31-summary artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid_summary.json --output artifacts\msqa_stage51_candidate_distribution_stage62.json --visualization-dir artifacts\msqa_stage51_candidate_distribution_stage62_visuals
+```
+
+结果：
+
+```text
+json report: generated
+svg visualizations: 4 generated
+```
+
+### 结论
+
+- Stage 62 完成 MSQA adapter candidate distribution review。
+- Stage 61 adapter contract 仍然有效。
+- Direct Stage 51 adapter comparison 被阻塞。
+- 阻塞原因不是 source coverage，而是 candidate pool size 与 Stage31 训练候选池严重不一致。
+- 当前不能运行 Stage 51 candidate。
+- 当前不能 defaultize。
+- 默认 runtime 不变。
+
+### 我学到的
+
+- adapter contract passed 只是必要条件，不是 sufficient condition。
+- candidate-pool shape 是 reranker fairness 的一部分；训练时最大 15 个候选，评估时中位数 79 个候选，会把 protocol shift 和 policy effect 混在一起。
+- gold-source candidate rate 接近并不能保证 reranker comparison 公平，因为候选池竞争空间已经完全不同。
+- 只有先把 MSQA candidate pool 对齐 Stage31 训练契约，后续的一次 Stage51 comparison 才更像策略比较，而不是数据管线比较。
+
+### 下一步
+
+- 做 Stage 63：Stage31-aligned MSQA candidate-pool cap 设计与 adapter dry-run。
+- Stage 63 目标：
+  1. 按 Stage31 训练契约设计 MSQA cap；
+  2. 优先候选：top5 source rows、每 source row 最多 3 个 answer-sentence candidates；
+  3. 保持 no question text、no fallback、no external fetch；
+  4. rerun adapter dry-run；
+  5. 再判断是否允许一次 Stage51 adapter comparison。

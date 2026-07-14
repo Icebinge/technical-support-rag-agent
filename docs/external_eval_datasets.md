@@ -240,6 +240,34 @@ default_runtime_policy: unchanged
 stage51_candidate_run_performed: false
 ```
 
+## Stage 62 MSQA Stage 51 Candidate Distribution Review
+
+Stage 62 reviewed whether the Stage 61 candidate pool is fair for one direct
+Stage 51 adapter comparison.
+
+Candidate-pool comparison:
+
+| Metric | Stage 31 | Stage 61 |
+| --- | ---: | ---: |
+| Average candidates | 13.2131 | 80.7776 |
+| Median candidates | 15 | 79 |
+| p10 candidates | 5 | 51 |
+| Max candidates | 15 | 189 |
+
+Decision:
+
+```text
+status: msqa_stage51_adapter_comparison_blocked_by_candidate_pool_mismatch
+can_run_stage51_candidate_now: false
+can_defaultize_runtime_now: false
+default_runtime_policy: unchanged
+stage51_candidate_run_performed: false
+```
+
+The adapter contract passed, but the candidate pool is not aligned with the
+Stage 31 training candidate contract. The next step is a Stage31-aligned MSQA
+candidate-pool cap dry run.
+
 ## Source Snapshot
 
 Sources checked on 2026-07-14:
@@ -302,6 +330,11 @@ artifacts/msqa_stage51_candidate_adapter_stage61_candidates.jsonl
 artifacts/msqa_stage51_candidate_adapter_stage61_visuals/stage61_adapter_candidate_counts.svg
 artifacts/msqa_stage51_candidate_adapter_stage61_visuals/stage61_adapter_source_hit_rates.svg
 artifacts/msqa_stage51_candidate_adapter_stage61_visuals/stage61_adapter_contract_checks.svg
+artifacts/msqa_stage51_candidate_distribution_stage62.json
+artifacts/msqa_stage51_candidate_distribution_stage62_visuals/stage62_candidate_count_percentiles.svg
+artifacts/msqa_stage51_candidate_distribution_stage62_visuals/stage62_stage31_vs_stage61_candidate_pool.svg
+artifacts/msqa_stage51_candidate_distribution_stage62_visuals/stage62_candidate_rows_by_retrieval_rank.svg
+artifacts/msqa_stage51_candidate_distribution_stage62_visuals/stage62_fairness_checks.svg
 ```
 
 These artifacts are local outputs under `artifacts/` and are not committed by

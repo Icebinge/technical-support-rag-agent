@@ -118,6 +118,17 @@ contract_checks_passed: 7 / 7
 stage51_candidate_run_performed: false
 ```
 
+Stage 62 reviewed candidate distribution and blocked direct Stage 51 comparison:
+
+```text
+Stage61 median candidates/query: 79
+Stage61 p10 candidates/query: 51
+Stage31 max candidates/question: 15
+status: msqa_stage51_adapter_comparison_blocked_by_candidate_pool_mismatch
+```
+
+The next data step is a Stage31-aligned MSQA candidate-pool cap dry run.
+
 ## Split Rule
 
 Any future held-out dataset must not be used for:
@@ -181,6 +192,12 @@ The current MSQA Stage 51 candidate adapter dry run is recorded in:
 
 ```text
 docs/msqa_stage51_candidate_adapter.md
+```
+
+The current MSQA Stage 51 candidate distribution review is recorded in:
+
+```text
+docs/msqa_stage51_candidate_distribution.md
 ```
 
 ## Leakage Checks

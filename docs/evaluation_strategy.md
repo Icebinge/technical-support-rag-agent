@@ -5,8 +5,9 @@ previously intended NVIDIA held-out path, Stage 55 completed external dataset
 discovery, Stage 56 probed MSQA locally, Stage 57 froze the MSQA evaluation
 split, Stage 58 recorded the MSQA answer-source baseline, Stage 59 blocked
 direct Stage 51 comparison on the current MSQA task, Stage 60 designed a
-recommended MSQA source/citation protocol, and Stage 61 completed the
-user-confirmed adapter dry run.
+recommended MSQA source/citation protocol, Stage 61 completed the user-confirmed
+adapter dry run, and Stage 62 blocked direct Stage 51 comparison because of
+candidate-pool mismatch.
 
 ## Current Facts
 
@@ -69,6 +70,12 @@ user-confirmed adapter dry run.
   - contract checks passed: 7 / 7
   - candidate JSONL rows with `question` field: 0
   - `can_run_stage51_candidate_now: false`
+- Stage 62 distribution review:
+  - Stage61 median candidates/query: 79
+  - Stage61 p10 candidates/query: 51
+  - Stage31 max candidates/question: 15
+  - Stage61 average candidate count is 6.1134x Stage31 average
+  - direct Stage 51 adapter comparison is blocked
 - Default runtime remains unchanged.
 
 ## Rejected Path
@@ -161,10 +168,20 @@ Stage 61 result:
 - No candidate rows contain a `question` field.
 - Stage 51 was not run.
 
+Stage 62 result:
+
+- Stage 61 adapter contract checks passed, but candidate distribution is not
+  aligned with the Stage 31 training candidate pool.
+- Stage61 median candidates/query: 79.
+- Stage31 max candidates/question: 15.
+- Stage61 p10 candidates/query: 51, so the mismatch is broad rather than an
+  outlier-only issue.
+- Direct Stage 51 adapter comparison remains blocked.
+
 Required next step:
 
-1. Review MSQA adapter candidate distribution and decide whether one single
-   Stage 51 adapter comparison is fair.
+1. Design a Stage31-aligned MSQA candidate-pool cap and rerun the adapter dry
+   run before any Stage 51 comparison.
 
 ## Parked Paths
 
@@ -204,7 +221,7 @@ leakage checks:
 - Do not use NVIDIA `train.json` as held-out evidence.
 - Do not treat MSQA as a held-out test set.
 - Do not compare top-k against Stage 51 on MSQA until an MSQA source/citation
-  adapter candidate distribution review decides that one comparison is fair.
+  adapter candidate-pool cap has been designed, dry-run checked, and reviewed.
 - Do not reuse MSQA `test_id.txt` as this project's final split until the
   missing ID and upstream filtering assumptions are handled explicitly.
 - Do not use an answer-field fallback for MSQA evaluation samples.
@@ -238,4 +255,6 @@ artifacts/msqa_stage51_protocol_stage60_visuals/
 artifacts/msqa_stage51_candidate_adapter_stage61.json
 artifacts/msqa_stage51_candidate_adapter_stage61_candidates.jsonl
 artifacts/msqa_stage51_candidate_adapter_stage61_visuals/
+artifacts/msqa_stage51_candidate_distribution_stage62.json
+artifacts/msqa_stage51_candidate_distribution_stage62_visuals/
 ```
