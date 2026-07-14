@@ -188,5 +188,13 @@ default_runtime_policy: unchanged
 
 ## Next Step
 
-Stage 70 should rerun PrimeQA train/dev baselines and candidate-reranker
-development checks on `primeqa_hybrid_stage68_v1`, keeping the test split locked.
+Stage 70 completed the PrimeQA train/dev baseline rerun and candidate artifact
+development checks. The current follow-up is Stage 71: run train/dev
+candidate-reranker policy development on `primeqa_hybrid_stage68_v1`, keeping
+the frozen test split locked.
+
+Stage 70 is recorded in:
+
+```text
+docs/primeqa_hybrid_development_checks.md
+```

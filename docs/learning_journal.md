@@ -17202,3 +17202,176 @@ total: 111.505s
 做 Stage70：rerun PrimeQA train/dev baselines and candidate-reranker development checks。
 
 Stage70 应该只在 `primeqa_hybrid_stage68_v1` 的 train/dev 上重跑 baseline 与候选 reranker 开发检查，继续保持 test split locked，不运行 final test metrics。
+
+## Stage 70: PrimeQA hybrid train/dev development checks
+
+### 阶段目标
+
+本阶段基于 Stage68 冻结的 `primeqa_hybrid_stage68_v1` 和 Stage69 重建的
+train/dev candidate artifact，做开发阶段检查：
+
+1. 只在 train/dev 上重新跑 BM25 baseline；
+2. 审计 Stage69 candidate JSONL 是否只包含 train/dev；
+3. 检查 runtime features 是否混入 offline gold label keys；
+4. 继续锁住 frozen test split，不运行 final test metrics；
+5. 不改变默认 runtime policy。
+
+### 新增与修改
+
+- 新增应用模块：
+  - `src/ts_rag_agent/application/primeqa_hybrid_development_checks.py`
+- 新增脚本：
+  - `scripts/run_primeqa_hybrid_development_checks.py`
+- 新增测试：
+  - `tests/test_primeqa_hybrid_development_checks.py`
+- 新增文档：
+  - `docs/primeqa_hybrid_development_checks.md`
+- 更新文档：
+  - `docs/data_strategy.md`
+  - `docs/evaluation_strategy.md`
+  - `docs/primeqa_hybrid_rebuild.md`
+  - `docs/learning_journal.md`
+
+### Stage70 运行命令
+
+```powershell
+python scripts\run_primeqa_hybrid_development_checks.py `
+  --output artifacts\primeqa_hybrid_development_checks_stage70.json `
+  --visualization-dir artifacts\primeqa_hybrid_development_checks_stage70_visuals `
+  --top-k 1,5,10 `
+  --bm25-k1 1.5 `
+  --bm25-b 0.75
+```
+
+### 真实 BM25 train/dev baseline
+
+```text
+train:
+  total_questions: 562
+  evaluated_questions: 370
+  hit@1: 0.4243
+  hit@5: 0.6054
+  hit@10: 0.6622
+  mrr: 0.5023
+
+dev:
+  total_questions: 121
+  evaluated_questions: 76
+  hit@1: 0.4342
+  hit@5: 0.6579
+  hit@10: 0.6974
+  mrr: 0.5331
+```
+
+这些只是开发集 baseline，不是最终 held-out test 结果。
+
+### Candidate artifact 检查结果
+
+```text
+row_count: 5993
+train rows: 5006
+dev rows: 987
+train questions: 370
+dev questions: 76
+rows_with_runtime_features: 5993
+rows_with_gold_labels: 5993
+rows_with_test_split: 0
+rows_with_forbidden_runtime_gold_keys: 0
+```
+
+### Guard checks
+
+```text
+development_baseline_splits_are_train_dev_only: passed
+candidate_artifact_splits_are_train_dev_only: passed
+candidate_rows_have_no_test_split: passed
+candidate_artifact_checks_passed: passed
+final_test_metrics_not_run: passed
+```
+
+### 生成的本地 artifacts
+
+这些 artifacts 位于 `artifacts/`，被 git ignore，不随提交进入仓库。
+
+Report：
+
+```text
+artifacts/primeqa_hybrid_development_checks_stage70.json
+sha256: 3d85033ac4b831fac4d2978af255d7e28c301e638fb02e0b87f97e4d2ea3e92d
+```
+
+可视化：
+
+```text
+artifacts/primeqa_hybrid_development_checks_stage70_visuals/stage70_primeqa_bm25_hit_at_k.svg
+sha256: a2122ccc07f44621832af61d6900b17a0beee3651d5f84a06f1637c04effcd29
+
+artifacts/primeqa_hybrid_development_checks_stage70_visuals/stage70_primeqa_bm25_mrr.svg
+sha256: a8439d71ebc95fdab64f4a7a96b3924701ea0804d6a0598fcc24b76f52f7b44b
+
+artifacts/primeqa_hybrid_development_checks_stage70_visuals/stage70_primeqa_candidate_questions_by_split.svg
+sha256: 679c550f4c44254f267766f000fc2aae0678d80d398def731fab4fd172b60f67
+
+artifacts/primeqa_hybrid_development_checks_stage70_visuals/stage70_primeqa_candidate_rows_by_split.svg
+sha256: 8b4665863e52697a6d2cb80ee1a91392dd6aeb51c9ea95767b0452d5916f8bea
+```
+
+### 问题、原因与修正
+
+- 问题 1：Stage69 candidate artifact 含有 offline gold labels，需要防止后续误当成 runtime features。
+  - 原因：train/dev candidate development 需要 gold labels 计算候选质量，但 runtime 不能使用这些标签。
+  - 修正：Stage70 scan 同时统计 `runtime_features` 和 `gold_labels`，并显式检查 runtime feature keys 不包含 gold label keys。
+- 问题 2：开发检查容易被误解为 final evaluation。
+  - 原因：当前已经有 frozen test split，但本阶段只应做 train/dev 开发检查。
+  - 修正：report 增加 `final_test_metrics_not_run` guard，decision 明确 `can_run_final_test_metrics_now: false` 和 `can_use_test_for_tuning: false`。
+- 问题 3：需要可视化结果但不能提交大数据产物。
+  - 原因：`artifacts/` 按仓库策略被 ignore，真实产物只保留在本地。
+  - 修正：生成 SVG 可视化并记录路径与 checksum，提交代码和文档，不提交 artifact 文件。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_development_checks.py scripts\run_primeqa_hybrid_development_checks.py tests\test_primeqa_hybrid_development_checks.py
+pytest -q tests\test_primeqa_hybrid_development_checks.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+真实运行耗时：
+
+```text
+load_splits: 0.015s
+load_documents: 0.898s
+bm25_index: 4.278s
+bm25_evaluate: 107.806s
+candidate_checks: 0.050s
+total: 113.047s
+```
+
+### 结论
+
+- Stage70 已完成 train/dev-only development checks。
+- Stage70 没有加载 test split 跑 BM25 baseline。
+- Stage70 没有运行 final test metrics。
+- Stage70 没有改变默认 runtime policy。
+- 当前可以进入 Stage71，但 Stage71 仍只能在 train/dev 上做 candidate-reranker policy development。
+
+### 我学到的
+
+- 冻结 test split 之后，每一个开发脚本都应该把 split contract 写进 report，而不是只靠命令约定。
+- candidate artifact 可以同时包含 runtime features 和 offline labels，但必须用结构化检查保证两者边界清楚。
+- 可视化不只是展示结果，也能帮助快速看出 train/dev 分布是否异常；但本地 artifact 不能代替文档里的可追溯 checksum。
+
+### 下一步
+
+做 Stage71：run train/dev candidate-reranker policy development on
+`primeqa_hybrid_stage68_v1`。
+
+Stage71 只能使用 train/dev candidate artifact 做开发检查，继续保持 frozen test split locked，不运行 final test metrics，不改变默认 runtime。

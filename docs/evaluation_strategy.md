@@ -1,11 +1,12 @@
 # Evaluation Strategy
 
-This document records the current evaluation strategy after Stage 69.
+This document records the current evaluation strategy after Stage 70.
 
 The active route is now the project-owned PrimeQA/TechQA hybrid split
 `primeqa_hybrid_stage68_v1`. Stage 68 froze local split artifacts, and Stage 69
 rebuilt PrimeQA-compatible question files plus train/dev candidate artifacts.
-The frozen test split remains locked for future final evaluation.
+Stage 70 ran train/dev development baselines and candidate artifact checks. The
+frozen test split remains locked for future final evaluation.
 
 ## Current Facts
 
@@ -48,6 +49,27 @@ decision: msqa_stage51_changed_case_review_blocks_defaultization
 - Stage 68 froze the split as `primeqa_hybrid_stage68_v1`.
 - Stage 69 rebuilt train/dev candidate artifacts from the frozen split without
   using test rows.
+- Stage 70 reran BM25 development baselines on train/dev and audited the Stage
+  69 candidate artifact:
+
+```text
+train evaluated questions: 370
+train hit@1: 0.4243
+train hit@5: 0.6054
+train hit@10: 0.6622
+train MRR: 0.5023
+
+dev evaluated questions: 76
+dev hit@1: 0.4342
+dev hit@5: 0.6579
+dev hit@10: 0.6974
+dev MRR: 0.5331
+
+candidate rows: 5993
+candidate rows with test split: 0
+final test metrics: not run
+default runtime policy: unchanged
+```
 
 ## Rejected Path
 
@@ -59,7 +81,7 @@ train/dev, so any quality metric reported as held-out would be misleading.
 
 ### Project-Owned PrimeQA/TechQA Hybrid Split
 
-Status: Stage 69 train/dev rebuild ready; final metrics not run.
+Status: Stage 70 train/dev development checks ready; final metrics not run.
 
 This route preserves the final target: document-style RAG over TechQA technotes.
 It accepts that old Stage 31-66 model-selection evidence cannot be treated as
@@ -130,8 +152,8 @@ default_runtime_policy: unchanged
 
 Required next step:
 
-Stage 70 should rerun PrimeQA train/dev baselines and candidate-reranker
-development checks on `primeqa_hybrid_stage68_v1`, keeping test locked.
+Stage 71 should run train/dev candidate-reranker policy development on
+`primeqa_hybrid_stage68_v1`, keeping test locked.
 
 ## Parked Paths
 
@@ -165,8 +187,9 @@ top-k as the default runtime. It cannot support a defaultization decision.
 ## Current Decision Boundary
 
 The PrimeQA/TechQA hybrid split route is selected, Stage 68 froze local split
-JSONL files, and Stage 69 rebuilt train/dev candidate artifacts. Until a future
-stage explicitly opens final evaluation:
+JSONL files, Stage 69 rebuilt train/dev candidate artifacts, and Stage 70
+completed train/dev development checks. Until a future stage explicitly opens
+final evaluation:
 
 - do not run final metrics;
 - do not change the default runtime;
@@ -225,6 +248,8 @@ artifacts/primeqa_hybrid_rebuild_stage69_questions/
 artifacts/primeqa_hybrid_rebuild_stage69_candidates.jsonl
 artifacts/primeqa_hybrid_rebuild_stage69_candidates.summary.json
 artifacts/primeqa_hybrid_rebuild_stage69_visuals/
+artifacts/primeqa_hybrid_development_checks_stage70.json
+artifacts/primeqa_hybrid_development_checks_stage70_visuals/
 ```
 
 The current Stage 67 protocol is recorded in:
@@ -243,4 +268,10 @@ The current Stage 69 rebuild is recorded in:
 
 ```text
 docs/primeqa_hybrid_rebuild.md
+```
+
+The current Stage 70 development checks are recorded in:
+
+```text
+docs/primeqa_hybrid_development_checks.md
 ```
