@@ -13054,3 +13054,261 @@ python -m json.tool artifacts\nvidia_heldout_leakage_stage53.json > $null
      - 保留 Stage 51 为 dev/train candidate，但不默认化；
   3. 不运行任何伪 held-out 指标；
   4. 在用户确认新评估路径前，不改变默认 runtime。
+
+## 2026-07-14 Stage 54：evaluation strategy review 与下一路径选项冻结
+
+### 本阶段目标
+
+Stage 53 已经证明 NVIDIA TechQA-RAG-Eval `train.json` 与 PrimeQA train/dev 完全重叠，当前不能作为 held-out defaultization test。本阶段目标是修正 evaluation strategy，而不是继续跑任何伪 held-out 指标：
+
+1. 将 Stage 53 的 leakage 阻断转成正式 evaluation strategy review；
+2. 明确 NVIDIA `train.json` 路径被拒绝；
+3. 盘点后续可选路径，并标记哪些需要用户确认；
+4. 保持 Stage 51 candidate 为非默认候选；
+5. 不改变默认 runtime。
+
+### 新增内容
+
+新增策略评审模块：
+
+```text
+src/ts_rag_agent/application/evaluation_strategy_review.py
+```
+
+新增 CLI：
+
+```text
+scripts/review_evaluation_strategy.py
+```
+
+新增测试：
+
+```text
+tests/test_evaluation_strategy_review.py
+```
+
+新增版本化策略文档：
+
+```text
+docs/evaluation_strategy.md
+```
+
+同步更新：
+
+```text
+docs/data_strategy.md
+```
+
+更新内容是把当前 evaluation path options 明确指向 `docs/evaluation_strategy.md`，避免后续只看 data strategy 时误把 NVIDIA `train.json` 当作可用 held-out。
+
+### 评审命令
+
+```powershell
+python scripts\review_evaluation_strategy.py `
+  --readiness-review artifacts\verified_rag_stage52_defaultization_readiness_review.json `
+  --leakage-report artifacts\nvidia_heldout_leakage_stage53.json `
+  --output artifacts\evaluation_strategy_stage54_review.json `
+  --visualization-dir artifacts\evaluation_strategy_stage54_visuals
+```
+
+### 评审结果
+
+当前事实：
+
+```text
+stage51_candidate_policy:
+  candidate_score_gte_60_rank_contained_preserve_baseline_out_of_rank_guarded_reranker
+stage51_dev_train_readiness_passed: true
+nvidia_train_json_blocked_as_heldout: true
+nvidia_exact_overlap_questions: 910
+nvidia_heldout_questions: 910
+nvidia_unhandled_overlap_questions: 910
+default_runtime_policy: unchanged
+```
+
+拒绝路径：
+
+```text
+use_nvidia_train_json_as_current_heldout: rejected
+reason:
+  Stage 53 found exact normalized overlap for all NVIDIA rows against PrimeQA train/dev.
+```
+
+可选路径 1：
+
+```text
+label: external_independent_eval_set
+status: available_after_user_confirmation
+validity_score: 3
+effort_score: 2
+can_support_defaultization: true
+keeps_stage51_candidate_frozen: true
+requires_full_pipeline_rerun: false
+```
+
+说明：这是最干净的默认化路径。它保留 Stage 51 frozen candidate，但必须先找到或构造真正没有进入 PrimeQA train/dev 开发循环的外部评估源，并先做 license/schema/leakage audit。
+
+可选路径 2：
+
+```text
+label: rebuild_leak_safe_primeqa_split
+status: available_after_user_confirmation
+validity_score: 2
+effort_score: 3
+can_support_defaultization: true
+keeps_stage51_candidate_frozen: false
+requires_full_pipeline_rerun: true
+```
+
+说明：这条路径不需要外部数据，但会让当前 Stage 31-53 的 model-selection evidence 失效。需要重新划分 split、重建 candidate-reranker dataset、重新跑 dev 流程，再冻结新协议。
+
+可选路径 3：
+
+```text
+label: freeze_without_defaultization
+status: available_after_user_confirmation
+validity_score: 1
+effort_score: 1
+can_support_defaultization: false
+keeps_stage51_candidate_frozen: true
+requires_full_pipeline_rerun: false
+```
+
+说明：这是最低风险的停止路径。Stage 51 保留为非默认研究候选，默认 runtime 继续保持 top-k，但不能进入默认化。
+
+### 决策边界
+
+Stage 54 没有替用户擅自选择下一条路线。报告中只给出推荐方向：
+
+```text
+requires_user_confirmation: true
+recommended_for_confirmation: external_independent_eval_set
+no_action_without_confirmation:
+  Do not change the default runtime, do not run pseudo-held-out metrics,
+  and do not tune the Stage 51 candidate.
+```
+
+因此下一阶段必须先确认一个路径：
+
+```text
+if external_independent_eval_set:
+  Stage 55: external dataset discovery and schema fit audit
+
+if rebuild_leak_safe_primeqa_split:
+  Stage 55: split redesign plan and full rerun cost estimate
+
+if freeze_without_defaultization:
+  Stage 55: package current candidate as non-default research result
+```
+
+### 可视化结果
+
+本阶段生成：
+
+```text
+artifacts/evaluation_strategy_stage54_visuals/stage54_option_validity_score.svg
+artifacts/evaluation_strategy_stage54_visuals/stage54_option_effort_score.svg
+artifacts/evaluation_strategy_stage54_visuals/stage54_option_defaultization_support.svg
+artifacts/evaluation_strategy_stage54_visuals/stage54_blocked_nvidia_overlap.svg
+```
+
+完整 JSON artifact：
+
+```text
+artifacts/evaluation_strategy_stage54_review.json
+```
+
+以上 artifacts 均在本地 `artifacts/` 下，按 `.gitignore` 规则不纳入 git。
+
+### 事实边界
+
+- 本阶段没有运行任何 held-out 指标。
+- 本阶段没有读取新的外部数据集。
+- 本阶段没有选择下一条 evaluation path。
+- 本阶段没有改默认 runtime。
+- 本阶段没有调 Stage 51 candidate 参数。
+- 本阶段只是把 Stage 53 的阻断结果转成策略评审和用户确认选项。
+
+### 问题与原因
+
+- 问题 1：原先的 final evaluation source 已经被 leakage audit 阻断。
+  - NVIDIA `train.json` 与 PrimeQA train/dev 910/910 exact overlap；
+  - 继续使用它会制造伪 held-out 结果。
+- 问题 2：Stage 51 通过 dev/train readiness，但不能 default。
+  - 缺少独立 final evaluation source；
+  - 因此只能保持为 non-default candidate。
+- 问题 3：下一步不再是纯工程实现，而是 evaluation design 选择。
+  - 外部数据、重划 split、停止默认化三条路的成本和意义不同；
+  - 按项目指令，不能由我擅自选择。
+
+### 修正与处理
+
+- 新增可复跑 strategy review 工具。
+- 新增 `docs/evaluation_strategy.md`，把当前策略边界版本化。
+- 在 `docs/data_strategy.md` 中链接当前 evaluation strategy。
+- 把 NVIDIA 当前 held-out 路径明确列入 rejected path。
+- 把三个后续选项列为 `available_after_user_confirmation`。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\evaluation_strategy_review.py scripts\review_evaluation_strategy.py tests\test_evaluation_strategy_review.py
+pytest -q tests\test_evaluation_strategy_review.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 143 passed
+```
+
+artifact JSON 校验：
+
+```powershell
+python -m json.tool artifacts\evaluation_strategy_stage54_review.json > $null
+```
+
+结果：通过。
+
+### 结论
+
+- Stage 54 完成 evaluation strategy review。
+- NVIDIA `train.json` 继续保持 rejected，不允许作为当前 held-out。
+- Stage 51 继续保持 non-default candidate。
+- 默认 runtime 不变。
+- 下一步不能自动继续跑指标，必须先确认 evaluation path。
+
+### 我学到的
+
+- 当最终评估源失效时，继续写 evaluator 反而可能让项目偏离事实；先修正 strategy 才是正确顺序。
+- 评估策略选择会改变项目成本和结论性质，必须显式让用户确认。
+- 外部独立评估集是最干净路径，但仍然需要 license、schema、leakage audit。
+- 重新划分现有数据是可行路径，但它会推翻旧 split 上的全部 candidate-selection 证据。
+
+### 下一步
+
+- 做 Stage 55，但需要先确认路径：
+  1. `external_independent_eval_set`：做外部数据集发现与 schema fit audit；
+  2. `rebuild_leak_safe_primeqa_split`：做 leak-safe split 重设计与全流程重跑成本评估；
+  3. `freeze_without_defaultization`：把 Stage 51 打包为非默认研究结果并停止默认化流程。
+- 在确认前：
+  - 不改默认 runtime；
+  - 不跑伪 held-out；
+  - 不调 Stage 51 candidate。

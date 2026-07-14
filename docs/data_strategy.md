@@ -59,6 +59,12 @@ For the current repository state, NVIDIA `train.json` has already been shown to
 overlap completely with PrimeQA train/dev, so it is blocked as a held-out
 evaluation source.
 
+The current evaluation path options are recorded in:
+
+```text
+docs/evaluation_strategy.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:
