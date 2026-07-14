@@ -67,10 +67,11 @@ Known strengths:
 Known risks:
 
 - no native unanswerable rows, because unanswered rows are filtered out;
-- source-link and citation coverage is not measured locally yet;
-- `msqa-32k.csv` has not been downloaded or parsed by this repository;
-- no exact or near-duplicate leakage audit has been run against PrimeQA
-  train/dev;
+- source-link and citation coverage had not been measured locally in Stage 55;
+- `msqa-32k.csv` had not been downloaded or parsed by this repository in
+  Stage 55;
+- no exact or near-duplicate leakage audit had been run against PrimeQA
+  train/dev in Stage 55;
 - the GitHub repository is archived, so future maintainer fixes are unlikely.
 
 Therefore:
@@ -79,6 +80,42 @@ Therefore:
 - do not compare MSQA top-k baseline with Stage 51 yet;
 - do not treat answer-only rows as citation-ready;
 - do not change default runtime.
+
+## Stage 56 Local MSQA Probe
+
+Stage 56 downloaded the public MSQA repository into ignored local storage and
+generated a local schema/source-link probe.
+
+Local source:
+
+```text
+data/raw/msqa_repo/
+```
+
+Repository HEAD:
+
+```text
+4be7e0376f3fa2ee8cbaa90644bd0eeb291c43f4
+```
+
+Key local findings:
+
+| Check | Result |
+| --- | ---: |
+| Local CSV rows | 32,236 |
+| README row-count claim | 32,252 |
+| Row-count delta | -16 |
+| CSV fields | 29 |
+| Unique question IDs | 32,236 |
+| Duplicate question ID rows | 0 |
+| Row-level Microsoft Learn Q&A URLs | 32,236 / 32,236 |
+| `ProcessedAnswerText` links | 19,924 / 32,236 |
+| `DoubleProcessedAnswerText` missing rows | 76 |
+| `test_id.txt` IDs found in CSV | 587 / 588 |
+| PrimeQA train/dev exact overlaps | 0 |
+
+Stage 56 still does not approve final metrics because near-duplicate leakage,
+adapter contract, and a project-owned MSQA split are not complete.
 
 ## Source Snapshot
 
@@ -111,6 +148,12 @@ artifacts/external_eval_dataset_discovery_stage55_visuals/stage55_candidate_fit_
 artifacts/external_eval_dataset_discovery_stage55_visuals/stage55_candidate_domain_fit.svg
 artifacts/external_eval_dataset_discovery_stage55_visuals/stage55_candidate_citation_fit.svg
 artifacts/external_eval_dataset_discovery_stage55_visuals/stage55_candidate_effort_score.svg
+artifacts/msqa_schema_probe_stage56.json
+artifacts/msqa_schema_probe_stage56_visuals/stage56_msqa_split_distribution.svg
+artifacts/msqa_schema_probe_stage56_visuals/stage56_msqa_source_link_coverage.svg
+artifacts/msqa_schema_probe_stage56_visuals/stage56_msqa_domain_flags.svg
+artifacts/msqa_schema_probe_stage56_visuals/stage56_msqa_test_id_coverage.svg
+artifacts/msqa_schema_probe_stage56_visuals/stage56_msqa_primeqa_exact_overlap.svg
 ```
 
 These artifacts are local outputs under `artifacts/` and are not committed by

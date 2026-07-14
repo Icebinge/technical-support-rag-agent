@@ -13576,3 +13576,286 @@ python -m json.tool artifacts\external_eval_dataset_discovery_stage55.json > $nu
   3. 统计 URL/source-link 覆盖率；
   4. 统计 `learn.microsoft.com` 文档链接覆盖率；
   5. 设计 MSQA 与 PrimeQA train/dev 的 exact/near-duplicate leakage audit。
+
+## 2026-07-14 Stage 56：MSQA 本地下载、schema probe 与 source-link 检查
+
+### 目标
+
+按 Stage 55 的推荐路线，把 Microsoft Q&A / MSQA 数据集真实下载到本地，并先做本地 schema/source-link/leakage 前置检查。
+
+本阶段边界：
+
+- 下载并解析 MSQA；
+- 记录真实来源、commit、文件大小和 SHA256；
+- 检查 CSV header、行数、缺失字段、split 分布、source-link 覆盖率；
+- 对 PrimeQA train/dev 做 exact normalized question overlap 预检查；
+- 生成 JSON artifact 与可视化结果；
+- 不运行 RAG end-to-end 指标；
+- 不比较 top-k 和 Stage 51；
+- 不改变默认 runtime；
+- 不把 MSQA 宣称为已经可用的 held-out test set。
+
+### 新增与修改
+
+新增 Stage 56 probe 模块：
+
+```text
+src/ts_rag_agent/application/msqa_schema_probe.py
+```
+
+新增 CLI：
+
+```text
+scripts/probe_msqa_dataset.py
+```
+
+新增测试：
+
+```text
+tests/test_msqa_schema_probe.py
+```
+
+新增文档：
+
+```text
+docs/msqa_schema_probe.md
+```
+
+更新文档：
+
+```text
+docs/data_strategy.md
+docs/evaluation_strategy.md
+docs/external_eval_datasets.md
+```
+
+### 下载事实
+
+下载命令：
+
+```powershell
+git clone --depth 1 --filter=blob:none https://github.com/microsoft/Microsoft-Q-A-MSQA-.git data\raw\msqa_repo
+```
+
+真实本地路径：
+
+```text
+data/raw/msqa_repo/
+```
+
+该路径被 `.gitignore` 忽略，不纳入 git。
+
+仓库 HEAD：
+
+```text
+4be7e0376f3fa2ee8cbaa90644bd0eeb291c43f4
+```
+
+文件 fingerprint：
+
+```text
+data/raw/msqa_repo/data/msqa-32k.csv
+bytes: 106085656
+sha256: 38839bb6234a2195216762ee7827e770d9d6de2eb49f913a365cc04dbdc20d93
+
+data/raw/msqa_repo/data/test_id.txt
+bytes: 4343
+sha256: 644fa017e8abcabef91eacf3ef10f58b9118e959b9c6e4497779270183bc4ba1
+
+data/raw/msqa_repo/README.md
+bytes: 16664
+sha256: 2dad24449874c91d29089a97e1381af3eb95f4f4c4fa07dfd5f5fe8acf92b0ac
+```
+
+### 运行命令
+
+```powershell
+python scripts\probe_msqa_dataset.py --msqa-csv data\raw\msqa_repo\data\msqa-32k.csv --test-id-file data\raw\msqa_repo\data\test_id.txt --readme data\raw\msqa_repo\README.md --repo-dir data\raw\msqa_repo --primeqa-train-questions data\raw\primeqa_techqa\TechQA\training_and_dev\training_Q_A.json --primeqa-dev-questions data\raw\primeqa_techqa\TechQA\training_and_dev\dev_Q_A.json --output artifacts\msqa_schema_probe_stage56.json --visualization-dir artifacts\msqa_schema_probe_stage56_visuals
+```
+
+### Stage 56 结果
+
+Schema：
+
+```text
+row_count: 32236
+README row count claim: 32252
+row_count_delta_vs_readme_claim: -16
+field_count: 29
+unique_question_ids: 32236
+duplicate_question_id_rows: 0
+duplicate_normalized_question_rows: 11
+malformed_row_count: 0
+```
+
+必需字段缺失：
+
+```text
+QuestionId: 0
+AnswerId: 0
+QuestionText: 0
+AnswerText: 0
+ProcessedAnswerText: 0
+Url: 0
+Split: 0
+```
+
+答案字段候选：
+
+```text
+AnswerText: 32236 / 32236 available
+ProcessedAnswerText: 32236 / 32236 available
+DoubleProcessedAnswerText: 32160 / 32236 available
+```
+
+Split：
+
+```text
+NNN: 21225
+train: 7710
+test: 3301
+```
+
+Domain flags：
+
+```text
+IsAzure=True: 11024
+IsM365=True: 6912
+IsOther=True: 15904
+```
+
+Source-link coverage：
+
+```text
+rows_with_row_url: 32236 / 32236 (100.0%)
+rows_with_learn_answers_url: 32236 / 32236 (100.0%)
+rows_with_question_text_link: 5307 / 32236 (16.463%)
+rows_with_answer_text_link: 22024 / 32236 (68.321%)
+rows_with_processed_answer_link: 19924 / 32236 (61.807%)
+rows_with_double_processed_answer_link: 17048 / 32236 (52.885%)
+rows_with_processed_answer_learn_link: 10929 / 32236 (33.903%)
+rows_with_processed_answer_azure_docish_link: 4343 / 32236 (13.473%)
+```
+
+`test_id.txt`：
+
+```text
+test_id_count: 588
+unique_test_id_count: 588
+duplicate_test_id_count: 0
+test_ids_found_in_csv: 587
+test_ids_missing_from_csv_count: 1
+test_ids_missing_from_csv: 699708
+found_test_id_split_counts: test=587
+```
+
+PrimeQA exact leakage precheck：
+
+```text
+PrimeQA train questions: 600
+PrimeQA dev questions: 310
+exact_overlap_pair_count: 0
+exact_overlap_msqa_question_count: 0
+passed_exact_precheck: true
+```
+
+没有在 Stage 56 运行：
+
+```text
+near_duplicate_token_jaccard_search
+semantic_duplicate_search
+answer_or_document_overlap_search
+```
+
+### 可视化结果
+
+```text
+artifacts/msqa_schema_probe_stage56_visuals/stage56_msqa_split_distribution.svg
+artifacts/msqa_schema_probe_stage56_visuals/stage56_msqa_source_link_coverage.svg
+artifacts/msqa_schema_probe_stage56_visuals/stage56_msqa_domain_flags.svg
+artifacts/msqa_schema_probe_stage56_visuals/stage56_msqa_test_id_coverage.svg
+artifacts/msqa_schema_probe_stage56_visuals/stage56_msqa_primeqa_exact_overlap.svg
+```
+
+完整 JSON artifact：
+
+```text
+artifacts/msqa_schema_probe_stage56.json
+```
+
+以上 artifacts 位于本地 `artifacts/`，按 `.gitignore` 不纳入 git。
+
+### 问题与原因
+
+- 问题 1：README 摘要行数是 32,252，但本地 CSV 实际解析为 32,236。
+  - 原因：当前只确认到本地文件真实解析结果与 README 摘要不一致；本阶段不倒填、不修正上游数字。
+  - 处理：在报告中同时记录 README claim 和本地 row count，并把差值 `-16` 标为 metrics 前阻塞项之一。
+- 问题 2：`test_id.txt` 有 588 个 ID，但只有 587 个能在 CSV 中找到。
+  - 缺失 ID：`699708`。
+  - 原因：上游 split 流程还包含 Azure/长度过滤，本项目不能直接把 `test_id.txt` 当作最终 split。
+  - 处理：记录真实覆盖率，不冻结评估 split。
+- 问题 3：`DoubleProcessedAnswerText` 有 76 行缺失。
+  - 原因：本地 CSV 字段本身缺失。
+  - 处理：Stage 56 不实现任何答案字段兜底；下一步必须显式选择 adapter 的 answer field。
+- 问题 4：exact overlap 为 0，但这还不是完整 leakage 结论。
+  - 原因：near-duplicate、semantic duplicate、answer/document overlap 都没有运行。
+  - 处理：只称为 exact-overlap precheck pass，不宣称 leakage fully passed。
+
+### 修正与处理
+
+- 将 MSQA 从 Stage 55 的“候选发现”推进到 Stage 56 的“本地 schema probe 完成”。
+- 新增可复跑 probe 脚本，避免只保留一次性临时命令输出。
+- 文档中明确区分 README claim、本地 CSV parse result、exact precheck 和尚未运行的 near-duplicate leakage。
+- `docs/evaluation_strategy.md` 继续阻止任何 pseudo-held-out metrics。
+- `docs/data_strategy.md` 记录 MSQA 已下载但仍不是 held-out。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\msqa_schema_probe.py scripts\probe_msqa_dataset.py tests\test_msqa_schema_probe.py
+pytest -q tests\test_msqa_schema_probe.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+artifact JSON 校验：
+
+```powershell
+python -m json.tool artifacts\msqa_schema_probe_stage56.json > $null
+```
+
+结果：通过。
+
+### 结论
+
+- Stage 56 完成 MSQA 本地下载与 schema/source-link probe。
+- MSQA 本地 CSV 可解析，字段完整性基本可用。
+- 行级 Microsoft Learn Q&A URL 覆盖率为 100%。
+- PrimeQA train/dev exact normalized question overlap 为 0。
+- 但 MSQA 仍然不能作为最终 held-out test set 使用。
+- 默认 runtime 不变。
+- Stage 51 candidate 继续保持 frozen non-default candidate。
+
+### 我学到的
+
+- 外部数据集即使是公开 benchmark，也要把 README 摘要和本地文件解析结果分开记录；两者不一致时只能如实报告，不能替上游“修正”。
+- `test_id.txt` 不是天然等于本项目 test split；必须结合上游 split 代码和本项目目标重新冻结 split。
+- 行级 source URL 覆盖率和答案文本中的 documentation-link 覆盖率不是同一个概念；前者可支持来源归因，后者才更接近文档证据覆盖。
+- exact overlap 为 0 是好信号，但它只覆盖最窄的 leakage 类型，不能替代 near-duplicate/semantic leakage 审计。
+
+### 下一步
+
+- 做 Stage 57：MSQA adapter contract、near-duplicate leakage audit 与 project-owned evaluation split freeze。
+- Stage 57 仍然不直接跑最终指标，先完成：
+  1. 明确 MSQA row -> 本项目 evaluation sample 的字段映射；
+  2. 明确 answer field 使用 `AnswerText`、`ProcessedAnswerText` 还是其他字段；
+  3. 明确 citation/source field 使用 row-level `Url` 的方式；
+  4. 运行 near-duplicate leakage audit；
+  5. 冻结本项目自己的 MSQA eval split。

@@ -1,8 +1,8 @@
 # Evaluation Strategy
 
 This document records the current evaluation strategy after Stage 53 blocked the
-previously intended NVIDIA held-out path and Stage 55 completed external dataset
-discovery.
+previously intended NVIDIA held-out path, Stage 55 completed external dataset
+discovery, and Stage 56 probed MSQA locally.
 
 ## Current Facts
 
@@ -20,6 +20,12 @@ discovery.
 - The user confirmed the external-independent-evaluation path after Stage 54.
 - Stage 55 recommends Microsoft Q&A (MSQA) only as the next schema-probe
   candidate, not as an already usable held-out test set.
+- Stage 56 downloaded and parsed MSQA locally:
+  - local rows parsed: 32,236
+  - README row-count claim: 32,252
+  - row-level Microsoft Learn Q&A URL coverage: 32,236 / 32,236
+  - PrimeQA train/dev exact normalized question overlaps: 0
+  - `test_id.txt` IDs found in CSV: 587 / 588
 - Default runtime remains unchanged.
 
 ## Rejected Path
@@ -32,7 +38,8 @@ train/dev, so any quality metric reported as held-out would be misleading.
 
 ### External Independent Evaluation Set
 
-Status: user-confirmed on 2026-07-14; Stage 55 discovery complete.
+Status: user-confirmed on 2026-07-14; Stage 55 discovery complete; Stage 56
+local MSQA schema probe complete.
 
 This is still the cleanest path to a real defaultization decision. It preserves
 the Stage 51 candidate as frozen and looks for an evaluation source that was not
@@ -44,19 +51,28 @@ Stage 55 result:
 - Stage 55 fit score: 17, from a generated audit rubric, not a model metric.
 - Reason: MSQA has the strongest external technical-support fit and a public
   dataset license, but it still needs local schema and leakage checks.
-- Blocking limitations:
-  - no native unanswerable rows, because MSQA filters to accepted-answer rows;
-  - source-link and citation coverage are not yet measured locally;
-  - the CSV has not been downloaded or parsed in this repository;
-  - no PrimeQA train/dev leakage audit has been run on MSQA rows.
+
+Stage 56 result:
+
+- MSQA local CSV is parseable and has 29 fields.
+- Required fields `QuestionId`, `AnswerId`, `QuestionText`, `AnswerText`,
+  `ProcessedAnswerText`, `Url`, and `Split` have 0 missing values.
+- `DoubleProcessedAnswerText` has 76 missing rows, so the future adapter must
+  choose an answer field explicitly.
+- Source-link coverage is strong at the row level because every row has a
+  Microsoft Learn Q&A page URL.
+- Processed-answer documentation-link coverage is partial, not complete.
+- Exact normalized overlap with PrimeQA train/dev is 0, but near-duplicate
+  leakage has not been run.
 
 Required next steps:
 
-1. Download or sample MSQA only after recording URL, size, and checksum.
-2. Probe CSV headers and parse a small local sample.
-3. Measure source-link and `learn.microsoft.com` documentation-link coverage.
-4. Run exact and near-duplicate leakage audit against PrimeQA train/dev.
-5. Freeze the MSQA evaluation split before comparing top-k and Stage 51.
+1. Define the MSQA adapter contract, including the chosen answer field and
+   citation/source field.
+2. Run near-duplicate leakage audit against PrimeQA train/dev.
+3. Freeze a project-owned MSQA evaluation split instead of blindly reusing the
+   repository `test_id.txt`.
+4. Only after those checks pass, compare top-k and Stage 51 on MSQA.
 
 ## Parked Paths
 
@@ -96,6 +112,8 @@ leakage checks:
 - Do not use NVIDIA `train.json` as held-out evidence.
 - Do not treat MSQA as a held-out test set.
 - Do not compare top-k against Stage 51 on MSQA.
+- Do not reuse MSQA `test_id.txt` as this project's final split until the
+  missing ID and upstream filtering assumptions are handled explicitly.
 
 ## Artifacts
 
@@ -106,4 +124,6 @@ artifacts/nvidia_heldout_leakage_stage53.json
 artifacts/nvidia_heldout_leakage_stage53_visuals/
 artifacts/external_eval_dataset_discovery_stage55.json
 artifacts/external_eval_dataset_discovery_stage55_visuals/
+artifacts/msqa_schema_probe_stage56.json
+artifacts/msqa_schema_probe_stage56_visuals/
 ```

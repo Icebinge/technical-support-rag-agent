@@ -67,15 +67,21 @@ Stage 55 source-backed facts:
 
 Current boundary:
 
-- Stage 55 did not download or commit the MSQA CSV.
-- Stage 55 did not parse MSQA rows locally.
-- Stage 55 did not run a PrimeQA leakage audit against MSQA.
-- Stage 55 did not run top-k or Stage 51 metrics on MSQA.
+- Stage 56 downloaded the public MSQA repository into ignored local storage:
+  `data/raw/msqa_repo/`.
+- Stage 56 parsed `data/msqa-32k.csv` locally and found 32,236 rows, not the
+  32,252 rows claimed in the README summary.
+- Stage 56 found 100% row-level Microsoft Learn Q&A URL coverage.
+- Stage 56 found 0 exact normalized question overlaps against local PrimeQA
+  train/dev.
+- Stage 56 did not run near-duplicate leakage search.
+- Stage 56 did not implement the MSQA adapter contract.
+- Stage 56 did not run top-k or Stage 51 metrics on MSQA.
 - MSQA is not yet a held-out test set for this project.
 
 Before MSQA can become a real held-out evaluation source, the next stage must
-probe its local schema, measure source-link/citation coverage, run leakage
-checks against PrimeQA train/dev, and freeze an evaluation split.
+implement an explicit adapter contract, run near-duplicate leakage checks
+against PrimeQA train/dev, and freeze a project-owned evaluation split.
 
 ## Split Rule
 
@@ -104,6 +110,12 @@ The current external dataset discovery snapshot is recorded in:
 
 ```text
 docs/external_eval_datasets.md
+```
+
+The current MSQA local schema probe is recorded in:
+
+```text
+docs/msqa_schema_probe.md
 ```
 
 ## Leakage Checks
