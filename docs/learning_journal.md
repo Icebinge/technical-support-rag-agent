@@ -11875,3 +11875,227 @@ pytest: 124 passed
   3. 评估候选 guard 是否能保持 Stage 48 dev 收益；
   4. 继续不使用 held-out test set；
   5. 在 gold citation 稳定前，不进入默认化评审。
+
+## 2026-07-14 Stage 50：gold-citation preservation guard 离线设计与可视化分析
+
+### 本阶段目标
+
+Stage 49 发现 rank-contained guarded reranker 虽然仍有 train F1 小幅收益，但在 `TRAIN_Q496` 上损失了 1 个 verified gold citation。本阶段目标不是直接修改默认 runtime，而是先做离线 guard 设计：
+
+1. 用 dev/train 既有报告模拟若干 runtime-only preservation guard；
+2. 判断能否拦住 `TRAIN_Q496` 这类“baseline 引用了 max citation rank 之外的文档，candidate 因 rank-contained 约束改引 rank 内相似文档”的风险；
+3. 给出可视化结果，方便比较 guard 的 F1、gold citation 和 blocked changed-answer 代价；
+4. 继续不使用 held-out test set。
+
+### 新增内容
+
+新增离线分析模块：
+
+```text
+src/ts_rag_agent/application/gold_citation_preservation_guard_analysis.py
+```
+
+新增命令行脚本：
+
+```text
+scripts/analyze_gold_citation_preservation_guards.py
+```
+
+新增测试：
+
+```text
+tests/test_gold_citation_preservation_guard_analysis.py
+```
+
+本阶段分析的 guard 候选：
+
+```text
+candidate_as_is
+preserve_all_baseline_docs
+preserve_baseline_out_of_rank_docs
+preserve_baseline_out_of_rank_score_gte_60
+preserve_baseline_score_gte_80_docs
+```
+
+重要边界：
+
+- guard 判定信号只使用 runtime 可见信息，例如 baseline/candidate citation document id、citation rank、retrieval score；
+- F1 和 gold citation 指标使用 gold labels 做离线评估；
+- 因此本阶段是 offline design / simulation，不是 runtime 默认策略变更。
+
+### 实验命令
+
+```powershell
+python scripts\analyze_gold_citation_preservation_guards.py `
+  --dev-baseline-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage46_topk_report.json `
+  --dev-candidate-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage48_rank_contained_reranker_report.json `
+  --train-baseline-report artifacts\verified_rag_train_hybrid_routing_mcpd3_stage49_topk_report.json `
+  --train-candidate-report artifacts\verified_rag_train_hybrid_routing_mcpd3_stage49_rank_contained_reranker_report.json `
+  --output artifacts\verified_rag_stage50_gold_citation_preservation_guard_analysis.json `
+  --visualization-dir artifacts\verified_rag_stage50_gold_citation_preservation_guard_visuals
+```
+
+### 实验结果
+
+dev split：
+
+```text
+candidate_as_is:
+  F1 delta: +0.0008
+  gold citation delta: 0
+  changed answers: 15
+
+preserve_baseline_out_of_rank_docs:
+  blocked changed answers: 2
+  blocked ids: DEV_Q052, DEV_Q095
+  blocked gold citation loss: 0
+  blocked answerable improvement: 1
+  blocked answerable regression: 0
+  F1 delta: +0.0005
+  gold citation delta: 0
+  changed answers: 13
+```
+
+train split：
+
+```text
+candidate_as_is:
+  F1 delta: +0.0008
+  gold citation delta: -1
+  changed answers: 39
+
+preserve_baseline_out_of_rank_docs:
+  blocked changed answers: 6
+  blocked ids: TRAIN_Q124, TRAIN_Q167, TRAIN_Q219, TRAIN_Q354, TRAIN_Q464, TRAIN_Q496
+  blocked gold citation loss: 1
+  blocked answerable improvement: 2
+  blocked answerable regression: 1
+  F1 delta: +0.0008
+  gold citation delta: 0
+  changed answers: 33
+```
+
+候选 guard 横向比较摘要：
+
+```text
+DEV:
+candidate_as_is                         F1 +0.0008, gold delta  0, blocked 0
+preserve_all_baseline_docs              F1 +0.0005, gold delta  0, blocked 2
+preserve_baseline_out_of_rank_docs      F1 +0.0005, gold delta  0, blocked 2
+preserve_baseline_out_of_rank_score_gte_60 F1 +0.0005, gold delta  0, blocked 2
+preserve_baseline_score_gte_80_docs     F1 +0.0005, gold delta  0, blocked 1
+
+TRAIN:
+candidate_as_is                         F1 +0.0008, gold delta -1, blocked 0
+preserve_all_baseline_docs              F1 +0.0007, gold delta  0, blocked 7
+preserve_baseline_out_of_rank_docs      F1 +0.0008, gold delta  0, blocked 6
+preserve_baseline_out_of_rank_score_gte_60 F1 +0.0008, gold delta  0, blocked 6
+preserve_baseline_score_gte_80_docs     F1 +0.0007, gold delta  0, blocked 6
+```
+
+### 可视化结果
+
+本阶段生成了 6 个 SVG 图：
+
+```text
+artifacts/verified_rag_stage50_gold_citation_preservation_guard_visuals/stage50_dev_f1_delta.svg
+artifacts/verified_rag_stage50_gold_citation_preservation_guard_visuals/stage50_dev_gold_citation_delta.svg
+artifacts/verified_rag_stage50_gold_citation_preservation_guard_visuals/stage50_dev_blocked_changed_count.svg
+artifacts/verified_rag_stage50_gold_citation_preservation_guard_visuals/stage50_train_f1_delta.svg
+artifacts/verified_rag_stage50_gold_citation_preservation_guard_visuals/stage50_train_gold_citation_delta.svg
+artifacts/verified_rag_stage50_gold_citation_preservation_guard_visuals/stage50_train_blocked_changed_count.svg
+```
+
+完整 JSON artifact：
+
+```text
+artifacts/verified_rag_stage50_gold_citation_preservation_guard_analysis.json
+```
+
+以上 artifact 均在本地 `artifacts/` 下，按 `.gitignore` 规则不纳入 git。
+
+### 问题与原因
+
+- 问题 1：Stage 48/49 的 rank-contained guard 只约束 citation rank，不保护 baseline 已引用文档的 identity。
+  - `TRAIN_Q496` 中 baseline 引用了 rank4 的 gold doc `swg21663373`；
+  - candidate 改为引用 rank2 的相似非 gold doc `swg21971637`；
+  - 结果 candidate 满足 rank-contained，但损失了 verified gold citation。
+- 问题 2：保护 baseline out-of-rank docs 会有收益代价。
+  - dev 上会拦掉 `DEV_Q052` 的 answerable improvement；
+  - train 上会拦掉 `TRAIN_Q124`、`TRAIN_Q219` 两个 answerable improvement；
+  - 同时也会拦掉 `TRAIN_Q496` 的 answerable regression 和 gold citation loss。
+- 问题 3：更宽的 `preserve_all_baseline_docs` 没有明显更优。
+  - train 上同样恢复 gold citation；
+  - 但 blocked changed answers 更多，F1 delta 低于 `preserve_baseline_out_of_rank_docs`。
+
+### 修正与处理
+
+- 新增 offline guard analysis，而不是直接改默认 runtime。
+- 新增可视化输出，避免只依赖文字表格判断。
+- 新增单元测试，覆盖“candidate 丢失 protected gold citation 时，guard 用 baseline 样本回退并恢复 gold citation”的核心行为。
+- 明确记录 runtime-only guard 信号与 gold-label offline evaluation 的边界。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\gold_citation_preservation_guard_analysis.py scripts\analyze_gold_citation_preservation_guards.py tests\test_gold_citation_preservation_guard_analysis.py
+pytest -q tests\test_gold_citation_preservation_guard_analysis.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 126 passed
+```
+
+artifact JSON 校验：
+
+```powershell
+python -m json.tool artifacts\verified_rag_stage50_gold_citation_preservation_guard_analysis.json > $null
+```
+
+结果：通过。
+
+### 结论
+
+- `preserve_baseline_out_of_rank_docs` 是当前最值得进入 runtime 实验的 guard 候选。
+- 它在 train 上恢复了 `TRAIN_Q496` 的 gold citation loss，使 gold citation delta 从 `-1` 回到 `0`。
+- 它没有降低 train 上四舍五入后的 F1 delta，仍为 `+0.0008`。
+- 它在 dev 上会把 F1 delta 从 `+0.0008` 降到 `+0.0005`，代价是真实存在的，不能忽略。
+- 因此本阶段只证明该 guard 候选值得进入下一步 runtime end-to-end 实验，不证明它可以默认化。
+- 本阶段没有使用 held-out test set，没有修改默认 runtime 策略。
+
+### 我学到的
+
+- citation rank 合规和 gold document preservation 是两个不同风险面，不能用一个 guard 互相替代。
+- train split 的价值在于暴露策略风险模式；但任何结论都只能指导下一步 dev/train runtime 实验，不能替代最终测试集评估。
+- 对 RAG 策略而言，changed answers 数量本身不是好坏指标，必须拆开看 improvement、regression、unanswerable refusal、gold citation loss。
+- 可视化对这种多指标比较很有帮助，尤其能快速看出更宽 guard 的 blocked 成本。
+
+### 下一步
+
+- 做 Stage 51：把 `preserve_baseline_out_of_rank_docs` 做成可选 runtime 参数。
+- 目标：
+  1. 不改变默认策略；
+  2. 在 runtime 中组合 rank-contained reranker 与 baseline out-of-rank doc preservation guard；
+  3. 跑 dev/train end-to-end verified RAG；
+  4. 对比 Stage 46/49 top-k baseline 与 Stage 48/49 rank-contained candidate；
+  5. 继续不使用 held-out test set；
+  6. 若 runtime 结果仍满足 F1、citation、refusal 三类稳定性，再进入下一阶段评审。
