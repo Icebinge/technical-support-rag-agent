@@ -206,5 +206,12 @@ default_runtime_policy: unchanged
 
 ## Next Step
 
-Stage 72 should review Stage 71 train/dev candidate-reranker policy changed
-cases before considering any final-test evaluation gate.
+Stage 72 reviewed Stage 71 train/dev candidate-reranker policy changed cases in:
+
+```text
+docs/primeqa_hybrid_candidate_reranker_changed_case_review.md
+```
+
+The current next step is Stage 73: decide whether to refine train/dev
+candidate-reranker policy gates further or explicitly approve one one-time
+final-test evaluation gate. The test split still cannot be used for tuning.

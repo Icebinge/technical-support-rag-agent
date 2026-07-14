@@ -17595,3 +17595,188 @@ total: 2.200s
 做 Stage72：review Stage71 train/dev candidate-reranker changed cases。
 
 Stage72 应该检查 logistic/ridge 在 dev 上改变了哪些问题、哪些是 top3 proxy 微弱收益或潜在风险，再决定是否存在值得进入 final-test evaluation gate 的候选策略。test split 继续 locked。
+
+## Stage72：PrimeQA hybrid candidate-reranker changed-case review
+
+时间：2026-07-14
+
+### 目标
+
+继续上一阶段的推荐路线，只复盘 Stage71 在 train/dev 范围内的 candidate-reranker changed cases，并补上可视化结果。
+
+这一阶段的边界是：
+
+- 不读取 frozen test split；
+- 不运行 final test metrics；
+- 不使用 test 做 tuning；
+- 不改变默认 runtime policy；
+- 只判断 dev changed-case 信号是否足够支持进入下一步 gate 决策。
+
+### 本次新增
+
+- 新增 `src/ts_rag_agent/application/primeqa_hybrid_candidate_reranker_changed_case_review.py`。
+- 新增 `scripts/review_primeqa_hybrid_candidate_reranker_changed_cases.py`。
+- 新增 `tests/test_primeqa_hybrid_candidate_reranker_changed_case_review.py`。
+- 新增文档 `docs/primeqa_hybrid_candidate_reranker_changed_case_review.md`。
+- 更新 `docs/evaluation_strategy.md`、`docs/data_strategy.md`、`docs/primeqa_hybrid_candidate_reranker_development.md`。
+
+### 真实运行命令
+
+```powershell
+python scripts\review_primeqa_hybrid_candidate_reranker_changed_cases.py `
+  --output artifacts\primeqa_hybrid_candidate_reranker_changed_case_review_stage72.json `
+  --visualization-dir artifacts\primeqa_hybrid_candidate_reranker_changed_case_review_stage72_visuals `
+  --models logistic_best_candidate,ridge_candidate_token_f1 `
+  --max-answer-candidates 3 `
+  --sample-limit 20
+```
+
+### 真实结果
+
+Dev top3 changed-case summary：
+
+```text
+logistic_best_candidate / stage36_main:
+  delta: +0.0001
+  regressions: 1
+  changed cases: 21
+  gold citation delta: +0
+
+logistic_best_candidate / candidate_score_gte_60:
+  delta: +0.0004
+  regressions: 0
+  changed cases: 17
+  gold citation delta: +0
+
+ridge_candidate_token_f1 / stage36_main:
+  delta: +0.0003
+  regressions: 1
+  changed cases: 8
+  gold citation delta: +0
+
+ridge_candidate_token_f1 / candidate_score_gte_60:
+  delta: +0.0000
+  regressions: 0
+  changed cases: 3
+  gold citation delta: +0
+```
+
+Policy-vs-main changed cases：
+
+```text
+logistic_best_candidate:
+  candidate_score_gte_60 differs from stage36_main on 4 / 76 dev cases
+  better / tied / worse: 1 / 2 / 1
+  average candidate delta vs main on changed cases: +0.0059
+
+ridge_candidate_token_f1:
+  candidate_score_gte_60 differs from stage36_main on 5 / 76 dev cases
+  better / tied / worse: 1 / 2 / 2
+  average candidate delta vs main on changed cases: -0.0039
+```
+
+当前 train/dev-only 最好的 dev top3 proxy 仍然是：
+
+```text
+model: logistic_best_candidate
+policy: candidate_score_gte_60
+dev top3 delta: +0.0004
+regressions: 0
+gold citation delta: +0
+```
+
+### 可视化结果
+
+本次生成了 4 个 SVG：
+
+```text
+artifacts/primeqa_hybrid_candidate_reranker_changed_case_review_stage72_visuals/stage72_dev_top3_delta_by_policy.svg
+artifacts/primeqa_hybrid_candidate_reranker_changed_case_review_stage72_visuals/stage72_changed_cases_by_policy.svg
+artifacts/primeqa_hybrid_candidate_reranker_changed_case_review_stage72_visuals/stage72_candidate_score_vs_main_outcomes.svg
+artifacts/primeqa_hybrid_candidate_reranker_changed_case_review_stage72_visuals/stage72_residual_regressions_by_policy.svg
+```
+
+报告和 SVG 都在 `artifacts/` 下，按项目 git policy 被 ignore，不提交进仓库。
+
+### Guard checks
+
+```text
+candidate_artifact_splits_are_train_dev_only: passed
+candidate_rows_have_no_test_split: passed
+gold_answer_splits_are_train_dev_only: passed
+stage71_final_test_metrics_not_run: passed
+stage72_review_uses_dev_holdout_only: passed
+stage72_report_is_public_safe_no_raw_answer_text: passed
+final_test_metrics_not_run: passed
+default_runtime_policy_unchanged: passed
+```
+
+额外检查：
+
+```text
+git check-ignore: Stage72 report and SVG are ignored by artifacts/*
+raw text search: no raw candidate sentence or answer text found; only the guard name contains raw_answer_text wording
+```
+
+### 问题、原因与修正
+
+- 问题 1：Stage71 的 top3 proxy 收益太小，不能只看单一平均 delta。
+  - 原因：candidate-reranker 改动的是候选句顺序，top3 组合答案会稀释 single-candidate proxy 的收益。
+  - 修正：Stage72 按 policy、model、changed-case、policy-vs-main 维度拆开复盘，并输出 residual regression 图。
+- 问题 2：changed-case review 需要可公开记录，但原始候选句和答案可能包含数据集文本。
+  - 原因：项目当前不打算公开数据集，记录不能泄露 raw answer/candidate text。
+  - 修正：报告只写 case ID、route、rank、score、document ID 和 metric delta，不写原文。
+- 问题 3：Stage72 结果仍然不足以自动打开 final test gate。
+  - 原因：最佳 dev top3 delta 只有 +0.0004，虽然 regressions 为 0，但收益非常微弱。
+  - 修正：结论中明确 `can_open_final_test_gate_now: false`，下一步只做 gate path 决策。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_candidate_reranker_changed_case_review.py scripts\review_primeqa_hybrid_candidate_reranker_changed_cases.py tests\test_primeqa_hybrid_candidate_reranker_changed_case_review.py
+pytest -q tests\test_primeqa_hybrid_candidate_reranker_changed_case_review.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+真实报告运行耗时：
+
+```text
+load_inputs: 0.057s
+load_train_dev_splits: 0.047s
+review_changed_cases: 0.234s
+guard_checks: 0.000s
+total: 0.338s
+```
+
+### 结论
+
+- Stage72 已完成 train/dev-only changed-case review。
+- Stage72 生成了可视化结果。
+- Stage72 没有读取 test split。
+- Stage72 没有运行 final test metrics。
+- Stage72 没有改变默认 runtime policy。
+- `logistic_best_candidate / candidate_score_gte_60` 是当前 dev top3 proxy 最稳的候选，但收益仍然非常小。
+- 当前不能自动进入 final test metrics，只能进入 Stage73 gate path decision。
+
+### 我学到的
+
+- changed-case review 不能只看“改了多少”，还要看改动相对原 policy 是 improvement、tie 还是 regression。
+- 对不公开的数据集，实验报告必须从设计上避免写入原始文本，而不是事后再清理。
+- 当 dev proxy 收益很小，即使 regression 为 0，也应该把“是否打开 final test gate”作为显式决策，而不是自动推进。
+
+### 下一步
+
+做 Stage73：决定 gate path。
+
+Stage73 只能在两个方向中做明确选择：
+
+- 继续 refine train/dev candidate-reranker policy gates；
+- 或显式批准一次 one-time final-test evaluation gate，只评估一次选定候选，不用 test 做 tuning。
