@@ -16153,3 +16153,208 @@ candidate_pool_rows: 47342
   3. 判断 regression 是否集中在 route、selected rank、score margin 或 cross-source replacement；
   4. 决定是否需要另一个外部数据集，或冻结最终评估协议；
   5. 继续不 defaultize。
+
+## Stage 65：MSQA Stage51 changed-case 与 source-citation tradeoff review
+
+### 本阶段目标
+
+接着 Stage64 的 capped MSQA Stage51 adapter comparison，做 case-level 复盘：
+
+1. 重建 Stage64 全量 case view，并确认聚合指标与 Stage64 artifact 一致；
+2. 分析 719 个 changed answers 中的 top3 regression、top3 improvement、citation gain/loss；
+3. 生成可视化，判断风险是否集中在 route、selected rank、score margin 或 source transition；
+4. 明确是否可以 defaultize Stage51。
+
+本阶段没有重建 candidate pool，没有重跑新的 Stage51 comparison，没有调参，也没有改变默认 runtime。
+
+### 新增与修改
+
+- 新增应用模块：
+  - `src/ts_rag_agent/application/msqa_stage51_changed_case_review.py`
+- 新增脚本：
+  - `scripts/review_msqa_stage51_changed_cases.py`
+- 新增测试：
+  - `tests/test_msqa_stage51_changed_case_review.py`
+- 更新 Stage64 comparison 模块：
+  - `src/ts_rag_agent/application/msqa_stage51_adapter_comparison.py`
+  - 将 Stage64 case rebuild 抽成可复用 helper；
+  - 暴露 full case rebuild、metrics summary、case-to-dict helper，供 Stage65 复用；
+  - 保留 runtime policy identity，避免把 policy 名称写死成字符串。
+- 新增文档：
+  - `docs/msqa_stage51_changed_case_review.md`
+- 更新文档索引与策略：
+  - `docs/msqa_stage51_adapter_comparison.md`
+  - `docs/data_strategy.md`
+  - `docs/evaluation_strategy.md`
+
+### Stage65 运行命令
+
+```powershell
+python scripts\review_msqa_stage51_changed_cases.py `
+  --stage64-report artifacts\msqa_stage51_adapter_comparison_stage64.json `
+  --split-jsonl artifacts\msqa_evaluation_split_stage57.jsonl `
+  --candidate-jsonl artifacts\msqa_stage51_candidate_adapter_stage63_capped_candidates.jsonl `
+  --adapter-report artifacts\msqa_stage51_candidate_adapter_stage63_capped.json `
+  --distribution-report artifacts\msqa_stage51_candidate_distribution_stage63_capped.json `
+  --candidate-reranker-dataset artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --stage31-summary artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid_summary.json `
+  --output artifacts\msqa_stage51_changed_case_review_stage65.json `
+  --visualization-dir artifacts\msqa_stage51_changed_case_review_stage65_visuals
+```
+
+### 真实运行结果
+
+Rebuild contract：
+
+```text
+candidate_pool_rebuilt: false
+case_count: 3301
+model_name: logistic_best_candidate
+train_split: train
+max_answer_candidates: 3
+max_citation_rank: 3
+consistency_checks_passed: true
+```
+
+Changed-case summary：
+
+```text
+question_count: 3301
+changed_answer_count: 719
+changed_answer_rate: 0.2178
+
+top3_regression_count: 57
+top3_improvement_count: 20
+regression_to_improvement_count_ratio: 2.85
+
+regression_loss_sum: -10.5636
+improvement_gain_sum: 1.3434
+net_top3_delta_sum: -9.2202
+
+citation_gained_count: 3
+citation_lost_count: 0
+citation_delta: +3
+regressions_with_citation_gain: 0
+improvements_with_citation_gain: 3
+changed_without_f1_or_citation_gain: 642
+```
+
+Route concentration：
+
+```text
+changed cases:
+other: 488
+error_or_log: 136
+install_upgrade_config: 77
+limitation_or_restriction: 18
+
+top3 regressions:
+other: 28
+install_upgrade_config: 16
+error_or_log: 12
+limitation_or_restriction: 1
+```
+
+关键集中性发现：
+
+```text
+regression_selected_rank_share:
+rank_4_5: 57 / 57
+
+regression_source_transition_share:
+leading_source_changed: 57 / 57
+
+citation_gain_source_transition_share:
+gold_source_added: 3 / 3
+```
+
+### 可视化结果
+
+本阶段生成 4 个 SVG：
+
+```text
+artifacts/msqa_stage51_changed_case_review_stage65_visuals/stage65_msqa_changed_outcomes.svg
+artifacts/msqa_stage51_changed_case_review_stage65_visuals/stage65_msqa_regressions_by_route.svg
+artifacts/msqa_stage51_changed_case_review_stage65_visuals/stage65_msqa_changed_by_selected_rank.svg
+artifacts/msqa_stage51_changed_case_review_stage65_visuals/stage65_msqa_source_transitions.svg
+```
+
+Stage65 report：
+
+```text
+artifacts/msqa_stage51_changed_case_review_stage65.json
+```
+
+Stage65 report checksum：
+
+```text
+089003101663b7b2880ad359b5eb2f6065778a6ece3983e154f3ba59b8e69def
+```
+
+以上 artifacts 位于本地 `artifacts/`，按 `.gitignore` 不纳入 git。
+
+### 问题、原因与修正
+
+- 问题 1：Stage64 case rebuild 原来是 `compare_msqa_stage51_capped_adapter` 内部逻辑，Stage65 不能可靠复用全量 case。
+  - 原因：Stage64 最初只需要输出聚合 report 和 sample cases，没有为后续 changed-case review 暴露 full case API。
+  - 修正：新增 `build_msqa_stage51_capped_adapter_cases`、`summarize_msqa_stage51_comparison_cases`、`msqa_stage51_comparison_case_to_dict`，让 Stage65 从同一套逻辑重建 full case view。
+- 问题 2：helper 抽取后 Stage64 report 中 `composition_policy` 一度引用旧局部变量 `policy`。
+  - 原因：policy 对象被移动到 case rebuild helper 内部，但 compare report 仍需要记录真实 policy name。
+  - 修正：让内部 case rebuild 返回 cases 与 `policy_name`，report 继续记录真实 runtime policy identity，不写死。
+- 问题 3：Stage65 不能只看 aggregate delta，否则会误读 citation gain。
+  - 原因：Stage64 aggregate 显示 citation +3、F1 -0.0028，但不知道风险集中在哪里。
+  - 修正：按 route、selected rank、score margin、source transition 拆解 changed cases；结果显示 57 个 top3 regression 全部来自 rank 4-5 的 leading-source change。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\msqa_stage51_adapter_comparison.py src\ts_rag_agent\application\msqa_stage51_changed_case_review.py scripts\review_msqa_stage51_changed_cases.py tests\test_msqa_stage51_changed_case_review.py tests\test_msqa_stage51_adapter_comparison.py
+pytest -q tests\test_msqa_stage51_adapter_comparison.py tests\test_msqa_stage51_changed_case_review.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 4 passed
+```
+
+真实 artifact 生成：
+
+```text
+Stage65 report: generated
+visualizations: 4 generated
+consistency_checks_passed: true
+candidate_pool_rebuilt: false
+```
+
+### 结论
+
+- Stage65 完成了 Stage64 changed-case 与 source-citation tradeoff review。
+- Stage65 重建的全量 case view 与 Stage64 aggregate 指标一致。
+- Citation gain 是真实存在的 MSQA proxy 信号：`+3` gained、`0` lost。
+- 但 answer 风险更强：top3 regression `57`，top3 improvement `20`，regression 数量是 improvement 的 `2.85x`。
+- 57 个 top3 regression 全部集中在 rank 4-5 的 leading-source change。
+- 当前不能 defaultize Stage51。
+- 默认 runtime 继续保持不变。
+
+### 我学到的
+
+- 外部 adapter 的收益不能只看 citation gain；必须同时看 changed-case answer risk。
+- Stage51 在 MSQA 上的少量 citation 修正主要来自 gold-source-added cases，但这种收益规模太小，不能抵消 rank 4-5 leading-source change 带来的 answer regression。
+- “同源句子改写”数量很大，但真正的回归风险集中在跨 leading source 的深 rank 替换，这比单纯看 changed-answer count 更有诊断价值。
+- 后续如果还想在 MSQA 上实验，必须冻结一个明确的新协议；不能围绕 Stage64/65 结果反复调参直到指标好看。
+
+### 下一步
+
+做 Stage66：显式选择下一条 evaluation route。
+
+候选路线：
+
+1. 找另一个外部数据集，并重新做 schema/license/leakage qualification；
+2. 设计一个 MSQA-specific 的 rank 4-5 leading-source risk guard，并只跑一次新的 frozen MSQA experiment；
+3. 冻结 Stage51 为 non-default research evidence，继续保持 top-k 为默认 runtime。
+
+在 Stage66 路线明确前，继续不 defaultize Stage51。

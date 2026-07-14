@@ -212,6 +212,12 @@ The current capped MSQA Stage51 adapter comparison is recorded in:
 docs/msqa_stage51_adapter_comparison.md
 ```
 
+The current MSQA Stage51 changed-case review is recorded in:
+
+```text
+docs/msqa_stage51_changed_case_review.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:

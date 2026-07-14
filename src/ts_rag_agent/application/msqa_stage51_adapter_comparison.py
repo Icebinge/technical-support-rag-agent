@@ -63,6 +63,7 @@ class MsqaStage51ComparisonCase:
     stage51_source_row_ids: list[str]
     model_selected_candidate_id: str | None
     model_selected_rank: int
+    model_selected_candidate_score: float
     model_score_margin_vs_top_candidate: float
     baseline_top1_token_f1: float
     stage51_top1_token_f1: float
@@ -86,6 +87,12 @@ class MsqaStage51AdapterComparisonVisualization:
     path: str
 
 
+@dataclass(frozen=True)
+class _MsqaStage51CaseBuild:
+    cases: list[MsqaStage51ComparisonCase]
+    policy_name: str
+
+
 def compare_msqa_stage51_capped_adapter(
     *,
     split_jsonl_path: Path,
@@ -107,45 +114,24 @@ def compare_msqa_stage51_capped_adapter(
         max_citation_rank=max_citation_rank,
         sample_limit=sample_limit,
     )
-    for path in [
-        split_jsonl_path,
-        candidate_jsonl_path,
-        adapter_report_path,
-        distribution_report_path,
-        candidate_reranker_dataset_path,
-        stage31_summary_path,
-    ]:
-        _ensure_file(path)
-
     adapter_report = _load_json(adapter_report_path)
     distribution_report = _load_json(distribution_report_path)
-    stage31_summary = _load_json(stage31_summary_path)
-    _validate_stage63_reports(adapter_report, distribution_report)
-    selector_name = str(stage31_summary["build_config"]["evidence_selector"])
-
-    samples = load_msqa_stage51_adapter_samples(split_jsonl_path)
     candidate_rows = _load_candidate_rows(candidate_jsonl_path)
-    candidate_rows_by_query = _candidate_rows_by_query(candidate_rows)
-    _validate_candidate_pool(samples=samples, candidate_rows_by_query=candidate_rows_by_query)
-
-    policy = fit_candidate_score_guarded_reranker_composition_policy(
-        rows=load_candidate_reranker_rows(candidate_reranker_dataset_path),
-        selector_name=selector_name,
+    case_build = _build_msqa_stage51_capped_adapter_case_view(
+        split_jsonl_path=split_jsonl_path,
+        candidate_jsonl_path=candidate_jsonl_path,
+        adapter_report_path=adapter_report_path,
+        distribution_report_path=distribution_report_path,
+        candidate_reranker_dataset_path=candidate_reranker_dataset_path,
+        stage31_summary_path=stage31_summary_path,
         model_name=model_name,
         train_split=train_split,
-        rank_contained_max_retrieval_rank=max_citation_rank,
-        preserve_baseline_out_of_rank_docs=True,
+        max_answer_candidates=max_answer_candidates,
+        max_citation_rank=max_citation_rank,
     )
-
-    cases = [
-        _compare_sample(
-            sample=sample,
-            rows=candidate_rows_by_query[sample.question_id],
-            policy=policy,
-            max_answer_candidates=max_answer_candidates,
-        )
-        for sample in samples
-    ]
+    cases = case_build.cases
+    stage31_summary = _load_json(stage31_summary_path)
+    selector_name = str(stage31_summary["build_config"]["evidence_selector"])
     metrics = _metrics(cases)
     route_metrics = _segment_metrics(cases, segment_fn=lambda case: case.question_route)
     reason_metrics = dict(sorted(Counter(case.decision_reason for case in cases).items()))
@@ -198,7 +184,7 @@ def compare_msqa_stage51_capped_adapter(
             "model_name": model_name,
             "train_split": train_split,
             "selector_name_runtime_feature": selector_name,
-            "composition_policy": policy.name,
+            "composition_policy": case_build.policy_name,
             "runtime_guard": (
                 "candidate_score_gte_60_all_selected_citations_rank_lte_"
                 "max_citation_rank_preserve_baseline_out_of_rank_docs"
@@ -224,6 +210,112 @@ def compare_msqa_stage51_capped_adapter(
         "sample_cases": _sample_cases(cases, sample_limit=sample_limit),
         "decision": _decision(metrics, distribution_report),
     }
+
+
+def build_msqa_stage51_capped_adapter_cases(
+    *,
+    split_jsonl_path: Path,
+    candidate_jsonl_path: Path,
+    adapter_report_path: Path,
+    distribution_report_path: Path,
+    candidate_reranker_dataset_path: Path,
+    stage31_summary_path: Path,
+    model_name: str = _DEFAULT_MODEL_NAME,
+    train_split: str = _DEFAULT_TRAIN_SPLIT,
+    max_answer_candidates: int = _DEFAULT_MAX_ANSWER_CANDIDATES,
+    max_citation_rank: int = _DEFAULT_MAX_CITATION_RANK,
+) -> list[MsqaStage51ComparisonCase]:
+    """Rebuild the full Stage64 case view without modifying the capped pool."""
+
+    return _build_msqa_stage51_capped_adapter_case_view(
+        split_jsonl_path=split_jsonl_path,
+        candidate_jsonl_path=candidate_jsonl_path,
+        adapter_report_path=adapter_report_path,
+        distribution_report_path=distribution_report_path,
+        candidate_reranker_dataset_path=candidate_reranker_dataset_path,
+        stage31_summary_path=stage31_summary_path,
+        model_name=model_name,
+        train_split=train_split,
+        max_answer_candidates=max_answer_candidates,
+        max_citation_rank=max_citation_rank,
+    ).cases
+
+
+def _build_msqa_stage51_capped_adapter_case_view(
+    *,
+    split_jsonl_path: Path,
+    candidate_jsonl_path: Path,
+    adapter_report_path: Path,
+    distribution_report_path: Path,
+    candidate_reranker_dataset_path: Path,
+    stage31_summary_path: Path,
+    model_name: str = _DEFAULT_MODEL_NAME,
+    train_split: str = _DEFAULT_TRAIN_SPLIT,
+    max_answer_candidates: int = _DEFAULT_MAX_ANSWER_CANDIDATES,
+    max_citation_rank: int = _DEFAULT_MAX_CITATION_RANK,
+) -> _MsqaStage51CaseBuild:
+    """Rebuild Stage64 cases and retain the runtime policy identity."""
+
+    _validate_options(
+        max_answer_candidates=max_answer_candidates,
+        max_citation_rank=max_citation_rank,
+        sample_limit=0,
+    )
+    for path in [
+        split_jsonl_path,
+        candidate_jsonl_path,
+        adapter_report_path,
+        distribution_report_path,
+        candidate_reranker_dataset_path,
+        stage31_summary_path,
+    ]:
+        _ensure_file(path)
+
+    adapter_report = _load_json(adapter_report_path)
+    distribution_report = _load_json(distribution_report_path)
+    stage31_summary = _load_json(stage31_summary_path)
+    _validate_stage63_reports(adapter_report, distribution_report)
+    selector_name = str(stage31_summary["build_config"]["evidence_selector"])
+
+    samples = load_msqa_stage51_adapter_samples(split_jsonl_path)
+    candidate_rows = _load_candidate_rows(candidate_jsonl_path)
+    candidate_rows_by_query = _candidate_rows_by_query(candidate_rows)
+    _validate_candidate_pool(samples=samples, candidate_rows_by_query=candidate_rows_by_query)
+
+    policy = fit_candidate_score_guarded_reranker_composition_policy(
+        rows=load_candidate_reranker_rows(candidate_reranker_dataset_path),
+        selector_name=selector_name,
+        model_name=model_name,
+        train_split=train_split,
+        rank_contained_max_retrieval_rank=max_citation_rank,
+        preserve_baseline_out_of_rank_docs=True,
+    )
+    cases = [
+        _compare_sample(
+            sample=sample,
+            rows=candidate_rows_by_query[sample.question_id],
+            policy=policy,
+            max_answer_candidates=max_answer_candidates,
+        )
+        for sample in samples
+    ]
+    return _MsqaStage51CaseBuild(cases=cases, policy_name=policy.name)
+
+
+def summarize_msqa_stage51_comparison_cases(
+    cases: Sequence[MsqaStage51ComparisonCase],
+) -> dict[str, Any]:
+    """Summarize full Stage64 comparison cases."""
+
+    return _metrics(cases)
+
+
+def msqa_stage51_comparison_case_to_dict(
+    case: MsqaStage51ComparisonCase,
+) -> dict[str, Any]:
+    """Convert one Stage64 comparison case to a JSON-safe dictionary."""
+
+    return _case_to_dict(case)
 
 
 def write_msqa_stage51_adapter_comparison_visualizations(
@@ -333,6 +425,7 @@ def _compare_sample(
         stage51_source_row_ids=[_source_row_id(entry) for entry in selected_entries],
         model_selected_candidate_id=_candidate_id(model_entry) if model_entry else None,
         model_selected_rank=trace.selected_candidate_rank,
+        model_selected_candidate_score=trace.selected_candidate_score,
         model_score_margin_vs_top_candidate=trace.model_score_margin_vs_top_candidate,
         baseline_top1_token_f1=round(baseline_top1_f1, 4),
         stage51_top1_token_f1=round(stage51_top1_f1, 4),
@@ -579,6 +672,7 @@ def _case_to_dict(case: MsqaStage51ComparisonCase) -> dict[str, Any]:
         "stage51_source_row_ids": case.stage51_source_row_ids,
         "model_selected_candidate_id": case.model_selected_candidate_id,
         "model_selected_rank": case.model_selected_rank,
+        "model_selected_candidate_score": case.model_selected_candidate_score,
         "model_score_margin_vs_top_candidate": case.model_score_margin_vs_top_candidate,
         "baseline_top3_answer_token_f1": case.baseline_top3_answer_token_f1,
         "stage51_top3_answer_token_f1": case.stage51_top3_answer_token_f1,

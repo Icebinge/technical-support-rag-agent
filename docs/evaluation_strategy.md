@@ -178,13 +178,27 @@ Stage 62 result:
   outlier-only issue.
 - Direct Stage 51 adapter comparison remains blocked.
 
+Stage65 completed the Stage64 changed-case and source-citation tradeoff review.
+It confirmed:
+
+```text
+consistency_checks_passed: true
+changed_answer_count: 719
+top3_regression_count: 57
+top3_improvement_count: 20
+citation_gained_count: 3
+citation_lost_count: 0
+decision: msqa_stage51_changed_case_review_blocks_defaultization
+```
+
 Required next step:
 
-1. Review Stage64 changed cases and source-citation tradeoffs.
-2. Treat the Stage64 result as external-adapter risk evidence, not a
+1. Choose the Stage66 evaluation route explicitly.
+2. Treat Stage64 and Stage65 as external-adapter risk evidence, not a
    defaultization result.
-3. Decide whether another external dataset or a frozen final evaluation protocol
-   is needed before any defaultization decision.
+3. Either find another external dataset, design one frozen MSQA-specific
+   rank-4/5 leading-source guard experiment, or freeze Stage51 as non-default
+   research evidence.
 
 ## Parked Paths
 
@@ -267,4 +281,6 @@ artifacts/msqa_stage51_candidate_distribution_stage63_capped.json
 artifacts/msqa_stage51_candidate_distribution_stage63_capped_visuals/
 artifacts/msqa_stage51_adapter_comparison_stage64.json
 artifacts/msqa_stage51_adapter_comparison_stage64_visuals/
+artifacts/msqa_stage51_changed_case_review_stage65.json
+artifacts/msqa_stage51_changed_case_review_stage65_visuals/
 ```

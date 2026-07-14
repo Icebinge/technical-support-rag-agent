@@ -237,9 +237,14 @@ Stage64 report checksum:
 
 These artifacts are local ignored outputs and are not committed by git policy.
 
-## Next Step
+## Stage65 Follow-Up
 
-Stage65 should review Stage64 changed cases and source-citation tradeoffs. The
-main question is whether the MSQA regression pattern indicates a Stage51
-external-adapter mismatch, or whether a separate external dataset/frozen final
-evaluation protocol is needed before any defaultization decision.
+Stage65 reviewed the Stage64 changed cases and source-citation tradeoffs:
+
+```text
+docs/msqa_stage51_changed_case_review.md
+```
+
+Stage65 confirmed that consistency checks pass, citation gain is real within the
+MSQA proxy, but top3 regressions outnumber improvements. Stage51 remains
+non-default.
