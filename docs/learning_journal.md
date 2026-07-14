@@ -12099,3 +12099,441 @@ python -m json.tool artifacts\verified_rag_stage50_gold_citation_preservation_gu
   4. 对比 Stage 46/49 top-k baseline 与 Stage 48/49 rank-contained candidate；
   5. 继续不使用 held-out test set；
   6. 若 runtime 结果仍满足 F1、citation、refusal 三类稳定性，再进入下一阶段评审。
+
+## 2026-07-14 Stage 51：rank-contained preservation guard runtime 实验
+
+### 本阶段目标
+
+Stage 50 的离线模拟显示 `preserve_baseline_out_of_rank_docs` 可以恢复 train 上 `TRAIN_Q496` 的 gold citation loss。本阶段目标是把该 guard 接入真实 runtime，但仍保持默认策略不变：
+
+1. 新增非默认 composition policy；
+2. 在 runtime 中组合 `candidate_score_gte_60`、rank-contained guard 和 baseline out-of-rank document preservation guard；
+3. 跑 dev/train end-to-end verified RAG；
+4. 对比 top-k baseline 与 Stage 48/49 rank-contained candidate；
+5. 继续不使用 held-out test set。
+
+### 新增与修改
+
+更新 runtime policy：
+
+```text
+src/ts_rag_agent/application/candidate_score_guarded_composition_policy.py
+```
+
+新增能力：
+
+- `preserve_baseline_out_of_rank_docs` 可选参数；
+- 当 baseline top-k answer candidates 中存在 `retrieval_rank > max_citation_rank` 的 document，且 candidate rewrite 会丢掉这些 document 时，阻止 rewrite，保留 baseline top-k candidates；
+- 该 guard 必须和 `rank_contained_max_retrieval_rank` 一起使用，否则直接报错；
+- decision trace 记录：
+  - `preserve_baseline_out_of_rank_docs`
+  - `protected_baseline_out_of_rank_document_ids`
+  - `dropped_protected_baseline_out_of_rank_document_ids`
+
+更新 runtime CLI：
+
+```text
+scripts/evaluate_verified_rag.py
+```
+
+新增非默认 policy alias：
+
+```text
+candidate-score-rank-contained-preserve-baseline-out-of-rank-reranker
+```
+
+report 中实际 policy name：
+
+```text
+candidate_score_gte_60_rank_contained_preserve_baseline_out_of_rank_guarded_reranker
+```
+
+report 中 runtime guard：
+
+```text
+candidate_score_gte_60_all_selected_citations_rank_lte_max_citation_rank_preserve_baseline_out_of_rank_docs
+```
+
+更新测试：
+
+```text
+tests/test_candidate_score_guarded_composition_policy.py
+```
+
+新增覆盖：
+
+- candidate rewrite 丢掉 baseline out-of-rank document 时会被 preservation guard 拦截；
+- 没有 protected document 时不会误拦；
+- 启用 preservation 但没有 rank limit 会报错；
+- 如果 rewrite 已被 score guard 提前拦截，trace 不会误报 protected document 被 dropped。
+
+### 实验命令
+
+dev：
+
+```powershell
+python scripts\evaluate_verified_rag.py `
+  --split dev `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --min-evidence-score 15 `
+  --composition-policy candidate-score-rank-contained-preserve-baseline-out-of-rank-reranker `
+  --candidate-reranker-dataset artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --candidate-reranker-model logistic_best_candidate `
+  --candidate-reranker-train-split train `
+  --sample-limit 1000 `
+  --output artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage51_rank_contained_preserve_out_of_rank_report.json
+```
+
+train：
+
+```powershell
+python scripts\evaluate_verified_rag.py `
+  --split train `
+  --evidence-selector hybrid-routing `
+  --max-candidates-per-document 3 `
+  --min-evidence-score 15 `
+  --composition-policy candidate-score-rank-contained-preserve-baseline-out-of-rank-reranker `
+  --candidate-reranker-dataset artifacts\candidate_reranker_dataset_stage31_dev_train_hybrid.jsonl `
+  --candidate-reranker-model logistic_best_candidate `
+  --candidate-reranker-train-split train `
+  --sample-limit 1000 `
+  --output artifacts\verified_rag_train_hybrid_routing_mcpd3_stage51_rank_contained_preserve_out_of_rank_report.json
+```
+
+说明：train 第一次使用 120 秒超时时间运行时超时且未生成报告；随后使用 300 秒超时时间重跑成功。后续又在 trace 修正后重新跑了 dev/train，最终 artifacts 与当前代码一致。
+
+comparison：
+
+```powershell
+python scripts\compare_verified_rag_reports.py `
+  --baseline-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage46_topk_report.json `
+  --candidate-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage51_rank_contained_preserve_out_of_rank_report.json `
+  --output artifacts\verified_rag_stage51_dev_preserve_vs_topk_comparison.json `
+  --visualization-dir artifacts\verified_rag_stage51_dev_preserve_vs_topk_visuals
+
+python scripts\compare_verified_rag_reports.py `
+  --baseline-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage48_rank_contained_reranker_report.json `
+  --candidate-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage51_rank_contained_preserve_out_of_rank_report.json `
+  --output artifacts\verified_rag_stage51_dev_preserve_vs_rank_contained_comparison.json `
+  --visualization-dir artifacts\verified_rag_stage51_dev_preserve_vs_rank_contained_visuals
+
+python scripts\compare_verified_rag_reports.py `
+  --baseline-report artifacts\verified_rag_train_hybrid_routing_mcpd3_stage49_topk_report.json `
+  --candidate-report artifacts\verified_rag_train_hybrid_routing_mcpd3_stage51_rank_contained_preserve_out_of_rank_report.json `
+  --output artifacts\verified_rag_stage51_train_preserve_vs_topk_comparison.json `
+  --visualization-dir artifacts\verified_rag_stage51_train_preserve_vs_topk_visuals
+
+python scripts\compare_verified_rag_reports.py `
+  --baseline-report artifacts\verified_rag_train_hybrid_routing_mcpd3_stage49_rank_contained_reranker_report.json `
+  --candidate-report artifacts\verified_rag_train_hybrid_routing_mcpd3_stage51_rank_contained_preserve_out_of_rank_report.json `
+  --output artifacts\verified_rag_stage51_train_preserve_vs_rank_contained_comparison.json `
+  --visualization-dir artifacts\verified_rag_stage51_train_preserve_vs_rank_contained_visuals
+```
+
+changed-answer risk：
+
+```powershell
+python scripts\analyze_verified_rag_changed_answer_risk.py `
+  --baseline-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage46_topk_report.json `
+  --candidate-report artifacts\verified_rag_dev_hybrid_routing_mcpd3_stage51_rank_contained_preserve_out_of_rank_report.json `
+  --output artifacts\verified_rag_stage51_dev_preserve_changed_answer_risk_analysis.json `
+  --visualization-dir artifacts\verified_rag_stage51_dev_preserve_changed_answer_risk_visuals
+
+python scripts\analyze_verified_rag_changed_answer_risk.py `
+  --baseline-report artifacts\verified_rag_train_hybrid_routing_mcpd3_stage49_topk_report.json `
+  --candidate-report artifacts\verified_rag_train_hybrid_routing_mcpd3_stage51_rank_contained_preserve_out_of_rank_report.json `
+  --output artifacts\verified_rag_stage51_train_preserve_changed_answer_risk_analysis.json `
+  --visualization-dir artifacts\verified_rag_stage51_train_preserve_changed_answer_risk_visuals
+```
+
+### 实验结果
+
+dev top-k baseline：
+
+```text
+verified F1: 0.2755
+verified gold citation: 95 / 158
+answerable refusals: 2
+unanswerable refusals: 4
+newly refused: 6
+```
+
+dev Stage 48 rank-contained：
+
+```text
+verified F1: 0.2763
+verified gold citation: 95 / 158
+answerable refusals: 2
+unanswerable refusals: 4
+newly refused: 6
+```
+
+dev Stage 51 preservation runtime：
+
+```text
+verified F1: 0.2760
+verified gold citation: 95 / 158
+answerable refusals: 2
+unanswerable refusals: 4
+newly refused: 6
+```
+
+dev Stage 51 vs top-k：
+
+```text
+verified F1 delta: +0.0005
+verified gold citation delta: 0
+newly refused delta: 0
+changed verified answers: 13
+answerable improved: 1
+answerable regressed: 0
+answerable tied changed: 4
+changed unanswerable: 8
+unanswerable refusal regressions: 0
+candidate out-of-rank citation: 0
+```
+
+dev Stage 51 vs Stage 48 rank-contained：
+
+```text
+verified F1 delta: -0.0003
+verified gold citation delta: 0
+newly refused delta: 0
+changed verified answers: 2
+answerable improved: 0
+answerable regressed: 1
+answerable tied changed: 0
+```
+
+train top-k baseline：
+
+```text
+verified F1: 0.2557
+verified gold citation: 232 / 442
+answerable refusals: 8
+unanswerable refusals: 5
+newly refused: 13
+```
+
+train Stage 49 rank-contained：
+
+```text
+verified F1: 0.2565
+verified gold citation: 231 / 442
+answerable refusals: 8
+unanswerable refusals: 5
+newly refused: 13
+```
+
+train Stage 51 preservation runtime：
+
+```text
+verified F1: 0.2565
+verified gold citation: 232 / 442
+answerable refusals: 8
+unanswerable refusals: 5
+newly refused: 13
+```
+
+train Stage 51 vs top-k：
+
+```text
+verified F1 delta: +0.0008
+verified gold citation delta: 0
+newly refused delta: 0
+changed verified answers: 33
+answerable improved: 4
+answerable regressed: 1
+answerable tied changed: 21
+changed unanswerable: 7
+unanswerable refusal regressions: 0
+candidate out-of-rank citation: 0
+```
+
+train Stage 51 vs Stage 49 rank-contained：
+
+```text
+verified F1 delta: 0.0000
+verified gold citation delta: +1
+newly refused delta: 0
+changed verified answers: 6
+answerable improved: 1
+answerable regressed: 2
+answerable tied changed: 0
+```
+
+关键样本：
+
+```text
+TRAIN_Q496:
+  Stage 49 rank-contained verified docs:
+    swg21971637
+    swg21587102
+    swg21587102
+
+  Stage 51 preservation verified docs:
+    swg21587102
+    swg21587102
+    swg21663373
+
+  result:
+    gold doc swg21663373 restored
+```
+
+相对 Stage 49 rank-contained，Stage 51 的代价：
+
+```text
+TRAIN_Q124: answerable F1 delta -0.026721
+TRAIN_Q219: answerable F1 delta -0.017297
+```
+
+相对 top-k，Stage 51 的 train 仍保留的 answerable improvement：
+
+```text
+TRAIN_Q027
+TRAIN_Q353
+TRAIN_Q515
+TRAIN_Q517
+```
+
+相对 top-k，Stage 51 的 train answerable regression：
+
+```text
+TRAIN_Q310
+```
+
+### 可视化结果
+
+本阶段生成的对比可视化目录：
+
+```text
+artifacts/verified_rag_stage51_dev_preserve_vs_topk_visuals
+artifacts/verified_rag_stage51_dev_preserve_vs_rank_contained_visuals
+artifacts/verified_rag_stage51_train_preserve_vs_topk_visuals
+artifacts/verified_rag_stage51_train_preserve_vs_rank_contained_visuals
+```
+
+每个 comparison 目录包含：
+
+```text
+verified_rag_metric_deltas.svg
+verified_rag_changed_answers.svg
+verified_rag_answerable_f1_outcomes.svg
+```
+
+changed-answer risk 可视化目录：
+
+```text
+artifacts/verified_rag_stage51_dev_preserve_changed_answer_risk_visuals
+artifacts/verified_rag_stage51_train_preserve_changed_answer_risk_visuals
+```
+
+每个 risk 目录包含：
+
+```text
+stage47_changed_by_route.svg
+stage47_changed_by_outcome.svg
+stage47_out_of_rank_by_outcome.svg
+stage47_candidate_worst_rank.svg
+```
+
+完整 JSON artifacts：
+
+```text
+artifacts/verified_rag_dev_hybrid_routing_mcpd3_stage51_rank_contained_preserve_out_of_rank_report.json
+artifacts/verified_rag_train_hybrid_routing_mcpd3_stage51_rank_contained_preserve_out_of_rank_report.json
+artifacts/verified_rag_stage51_dev_preserve_vs_topk_comparison.json
+artifacts/verified_rag_stage51_dev_preserve_vs_rank_contained_comparison.json
+artifacts/verified_rag_stage51_train_preserve_vs_topk_comparison.json
+artifacts/verified_rag_stage51_train_preserve_vs_rank_contained_comparison.json
+artifacts/verified_rag_stage51_dev_preserve_changed_answer_risk_analysis.json
+artifacts/verified_rag_stage51_train_preserve_changed_answer_risk_analysis.json
+```
+
+以上 artifacts 均在本地 `artifacts/` 下，按 `.gitignore` 规则不纳入 git。
+
+### 问题与原因
+
+- 问题 1：Stage 49 的 rank-contained guard 能防止 candidate out-of-rank citation，但不能防止 candidate 用 rank 内相似文档替换 baseline 中原本的 out-of-rank gold doc。
+  - Stage 51 通过 preservation guard 恢复了 `TRAIN_Q496` 的 gold doc `swg21663373`。
+- 问题 2：preservation guard 不是免费收益。
+  - dev 相对 Stage 48 rank-contained 损失 `0.0003` F1；
+  - train 相对 Stage 49 rank-contained 牺牲了 `TRAIN_Q124`、`TRAIN_Q219` 两个 answerable improvement；
+  - 但 train gold citation delta 从 Stage 49 的 `-1` 修复到 `0`。
+- 问题 3：首次 train end-to-end 命令 120 秒超时。
+  - 原因是 train split 600 题生成验证耗时约 178 秒；
+  - 处理方式是使用 300 秒超时重跑，并在 trace 修正后再次重跑，最终报告有效。
+- 问题 4：trace 细节最初会在更早 guard 已经拦截时误显示 protected docs dropped。
+  - 已修正为：如果 score/route/rank guard 已经保留 baseline，则 dropped protected docs 为空；
+  - 新增测试覆盖该诊断边界。
+
+### 修正与处理
+
+- 新增非默认 runtime policy，不改变 `top-k` 默认策略。
+- 保持 `candidate-score-rank-contained-reranker` 原有行为不变。
+- 新增 preservation guard 只在显式 policy alias 下启用。
+- report 中写入明确 runtime guard，方便后续追踪。
+- 没有使用 held-out test set。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\candidate_score_guarded_composition_policy.py scripts\evaluate_verified_rag.py tests\test_candidate_score_guarded_composition_policy.py
+pytest -q tests\test_candidate_score_guarded_composition_policy.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 7 passed
+```
+
+全量验证：
+
+```powershell
+ruff check .
+pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 130 passed
+```
+
+artifact JSON 校验：8 个 Stage 51 JSON artifacts 均可正常解析。
+
+### 结论
+
+- Stage 51 runtime 实验通过 dev/train end-to-end 检查：
+  - dev：相对 top-k F1 `+0.0005`，gold citation delta `0`；
+  - train：相对 top-k F1 `+0.0008`，gold citation delta `0`；
+  - dev/train 均无新增 refusal；
+  - dev/train 均无 unanswerable refusal regression；
+  - dev/train candidate out-of-rank citation 均为 `0`。
+- 相对 Stage 49 rank-contained，Stage 51 成功修复 train 的 1 个 gold citation loss。
+- 代价是真实存在的：dev F1 比 Stage 48 rank-contained 低 `0.0003`，train 牺牲两个 rank-contained 带来的 answerable improvement。
+- 因此 Stage 51 可以进入下一步默认化前评审，但仍不能直接默认化。
+- 本阶段没有使用 held-out test set，没有改变默认 runtime 策略。
+
+### 我学到的
+
+- citation-risk guard 需要同时看 rank、document identity、changed-answer outcome，单独看 rank-contained 会漏掉“rank 内相似文档替换 gold doc”的风险。
+- runtime trace 本身也是实验资产；trace 如果误报 dropped docs，会污染下一阶段分析。
+- preservation guard 的收益更像“修复 citation stability”，不是扩大 F1 上限；它适合进入默认化评审，但不应该因为 train gold citation 修复就直接晋升。
+- 对这种候选策略，dev 的轻微 F1 损失和 train 的 citation 修复需要在同一个评审门槛下讨论。
+
+### 下一步
+
+- 做 Stage 52：默认化前评审与 held-out test 使用协议冻结。
+- 目标：
+  1. 汇总 Stage 46-51 的 dev/train 指标、风险、可视化和 artifact；
+  2. 明确默认化门槛：F1、gold citation、refusal、unanswerable regression、changed-answer 风险；
+  3. 决定是否把 Stage 51 policy 作为“唯一待测候选”；
+  4. 在使用 held-out test set 前冻结命令、参数、候选策略和验收标准；
+  5. 继续不在未冻结协议前使用 held-out test set。

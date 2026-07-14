@@ -1,3 +1,5 @@
+import pytest
+
 from ts_rag_agent.application.candidate_score_guarded_composition_policy import (
     CandidateScoreGuardedRerankerCompositionPolicy,
 )
@@ -89,6 +91,136 @@ def test_candidate_score_guarded_reranker_blocks_rank_contained_replacement():
     assert policy.last_trace.action == "keep_top_candidate"
     assert policy.last_trace.proposed_worst_retrieval_rank == 4
     assert policy.last_trace.rank_contained_max_retrieval_rank == 3
+
+
+def test_candidate_score_guarded_reranker_preserves_baseline_out_of_rank_docs():
+    policy = CandidateScoreGuardedRerankerCompositionPolicy(
+        scorer=_FixedScorer([0.2, 0.1, 0.15, 0.95]),
+        selector_name="test_selector",
+        rank_contained_max_retrieval_rank=3,
+        preserve_baseline_out_of_rank_docs=True,
+    )
+    candidates = [
+        _candidate("doc-top", score=100.0, sentence="Top ranked baseline answer."),
+        _candidate("doc-second", score=90.0, sentence="Second baseline answer."),
+        _candidate(
+            "doc-protected",
+            score=80.0,
+            sentence="Baseline out-of-rank answer.",
+            retrieval_rank=4,
+        ),
+        _candidate(
+            "doc-selected",
+            score=75.0,
+            sentence="Model selected in-rank answer.",
+            retrieval_rank=2,
+        ),
+    ]
+
+    decision = policy.select(
+        question=_question(),
+        candidates=candidates,
+        max_sentences=3,
+    )
+
+    assert (
+        policy.name
+        == "candidate_score_gte_60_rank_contained_preserve_baseline_out_of_rank_guarded_reranker"
+    )
+    assert decision.selected_candidates == candidates[:3]
+    assert decision.reason == "baseline_out_of_rank_document_dropped"
+    assert policy.last_trace is not None
+    assert policy.last_trace.action == "keep_top_candidate"
+    assert policy.last_trace.proposed_worst_retrieval_rank == 2
+    assert policy.last_trace.preserve_baseline_out_of_rank_docs is True
+    assert policy.last_trace.protected_baseline_out_of_rank_document_ids == (
+        "doc-protected",
+    )
+    assert policy.last_trace.dropped_protected_baseline_out_of_rank_document_ids == (
+        "doc-protected",
+    )
+
+
+def test_candidate_score_guarded_reranker_accepts_preservation_when_no_doc_is_protected():
+    policy = CandidateScoreGuardedRerankerCompositionPolicy(
+        scorer=_FixedScorer([0.2, 0.95, 0.1]),
+        selector_name="test_selector",
+        rank_contained_max_retrieval_rank=3,
+        preserve_baseline_out_of_rank_docs=True,
+    )
+    candidates = [
+        _candidate("doc-top", score=100.0, sentence="Top ranked baseline answer."),
+        _candidate(
+            "doc-selected",
+            score=80.0,
+            sentence="Selected stronger answer.",
+            retrieval_rank=2,
+        ),
+        _candidate("doc-third", score=70.0, sentence="Third answer.", retrieval_rank=3),
+    ]
+
+    decision = policy.select(
+        question=_question(),
+        candidates=candidates,
+        max_sentences=3,
+    )
+
+    assert decision.selected_candidates == [candidates[1], candidates[0], candidates[2]]
+    assert decision.reason == "candidate_score_gte_60_accepted"
+    assert policy.last_trace is not None
+    assert policy.last_trace.action == "replace_with_model_candidate"
+    assert policy.last_trace.protected_baseline_out_of_rank_document_ids == ()
+    assert policy.last_trace.dropped_protected_baseline_out_of_rank_document_ids == ()
+
+
+def test_candidate_score_guarded_reranker_preservation_trace_respects_earlier_block():
+    policy = CandidateScoreGuardedRerankerCompositionPolicy(
+        scorer=_FixedScorer([0.2, 0.95, 0.1]),
+        selector_name="test_selector",
+        rank_contained_max_retrieval_rank=3,
+        preserve_baseline_out_of_rank_docs=True,
+    )
+    candidates = [
+        _candidate("doc-top", score=100.0, sentence="Top ranked baseline answer."),
+        _candidate(
+            "doc-low",
+            score=59.9,
+            sentence="Low score model pick.",
+            retrieval_rank=2,
+        ),
+        _candidate(
+            "doc-protected",
+            score=80.0,
+            sentence="Baseline out-of-rank answer.",
+            retrieval_rank=4,
+        ),
+    ]
+
+    decision = policy.select(
+        question=_question(),
+        candidates=candidates,
+        max_sentences=3,
+    )
+
+    assert decision.selected_candidates == candidates
+    assert decision.reason == "candidate_score_gte_60_blocked"
+    assert policy.last_trace is not None
+    assert policy.last_trace.protected_baseline_out_of_rank_document_ids == (
+        "doc-protected",
+    )
+    assert policy.last_trace.dropped_protected_baseline_out_of_rank_document_ids == ()
+
+
+def test_candidate_score_guarded_reranker_requires_rank_limit_for_preservation():
+    with pytest.raises(
+        ValueError,
+        match="preserve_baseline_out_of_rank_docs requires rank_contained_max_retrieval_rank",
+    ):
+        CandidateScoreGuardedRerankerCompositionPolicy(
+            scorer=_FixedScorer([0.2]),
+            selector_name="test_selector",
+            preserve_baseline_out_of_rank_docs=True,
+        )
 
 
 class _FixedScorer:

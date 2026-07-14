@@ -41,6 +41,9 @@ class RuntimeCandidateRerankerDecisionTrace:
     model_score_margin_vs_top_candidate: float
     proposed_worst_retrieval_rank: int | None = None
     rank_contained_max_retrieval_rank: int | None = None
+    preserve_baseline_out_of_rank_docs: bool = False
+    protected_baseline_out_of_rank_document_ids: tuple[str, ...] = ()
+    dropped_protected_baseline_out_of_rank_document_ids: tuple[str, ...] = ()
 
 
 class CandidateScoreGuardedRerankerCompositionPolicy:
@@ -52,22 +55,34 @@ class CandidateScoreGuardedRerankerCompositionPolicy:
         selector_name: str,
         policy_config: CandidateRerankerPolicyConfig | None = None,
         rank_contained_max_retrieval_rank: int | None = None,
+        preserve_baseline_out_of_rank_docs: bool = False,
     ) -> None:
         if (
             rank_contained_max_retrieval_rank is not None
             and rank_contained_max_retrieval_rank <= 0
         ):
             raise ValueError("rank_contained_max_retrieval_rank must be positive")
+        if preserve_baseline_out_of_rank_docs and rank_contained_max_retrieval_rank is None:
+            raise ValueError(
+                "preserve_baseline_out_of_rank_docs requires "
+                "rank_contained_max_retrieval_rank"
+            )
         self._scorer = scorer
         self._selector_name = selector_name
         self._policy_config = policy_config or _candidate_score_gte60_config()
         self._rank_contained_max_retrieval_rank = rank_contained_max_retrieval_rank
+        self._preserve_baseline_out_of_rank_docs = preserve_baseline_out_of_rank_docs
         self._last_trace: RuntimeCandidateRerankerDecisionTrace | None = None
 
     @property
     def name(self) -> str:
         """Stable policy name used in experiment reports."""
 
+        if self._preserve_baseline_out_of_rank_docs:
+            return (
+                "candidate_score_gte_60_rank_contained_"
+                "preserve_baseline_out_of_rank_guarded_reranker"
+            )
         if self._rank_contained_max_retrieval_rank is not None:
             return "candidate_score_gte_60_rank_contained_guarded_reranker"
         return "candidate_score_gte_60_guarded_reranker"
@@ -95,6 +110,9 @@ class CandidateScoreGuardedRerankerCompositionPolicy:
                 model_score_margin_vs_top_candidate=0.0,
                 proposed_worst_retrieval_rank=None,
                 rank_contained_max_retrieval_rank=self._rank_contained_max_retrieval_rank,
+                preserve_baseline_out_of_rank_docs=(
+                    self._preserve_baseline_out_of_rank_docs
+                ),
             )
             return AnswerCompositionDecision(
                 selected_candidates=[],
@@ -128,6 +146,7 @@ class CandidateScoreGuardedRerankerCompositionPolicy:
             model_score_margin_vs_top_candidate=margin,
         )
         if blocked_reason is None:
+            baseline_candidates = list(candidates[:max_sentences])
             proposed_candidates = _leading_rewrite_candidates(
                 leading_candidate=selected_candidate,
                 baseline_candidates=candidates,
@@ -138,12 +157,23 @@ class CandidateScoreGuardedRerankerCompositionPolicy:
                 proposed_candidates=proposed_candidates,
                 max_retrieval_rank=self._rank_contained_max_retrieval_rank,
             )
+            preservation_blocked_reason = _baseline_out_of_rank_preservation_blocked_reason(
+                baseline_candidates=baseline_candidates,
+                proposed_candidates=proposed_candidates,
+                max_retrieval_rank=self._rank_contained_max_retrieval_rank,
+                enabled=self._preserve_baseline_out_of_rank_docs,
+            )
             if rank_contained_blocked_reason is None:
-                selected_candidates = proposed_candidates
-                action = "replace_with_model_candidate"
-                reason = "candidate_score_gte_60_accepted"
+                if preservation_blocked_reason is None:
+                    selected_candidates = proposed_candidates
+                    action = "replace_with_model_candidate"
+                    reason = "candidate_score_gte_60_accepted"
+                else:
+                    selected_candidates = baseline_candidates
+                    action = "keep_top_candidate"
+                    reason = preservation_blocked_reason
             else:
-                selected_candidates = list(candidates[:max_sentences])
+                selected_candidates = baseline_candidates
                 action = "keep_top_candidate"
                 reason = rank_contained_blocked_reason
         else:
@@ -151,7 +181,14 @@ class CandidateScoreGuardedRerankerCompositionPolicy:
             action = "keep_top_candidate"
             reason = blocked_reason
             proposed_worst_retrieval_rank = None
+            proposed_candidates = selected_candidates
 
+        protected_docs = _baseline_out_of_rank_document_ids(
+            baseline_candidates=list(candidates[:max_sentences]),
+            max_retrieval_rank=self._rank_contained_max_retrieval_rank,
+            enabled=self._preserve_baseline_out_of_rank_docs,
+        )
+        proposed_docs = _document_ids(proposed_candidates)
         self._last_trace = RuntimeCandidateRerankerDecisionTrace(
             action=action,
             reason=reason,
@@ -160,6 +197,13 @@ class CandidateScoreGuardedRerankerCompositionPolicy:
             model_score_margin_vs_top_candidate=margin,
             proposed_worst_retrieval_rank=proposed_worst_retrieval_rank,
             rank_contained_max_retrieval_rank=self._rank_contained_max_retrieval_rank,
+            preserve_baseline_out_of_rank_docs=(
+                self._preserve_baseline_out_of_rank_docs
+            ),
+            protected_baseline_out_of_rank_document_ids=tuple(sorted(protected_docs)),
+            dropped_protected_baseline_out_of_rank_document_ids=tuple(
+                sorted(protected_docs - proposed_docs)
+            ),
         )
         return AnswerCompositionDecision(
             selected_candidates=selected_candidates,
@@ -175,6 +219,7 @@ def fit_candidate_score_guarded_reranker_composition_policy(
     model_name: str = "logistic_best_candidate",
     train_split: str = "train",
     rank_contained_max_retrieval_rank: int | None = None,
+    preserve_baseline_out_of_rank_docs: bool = False,
 ) -> CandidateScoreGuardedRerankerCompositionPolicy:
     """Fit a runtime candidate-score guarded reranker composition policy."""
 
@@ -195,6 +240,7 @@ def fit_candidate_score_guarded_reranker_composition_policy(
         scorer=scorer,
         selector_name=selector_name,
         rank_contained_max_retrieval_rank=rank_contained_max_retrieval_rank,
+        preserve_baseline_out_of_rank_docs=preserve_baseline_out_of_rank_docs,
     )
 
 
@@ -275,6 +321,47 @@ def _rank_contained_blocked_reason(
     ):
         return "selected_citation_rank_exceeds_limit"
     return None
+
+
+def _baseline_out_of_rank_preservation_blocked_reason(
+    baseline_candidates: Sequence[SentenceEvidenceCandidate],
+    proposed_candidates: Sequence[SentenceEvidenceCandidate],
+    max_retrieval_rank: int | None,
+    enabled: bool,
+) -> str | None:
+    protected_docs = _baseline_out_of_rank_document_ids(
+        baseline_candidates=baseline_candidates,
+        max_retrieval_rank=max_retrieval_rank,
+        enabled=enabled,
+    )
+    if not protected_docs:
+        return None
+    dropped_docs = protected_docs - _document_ids(proposed_candidates)
+    if dropped_docs:
+        return "baseline_out_of_rank_document_dropped"
+    return None
+
+
+def _baseline_out_of_rank_document_ids(
+    baseline_candidates: Sequence[SentenceEvidenceCandidate],
+    max_retrieval_rank: int | None,
+    enabled: bool,
+) -> set[str]:
+    if not enabled:
+        return set()
+    if max_retrieval_rank is None:
+        raise ValueError(
+            "max_retrieval_rank is required when preserving baseline out-of-rank docs"
+        )
+    return {
+        candidate.retrieval_result.document.id
+        for candidate in baseline_candidates
+        if candidate.retrieval_result.rank > max_retrieval_rank
+    }
+
+
+def _document_ids(candidates: Sequence[SentenceEvidenceCandidate]) -> set[str]:
+    return {candidate.retrieval_result.document.id for candidate in candidates}
 
 
 def _worst_retrieval_rank(

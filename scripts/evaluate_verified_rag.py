@@ -82,8 +82,9 @@ def main(
             help=(
                 "Answer composition policy: top-k, route-aware, "
                 "candidate-score-guarded-reranker, or "
-                "candidate-score-rank-contained-reranker. top-k keeps the "
-                "current default runtime behavior."
+                "candidate-score-rank-contained-reranker, or "
+                "candidate-score-rank-contained-preserve-baseline-out-of-rank-reranker. "
+                "top-k keeps the current default runtime behavior."
             ),
         ),
     ] = "top-k",
@@ -458,6 +459,11 @@ def _create_composition_policy(
                     )
                     else None
                 ),
+                preserve_baseline_out_of_rank_docs=(
+                    _is_candidate_score_rank_contained_preservation_reranker_policy(
+                        composition_policy
+                    )
+                ),
             )
         except ValueError as exc:
             raise typer.BadParameter(str(exc)) from exc
@@ -479,18 +485,21 @@ def _candidate_reranker_report_config(
     rank_contained = _is_candidate_score_rank_contained_reranker_policy(
         composition_policy
     )
+    preservation = _is_candidate_score_rank_contained_preservation_reranker_policy(
+        composition_policy
+    )
     return {
         "dataset": str(candidate_reranker_dataset) if candidate_reranker_dataset else None,
         "model": candidate_reranker_model,
         "train_split": candidate_reranker_train_split,
-        "runtime_guard": (
-            "candidate_score_gte_60_all_selected_citations_rank_lte_max_citation_rank"
-            if rank_contained
-            else "candidate_score_gte_60"
+        "runtime_guard": _candidate_reranker_runtime_guard_label(
+            rank_contained=rank_contained,
+            preservation=preservation,
         ),
         "rank_contained_max_retrieval_rank": max_citation_rank
         if rank_contained
         else None,
+        "preserve_baseline_out_of_rank_docs": preservation,
     }
 
 
@@ -501,6 +510,11 @@ def _is_candidate_score_guarded_reranker_policy(composition_policy: str) -> bool
         "candidate_score_gte_60_guarded_reranker",
         "candidate_score_rank_contained_reranker",
         "candidate_score_gte_60_rank_contained_guarded_reranker",
+        "candidate_score_rank_contained_preserve_baseline_out_of_rank_reranker",
+        (
+            "candidate_score_gte_60_rank_contained_"
+            "preserve_baseline_out_of_rank_guarded_reranker"
+        ),
     }
 
 
@@ -509,7 +523,39 @@ def _is_candidate_score_rank_contained_reranker_policy(composition_policy: str) 
     return normalized in {
         "candidate_score_rank_contained_reranker",
         "candidate_score_gte_60_rank_contained_guarded_reranker",
+        "candidate_score_rank_contained_preserve_baseline_out_of_rank_reranker",
+        (
+            "candidate_score_gte_60_rank_contained_"
+            "preserve_baseline_out_of_rank_guarded_reranker"
+        ),
     }
+
+
+def _is_candidate_score_rank_contained_preservation_reranker_policy(
+    composition_policy: str,
+) -> bool:
+    normalized = composition_policy.strip().lower().replace("-", "_")
+    return normalized in {
+        "candidate_score_rank_contained_preserve_baseline_out_of_rank_reranker",
+        (
+            "candidate_score_gte_60_rank_contained_"
+            "preserve_baseline_out_of_rank_guarded_reranker"
+        ),
+    }
+
+
+def _candidate_reranker_runtime_guard_label(
+    rank_contained: bool,
+    preservation: bool,
+) -> str:
+    if preservation:
+        return (
+            "candidate_score_gte_60_all_selected_citations_rank_lte_"
+            "max_citation_rank_preserve_baseline_out_of_rank_docs"
+        )
+    if rank_contained:
+        return "candidate_score_gte_60_all_selected_citations_rank_lte_max_citation_rank"
+    return "candidate_score_gte_60"
 
 
 def _resolve_questions_path(training_dir: Path, split: str) -> Path:
