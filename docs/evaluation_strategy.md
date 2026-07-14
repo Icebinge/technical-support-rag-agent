@@ -3,7 +3,8 @@
 This document records the current evaluation strategy after Stage 53 blocked the
 previously intended NVIDIA held-out path, Stage 55 completed external dataset
 discovery, Stage 56 probed MSQA locally, Stage 57 froze the MSQA evaluation
-split, and Stage 58 recorded the MSQA answer-source baseline.
+split, Stage 58 recorded the MSQA answer-source baseline, and Stage 59 blocked
+direct Stage 51 comparison on the current MSQA task.
 
 ## Current Facts
 
@@ -42,6 +43,18 @@ split, and Stage 58 recorded the MSQA answer-source baseline.
   - primary answer-only MRR: 0.4762
   - primary answer-only average top1 token F1: 0.5138
   - diagnostic question+answer page-text hit@1: 1.0
+- Stage 59 reviewed Stage 58 failure modes and compatibility with Stage 51:
+  - compatibility gate checks: 7
+  - pass: 2
+  - blocked: 5
+  - blocker count: 5
+  - primary answer-only gold-source misses at 10: 1278
+  - primary answer-only wrong top1 sources: 1932
+  - primary answer-only low-F1 top1 answers: 1758
+- Stage 59 decision:
+  - `can_run_stage51_candidate_now: false`
+  - `can_defaultize_runtime_now: false`
+  - diagnostic `question_answer_page_text` is rejected as a comparison target.
 - Default runtime remains unchanged.
 
 ## Rejected Path
@@ -102,12 +115,20 @@ Stage 58 result:
   document-grounded verified RAG logic, while Stage 58 is an MSQA answer-source
   retrieval baseline.
 
-Required next steps:
+Stage 59 result:
 
-1. Review Stage 58 failure modes.
-2. Decide whether Stage 51 can be adapted fairly to the MSQA answer-source task.
-3. Only after that compatibility decision, run or reject a Stage 51 candidate
-   comparison.
+- Stage 51 cannot be fairly compared directly on the current Stage 58 MSQA
+  answer-source task.
+- The diagnostic question+answer page-text variant must not be used for
+  candidate comparison because it indexes the question text and trivializes
+  source-row retrieval.
+- Before any candidate comparison, the project needs an MSQA-compatible
+  source/citation identity contract and candidate construction protocol.
+
+Required next step:
+
+1. Design the MSQA source/citation adapter and comparison protocol before any
+   Stage 51 candidate run.
 
 ## Parked Paths
 
@@ -146,13 +167,15 @@ leakage checks:
 - Do not tune the Stage 51 candidate.
 - Do not use NVIDIA `train.json` as held-out evidence.
 - Do not treat MSQA as a held-out test set.
-- Do not compare top-k against Stage 51 on MSQA before the frozen-split top-k
-  baseline compatibility review is recorded.
+- Do not compare top-k against Stage 51 on MSQA until an MSQA source/citation
+  adapter and comparison protocol have been designed and frozen.
 - Do not reuse MSQA `test_id.txt` as this project's final split until the
   missing ID and upstream filtering assumptions are handled explicitly.
 - Do not use an answer-field fallback for MSQA evaluation samples.
 - Do not treat Stage 58 MSQA answer-source metrics as PrimeQA-style verified
   RAG document-citation metrics.
+- Do not use the Stage 58 diagnostic `question_answer_page_text` variant as a
+  candidate-comparison target.
 
 ## Artifacts
 
@@ -170,4 +193,6 @@ artifacts/msqa_evaluation_split_stage57.jsonl
 artifacts/msqa_evaluation_split_stage57_visuals/
 artifacts/msqa_topk_baseline_stage58.json
 artifacts/msqa_topk_baseline_stage58_visuals/
+artifacts/msqa_stage51_compatibility_stage59.json
+artifacts/msqa_stage51_compatibility_stage59_visuals/
 ```

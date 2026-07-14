@@ -14440,3 +14440,269 @@ jsonl sha256: a60db5be5b1a6bfbf24d32ffc99c5482f57ad3462c39cd7b8510cc3c8d569bb3
   2. 是否需要先设计 MSQA document/corpus construction，而不是直接跑 Stage 51；
   3. 如果可以比较，应该比较 answer-only corpus 还是 page-text corpus；
   4. 是否需要先优化 BM25 performance，再考虑全量 32k corpus baseline。
+
+## 2026-07-14 Stage 59：MSQA failure mode review 与 Stage 51 compatibility gate
+
+### 本阶段目标
+
+Stage 58 已经得到 MSQA frozen-split answer-source top-k baseline。本阶段目标不是运行 Stage 51 candidate，而是先做兼容性门禁：
+
+1. 复查 Stage 58 answer-only baseline 的失败模式；
+2. 明确 Stage 51 PrimeQA document-grounded composition policy 是否能直接用于 MSQA answer-source task；
+3. 判断 `question_answer_page_text` diagnostic variant 能否作为候选比较目标；
+4. 若不能直接比较，记录阻塞原因、可视化结果和下一阶段协议设计方向；
+5. 继续保持默认 runtime 不变。
+
+### Stage 59 预检中的真实 artifact 修正
+
+本阶段开始时发现一个必须如实记录的问题：
+
+```text
+artifacts/msqa_topk_baseline_stage58.json
+```
+
+本地 ignored artifact 一度不是 Stage 58 文档中记录的 frozen-split-only 结果，而是旧的 all-contract-row 尝试残留：
+
+```text
+corpus_contract_rows: 32236
+hit@1: 0.3196
+hit@10: 0.5068
+missing corpus_scope
+LastWriteTime: 2026-07-14 13:37:14
+```
+
+这与 Stage 58 已记录结论不一致，因此我没有继续基于该旧 artifact 做 Stage 59，而是在 Stage 59 预检中按 frozen-split-only 命令真实重跑 Stage 58：
+
+```powershell
+python scripts\evaluate_msqa_topk_baseline.py `
+  --msqa-csv data\raw\msqa_repo\data\msqa-32k.csv `
+  --split-jsonl artifacts\msqa_evaluation_split_stage57.jsonl `
+  --output artifacts\msqa_topk_baseline_stage58.json `
+  --visualization-dir artifacts\msqa_topk_baseline_stage58_visuals `
+  --top-k 1,3,5,10 `
+  --corpus-modes answer_only,question_answer_page_text `
+  --corpus-scope frozen_split_only
+```
+
+重跑后 artifact 恢复为当前一致版本：
+
+```text
+corpus_scope: frozen_split_only
+frozen_split_samples: 3301
+answer_only hit@10: 0.6128
+answer_only MRR: 0.4762
+answer_only average_top1_token_f1: 0.5138
+question_answer_page_text hit@1/hit@10/MRR: 1.0
+current Stage 58 report checksum: f34f1d749d94ff08e2a62f3a22b58ec9804cddea4535d971c4618666b65a4dd8
+```
+
+说明：这是 Stage 59 期间发生的预检修正，不伪装成 Stage 58 原本就已发生。由于 report 中包含 timing 字段，重跑后 checksum 与 Stage 58 文档之前记录的 checksum 不同。
+
+### 新增与修改
+
+新增 Stage 59 compatibility review 模块：
+
+```text
+src/ts_rag_agent/application/msqa_stage51_compatibility_review.py
+```
+
+新增能力：
+
+- 读取 Stage 58 baseline report；
+- 验证 report stage、primary variant、diagnostic variant、frozen split sample 数；
+- 提取 `answer_only` 失败模式；
+- 计算 primary 与 diagnostic 的指标差距；
+- 输出 7 项 compatibility gate checks；
+- 将 gate 结果转换为是否允许运行 Stage 51 candidate 的明确 decision；
+- 生成 Stage 59 SVG 可视化。
+
+新增 CLI：
+
+```text
+scripts/review_msqa_stage51_compatibility.py
+```
+
+新增测试：
+
+```text
+tests/test_msqa_stage51_compatibility_review.py
+```
+
+新增文档：
+
+```text
+docs/msqa_stage51_compatibility.md
+```
+
+同步更新：
+
+```text
+docs/msqa_topk_baseline.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+docs/external_eval_datasets.md
+docs/learning_journal.md
+```
+
+### Stage 59 运行命令
+
+```powershell
+python scripts\review_msqa_stage51_compatibility.py `
+  --stage58-report artifacts\msqa_topk_baseline_stage58.json `
+  --output artifacts\msqa_stage51_compatibility_stage59.json `
+  --visualization-dir artifacts\msqa_stage51_compatibility_stage59_visuals
+```
+
+### Stage 59 结果
+
+输入摘要：
+
+```text
+split_name: msqa_stage57_project_eval_v1
+adapter_contract_version: msqa_eval_adapter_v1
+corpus_scope: frozen_split_only
+evaluated_questions: 3301
+primary_variant: answer_only
+diagnostic_variant: question_answer_page_text
+max_k: 10
+```
+
+answer-only failure mode：
+
+```text
+gold_source_missing_at_10: 1278 / 3301 = 0.3872
+top1_wrong_source: 1932 / 3301 = 0.5853
+top1_token_f1_below_0_3: 1758 / 3301 = 0.5326
+```
+
+primary vs diagnostic gap：
+
+```text
+hit@1 gap: 0.5853
+hit@10 gap: 0.3872
+MRR gap: 0.5238
+average_top1_token_f1 gap: 0.4862
+```
+
+compatibility gate：
+
+```text
+total_checks: 7
+pass: 2
+blocked: 5
+blocker_count: 5
+```
+
+blocked checks：
+
+```text
+stage51_task_semantics_match_msqa
+citation_identity_contract_match
+candidate_feature_contract_available
+diagnostic_variant_usable_for_comparison
+failure_modes_are_policy_test_ready
+```
+
+decision：
+
+```text
+status: stage51_msqa_compatibility_blocked
+can_run_stage51_candidate_now: false
+can_defaultize_runtime_now: false
+default_runtime_policy: unchanged
+rejected_comparison_variant: question_answer_page_text
+recommended_next_stage: Stage 60: design the MSQA source/citation adapter and comparison protocol before any Stage 51 candidate run
+```
+
+### 可视化结果
+
+本阶段生成：
+
+```text
+artifacts/msqa_stage51_compatibility_stage59_visuals/stage59_msqa_stage51_gate_checks.svg
+artifacts/msqa_stage51_compatibility_stage59_visuals/stage59_msqa_answer_only_failure_modes.svg
+artifacts/msqa_stage51_compatibility_stage59_visuals/stage59_msqa_variant_metric_comparison.svg
+```
+
+Stage 59 report：
+
+```text
+artifacts/msqa_stage51_compatibility_stage59.json
+```
+
+Stage 59 report checksum：
+
+```text
+9f72f74262ee4c2da0613e2482043366049051aae3a6ea647b617f2bfd6d79b2
+```
+
+以上 artifacts 位于本地 `artifacts/`，按 `.gitignore` 不纳入 git。
+
+### 问题与原因
+
+- 问题 1：Stage 59 预检时发现 Stage 58 本地 ignored artifact 与已记录 frozen-split 指标不一致。
+  - 原因：本地 ignored artifact 残留了旧的 all-contract-row 尝试结果；
+  - 处理：在 Stage 59 期间真实重跑 Stage 58 frozen-split-only 命令，并在文档中记录这是 Stage 59 预检修正。
+- 问题 2：Stage 51 不能直接跑在当前 MSQA task 上。
+  - 原因：Stage 51 的输入/策略围绕 PrimeQA `SentenceEvidenceCandidate`、文档 ID、citation rank 和 candidate score；当前 MSQA Stage 58 是 Q&A row answer-source retrieval，没有独立 document-span citation contract。
+- 问题 3：`question_answer_page_text` 指标不能作为 candidate comparison。
+  - 原因：它把 question text 放入 index，gold row 自匹配过强，hit@1/MRR/F1 全部达到 1.0；
+  - 处理：Stage 59 明确将其标记为 rejected comparison variant。
+- 问题 4：answer-only baseline failure modes 主要是 retrieval/source-row 层面问题。
+  - 证据：1278 个 gold source missing@10，1932 个 top1 wrong source，1758 个 top1 low-F1；
+  - 处理：先设计 MSQA source/citation adapter 与 candidate construction protocol，再考虑 candidate policy。
+
+### 测试
+
+局部验证：
+
+```powershell
+ruff check src\ts_rag_agent\application\msqa_stage51_compatibility_review.py scripts\review_msqa_stage51_compatibility.py tests\test_msqa_stage51_compatibility_review.py
+pytest -q tests\test_msqa_stage51_compatibility_review.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 4 passed
+```
+
+Stage 59 真实 artifact 生成：
+
+```text
+python scripts\review_msqa_stage51_compatibility.py --stage58-report artifacts\msqa_topk_baseline_stage58.json --output artifacts\msqa_stage51_compatibility_stage59.json --visualization-dir artifacts\msqa_stage51_compatibility_stage59_visuals
+```
+
+结果：
+
+```text
+json report: generated
+svg visualizations: 3 generated
+```
+
+### 结论
+
+- Stage 59 完成 MSQA failure mode review 与 Stage 51 compatibility gate。
+- Stage 51 不能直接在当前 MSQA Stage 58 answer-source task 上运行。
+- `question_answer_page_text` diagnostic variant 不能作为 candidate comparison target。
+- 默认 runtime 不变。
+- 当前还没有得到可以支持 defaultization 的 held-out test evidence。
+- 下一步不是跑 Stage 51，而是设计 MSQA-compatible source/citation adapter 和 comparison protocol。
+
+### 我学到的
+
+- ignored artifact 不能因为“上一步已提交”就默认可信；跨阶段开始前必须抽查真实 artifact 内容，尤其是 artifact 不进 git 时。
+- 外部数据集的 schema 兼容不等于任务兼容。MSQA 有 question/answer/source URL，但这还不是 PrimeQA-style document-grounded citation task。
+- diagnostic variant 可以帮助理解上限，但如果它把 query 本身写进 index，就不能拿来做候选策略评测。
+- composition policy 的比较前提是候选对象一致。没有 MSQA evidence candidate contract 时，直接跑 Stage 51 会把 retrieval task、citation task 和 reranker task 混在一起。
+
+### 下一步
+
+- 做 Stage 60：MSQA source/citation adapter 与 comparison protocol 设计。
+- Stage 60 目标：
+  1. 定义 MSQA 上的 source/citation identity；
+  2. 设计如何从 MSQA Q&A row 构造 evidence candidates；
+  3. 明确是否使用 answer sentence、processed answer chunk、source URL 或 Microsoft Learn link 作为 citation unit；
+  4. 冻结 baseline/candidate 共享的 comparison protocol；
+  5. 继续不运行 Stage 51 candidate，直到 Stage 60 protocol 明确通过。

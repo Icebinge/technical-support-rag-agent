@@ -89,11 +89,15 @@ Current boundary:
 - MSQA is now frozen for the next baseline evaluation step, but it is not yet
   evidence for changing the default runtime.
 
-Before MSQA can support a defaultization decision, the next stage must run the
-top-k baseline on the frozen split and record the baseline quality and failure
-modes. Stage 58 has now recorded this baseline, but it also showed that the MSQA
-task is answer-source retrieval rather than PrimeQA-style document-grounded
-verified RAG. Stage 51 comparison must wait for a compatibility review.
+Before MSQA can support a defaultization decision, the project must have a task
+contract that is fair for both the baseline and candidate. Stage 58 recorded the
+frozen-split answer-source baseline, and Stage 59 reviewed compatibility with
+Stage 51. Direct Stage 51 comparison is blocked because Stage 51 is a PrimeQA
+document-grounded evidence composition policy, while the current MSQA task is
+answer-source row retrieval.
+
+The next data step is to design an MSQA source/citation adapter and comparison
+protocol before any Stage 51 candidate run.
 
 ## Split Rule
 
@@ -140,6 +144,12 @@ The current MSQA top-k baseline is recorded in:
 
 ```text
 docs/msqa_topk_baseline.md
+```
+
+The current MSQA Stage 51 compatibility review is recorded in:
+
+```text
+docs/msqa_stage51_compatibility.md
 ```
 
 ## Leakage Checks

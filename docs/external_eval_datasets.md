@@ -150,6 +150,33 @@ future compatibility review.
 
 Stage 58 still does not approve Stage 51 comparison or default runtime changes.
 
+## Stage 59 MSQA Stage 51 Compatibility Review
+
+Stage 59 reviewed whether the existing Stage 51 candidate can be fairly compared
+on the current MSQA answer-source task.
+
+| Gate check summary | Result |
+| --- | ---: |
+| Total checks | 7 |
+| Pass | 2 |
+| Blocked | 5 |
+| Blocker count | 5 |
+
+Primary answer-only failure modes:
+
+| Failure mode | Count | Rate |
+| --- | ---: | ---: |
+| `gold_source_missing_at_10` | 1278 | 0.3872 |
+| `top1_wrong_source` | 1932 | 0.5853 |
+| `top1_token_f1_below_0_3` | 1758 | 0.5326 |
+
+Decision:
+
+- direct Stage 51 comparison is blocked;
+- default runtime remains unchanged;
+- diagnostic `question_answer_page_text` is rejected as a comparison target;
+- the next step is an MSQA source/citation adapter and comparison protocol.
+
 ## Source Snapshot
 
 Sources checked on 2026-07-14:
@@ -198,6 +225,10 @@ artifacts/msqa_topk_baseline_stage58_visuals/stage58_msqa_hit_at_1.svg
 artifacts/msqa_topk_baseline_stage58_visuals/stage58_msqa_hit_at_10.svg
 artifacts/msqa_topk_baseline_stage58_visuals/stage58_msqa_mrr.svg
 artifacts/msqa_topk_baseline_stage58_visuals/stage58_msqa_top1_answer_f1.svg
+artifacts/msqa_stage51_compatibility_stage59.json
+artifacts/msqa_stage51_compatibility_stage59_visuals/stage59_msqa_stage51_gate_checks.svg
+artifacts/msqa_stage51_compatibility_stage59_visuals/stage59_msqa_answer_only_failure_modes.svg
+artifacts/msqa_stage51_compatibility_stage59_visuals/stage59_msqa_variant_metric_comparison.svg
 ```
 
 These artifacts are local outputs under `artifacts/` and are not committed by

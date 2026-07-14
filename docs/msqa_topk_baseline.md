@@ -149,6 +149,21 @@ artifacts/msqa_topk_baseline_stage58_visuals/stage58_msqa_top1_answer_f1.svg
 Report checksum:
 
 ```text
+f34f1d749d94ff08e2a62f3a22b58ec9804cddea4535d971c4618666b65a4dd8
+```
+
+Stage 59 preflight correction:
+
+During Stage 59 preflight on 2026-07-14, the local ignored Stage 58 JSON
+artifact on disk was found inconsistent with the documented frozen-split result.
+It contained an older all-contract-row attempt. The Stage 58 frozen-split command
+was rerun during Stage 59 to restore the current artifact. The metrics above
+remained the frozen-split result; the checksum above is the current local report
+checksum after that Stage 59 rerun.
+
+The previously recorded checksum was:
+
+```text
 d114f5f3ad1a4e9680a6296c59d66150770d94605c652fea4e2e8e9039897234
 ```
 
@@ -156,6 +171,6 @@ These artifacts are local ignored outputs and are not committed by git policy.
 
 ## Next Step
 
-Stage 59 should review MSQA baseline failure modes and decide whether Stage 51
-can be adapted fairly to the MSQA answer-source task. It should not run the
-Stage 51 candidate before that compatibility decision is recorded.
+Stage 59 reviewed MSQA baseline failure modes and blocked direct Stage 51
+comparison. Stage 60 should design an MSQA source/citation adapter and comparison
+protocol before any Stage 51 candidate run.
