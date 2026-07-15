@@ -26326,3 +26326,281 @@ dev validation only
 runtime defaults unchanged
 no fallback strategies
 ```
+
+## Stage109：运行 failure-pattern redesign train-CV/dev comparison
+
+### 目标
+
+按 Stage108 冻结的协议继续下一步，真正实现 3 个 candidate families / 7 个 configs，并运行：
+
+```text
+train grouped-CV selection only
+dev single validation only
+test locked
+no final metrics
+runtime defaults unchanged
+no fallback strategies
+```
+
+本阶段不是 runtime defaultization，也不是 final-test gate。
+
+### 本阶段新增内容
+
+新增：
+
+```text
+src\ts_rag_agent\application\primeqa_hybrid_failure_pattern_redesign_comparison.py
+scripts\run_primeqa_hybrid_failure_pattern_redesign_comparison.py
+tests\test_primeqa_hybrid_failure_pattern_redesign_comparison.py
+docs\primeqa_hybrid_failure_pattern_redesign_comparison.md
+```
+
+真实运行输出：
+
+```text
+artifacts\primeqa_hybrid_failure_pattern_redesign_comparison_stage109.json
+artifacts\primeqa_hybrid_failure_pattern_redesign_comparison_stage109_visuals\
+```
+
+注意：`artifacts/` 目录按仓库规则被 `.gitignore` 忽略；提交中记录的是代码、脚本、测试和文档摘要，不把 artifact JSON/SVG 作为 tracked 文件。
+
+### 实现边界
+
+Stage109 只读取：
+
+```text
+Stage108 frozen protocol
+Stage102 public-safe decomposition report
+Stage68 train split
+Stage68 dev split
+PrimeQA training/dev corpus sections
+```
+
+没有读取 test split，没有运行 final metrics，没有把 dev 用于 config selection 或 threshold tuning。
+
+Train grouped-CV 的 grouping 内部使用：
+
+```text
+normalized question + answer document / unanswerable marker
+```
+
+报告只写 fold counts，不写 raw group values。
+
+### 真实数据
+
+```text
+documents: 28482
+train rows: 562
+train answerable rows: 370
+train unanswerable rows: 192
+dev rows: 121
+dev answerable rows: 76
+dev unanswerable rows: 45
+```
+
+Train grouped-CV：
+
+```text
+fold_count: 5
+fold_1: 113 rows / 107 groups
+fold_2: 113 rows / 107 groups
+fold_3: 112 rows / 106 groups
+fold_4: 112 rows / 106 groups
+fold_5: 112 rows / 107 groups
+raw_group_values_written: false
+```
+
+### Baseline
+
+Stage109 复现的 Stage102 verified BM25 top10 answer-pipeline baseline：
+
+```text
+train-CV weighted target score: 728.70
+train-full weighted target score: 728.70
+dev weighted target score: 163.55
+```
+
+Train-CV verified：
+
+```text
+answerable_refusal_rate: 0.0459
+unanswerable_refusal_rate: 0.0625
+gold_doc_citation_rate: 0.4958
+average_token_f1: 0.2017
+```
+
+Dev verified：
+
+```text
+answerable_refusal_rate: 0.1053
+unanswerable_refusal_rate: 0.0889
+gold_doc_citation_rate: 0.6029
+average_token_f1: 0.2040
+```
+
+### Train-CV 结果
+
+7 个 frozen configs 的 train-CV ranking：
+
+| Rank | Config | Train-CV delta | Selectable | Changed answers |
+| ---: | --- | ---: | --- | ---: |
+| 1 | jsgc_support2_evidence7_anchor_top2_v1 | -199.65 | false | 534 |
+| 2 | cpsc_title_query_anchor_top2_mcpd3_rank3_v1 | -123.05 | false | 543 |
+| 3 | jsgc_support2_evidence6_title_anchor_top2_v1 | -115.90 | false | 551 |
+| 4 | saag_support2_evidence7_rank3_v1 | -111.15 | false | 117 |
+| 5 | saag_support2_evidence6_rank5_v1 | -31.65 | false | 49 |
+| 6 | cpsc_anchor_top2_mcpd3_rank3_v1 | -28.50 | false | 533 |
+| 7 | cpsc_anchor_top3_mcpd3_rank3_v1 | 0.00 | false | 0 |
+
+结论：
+
+```text
+selected_config_id: null
+selectable_config_count: 0 / 7
+```
+
+虽然多数 config 都让 weighted target score 下降，但全部被 frozen train-CV selectability guard 挡住。
+
+### 失败规律
+
+主要失败原因是 answerable refusal 增加太多。
+
+Frozen guard：
+
+```text
+max_train_cv_answerable_refusal_rate_delta: 0.02
+```
+
+实际：
+
+```text
+jsgc_support2_evidence7_anchor_top2_v1: +0.3784
+cpsc_title_query_anchor_top2_mcpd3_rank3_v1: +0.3027
+jsgc_support2_evidence6_title_anchor_top2_v1: +0.2352
+saag_support2_evidence7_rank3_v1: +0.1919
+saag_support2_evidence6_rank5_v1: +0.0568
+cpsc_anchor_top2_mcpd3_rank3_v1: +0.0541
+cpsc_anchor_top3_mcpd3_rank3_v1: +0.0000
+```
+
+`cpsc_anchor_top3_mcpd3_rank3_v1` 是 no-op：
+
+```text
+train-CV delta: 0.00
+changed answers: 0
+failed guard: train_cv_weighted_target_delta_negative
+```
+
+因此它也不能被选中。
+
+### Dev validation
+
+Dev 没有被用于选择或调参。因为 train-CV 没有选出任何 config，所以没有 selected config 可以进入 dev validation：
+
+```text
+selected_config_id: null
+status: no_train_cv_selectable_config
+dev_validation_passed: false
+```
+
+部分 config 在 dev 上也有 weighted target delta 改善，但它们已经在 train-CV guard 上失败，不能从 dev 反选。
+
+### 决策
+
+```text
+status: primeqa_hybrid_failure_pattern_redesign_completed_no_train_cv_selectable_config
+selected_config_id: null
+selectable_config_count: 0
+dev_validation_passed: false
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+fallback_strategies_enabled: false
+default_runtime_policy: unchanged
+recommended_next_direction: record_failure_pattern_redesign_stop_decision
+```
+
+Stage109 不支持 runtime defaultization，也不能打开 final-test gate。
+
+### 可视化结果
+
+已生成：
+
+```text
+artifacts\primeqa_hybrid_failure_pattern_redesign_comparison_stage109_visuals\stage109_train_cv_weighted_target_deltas.svg
+artifacts\primeqa_hybrid_failure_pattern_redesign_comparison_stage109_visuals\stage109_dev_weighted_target_deltas.svg
+artifacts\primeqa_hybrid_failure_pattern_redesign_comparison_stage109_visuals\stage109_train_cv_selectability.svg
+artifacts\primeqa_hybrid_failure_pattern_redesign_comparison_stage109_visuals\stage109_changed_answer_counts.svg
+artifacts\primeqa_hybrid_failure_pattern_redesign_comparison_stage109_visuals\stage109_dev_metric_deltas.svg
+artifacts\primeqa_hybrid_failure_pattern_redesign_comparison_stage109_visuals\stage109_decision_flags.svg
+artifacts\primeqa_hybrid_failure_pattern_redesign_comparison_stage109_visuals\stage109_guard_check_status.svg
+```
+
+### 问题、原因与修正
+
+- 问题 1：所有 candidate 都不能进入 dev selected validation。
+  - 原因：没有任何 config 同时满足负向 train-CV target delta 和 frozen selectability guards。
+  - 修正：如实记录为 no selectable config，不从 dev 反选。
+- 问题 2：多数 target-score 改善来自更强的拒答。
+  - 原因：support gate 和 joint gate 降低了 false-answer / span-miss buckets，但显著增加 answerable refusal。
+  - 修正：保留 guard 阻断，不放宽阈值，不加入兜底策略。
+- 问题 3：一个 config 是 no-op。
+  - 原因：`cpsc_anchor_top3_mcpd3_rank3_v1` 与 baseline 结果等价。
+  - 修正：Stage108 的 no-op block 生效，不能把它作为可推进 config。
+
+### 验证
+
+局部验证：
+
+```text
+python -m ruff check src\ts_rag_agent\application\primeqa_hybrid_failure_pattern_redesign_comparison.py scripts\run_primeqa_hybrid_failure_pattern_redesign_comparison.py tests\test_primeqa_hybrid_failure_pattern_redesign_comparison.py
+python -m pytest tests\test_primeqa_hybrid_failure_pattern_redesign_comparison.py -q
+python scripts\run_primeqa_hybrid_failure_pattern_redesign_comparison.py --user-confirmed-comparison ...
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+Stage109 run: passed
+guard checks: 20 / 20 passed
+runtime defaults: unchanged
+fallback strategies: disabled
+test/final metrics: locked
+```
+
+全仓验证：
+
+```text
+python -m ruff check .
+python -m pytest -q
+git diff --check
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 297 passed
+git diff --check: passed
+```
+
+### 我学到了
+
+- train-CV 的价值在这里很明确：dev 上看起来有改善的 config，只要 train-CV guard 不过，就不能推进。
+- 当前这一批 redesign 仍然把“减少 false answer”变成了“更多 answerable refusal”，说明简单 support gate / anchor composer 不是可默认化路线。
+- no-op 不再能作为“安全但没收益”的候选进入下一关，这是 Stage108 协议里最关键的修正之一。
+- 下一步不是调阈值救这个 family，也不是看 test，而是先记录 stop decision，明确为什么这条 frozen redesign family 停止。
+
+### 下一步
+
+Stage110：记录 frozen Stage108 failure-pattern redesign family 的 stop decision。必须说明：
+
+```text
+all 7 configs failed train-CV selectability
+dev cannot be used to rescue nonselectable configs
+test remains locked
+runtime defaults remain unchanged
+fallback strategies remain disabled
+```
