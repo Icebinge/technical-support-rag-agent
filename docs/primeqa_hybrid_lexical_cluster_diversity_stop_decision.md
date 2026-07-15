@@ -192,7 +192,12 @@ git diff --check: passed
 
 ## Next Step
 
-Stage88 should confirm and freeze the train/dev-only protocol for
-`structured_query_keyphrase_compaction_design`. The frozen test split remains
-locked, final metrics must not be run, source `DOC_IDS` must not be used as
-runtime retrieval evidence, and runtime defaults remain unchanged.
+Stage88 confirmed and froze the train/dev-only protocol for
+`structured_query_keyphrase_compaction_design` as
+`structured_query_keyphrase_compaction_train_dev_v1`. Stage88 did not run
+retrieval metrics and did not change runtime defaults.
+
+The current next step is Stage89: run the frozen train/dev-only structured query
+keyphrase compaction comparison after user confirmation. The frozen test split
+remains locked, final metrics must not be run, source `DOC_IDS` must not be used
+as runtime retrieval evidence, and runtime defaults remain unchanged.

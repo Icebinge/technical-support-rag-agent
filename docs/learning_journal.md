@@ -21123,3 +21123,225 @@ git diff --check: passed
 Stage88：确认并冻结 `structured_query_keyphrase_compaction_design` 的 train/dev-only protocol。
 
 Stage88 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。
+
+## Stage88：structured query keyphrase compaction protocol freeze
+
+### 目标
+
+Stage88 的目标是确认并冻结 `structured_query_keyphrase_compaction_design` 的 train/dev-only protocol。
+
+本阶段只做 protocol freeze：
+
+- 不运行 retrieval metrics。
+- 不读取 train/dev/test split 文件。
+- 不触碰 frozen test。
+- 不运行 final metrics。
+- 不使用 source `DOC_IDS` 作为 runtime 检索证据。
+- 不改变 runtime 默认策略。
+
+### 用户确认
+
+本轮用户说“好确认下一步”，我按 Stage87 已记录的推荐下一步解释为确认：
+
+```text
+confirmed: true
+confirmed_candidate_id: structured_query_keyphrase_compaction_design
+confirmation_note: user confirmed Stage88 structured query protocol freeze in current turn
+```
+
+### 新增文件
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_structured_query_protocol.py
+scripts/freeze_primeqa_hybrid_structured_query_protocol.py
+tests/test_primeqa_hybrid_structured_query_protocol.py
+docs/primeqa_hybrid_structured_query_protocol.md
+```
+
+### 更新文件
+
+```text
+docs/primeqa_hybrid_lexical_cluster_diversity_stop_decision.md
+docs/primeqa_hybrid_second_wave_retrieval_candidate_design.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+docs/learning_journal.md
+```
+
+### 真实运行命令
+
+```text
+python scripts\freeze_primeqa_hybrid_structured_query_protocol.py --user-confirmed-candidate --confirmed-candidate-id structured_query_keyphrase_compaction_design --confirmation-note "user confirmed Stage88 structured query protocol freeze in current turn" --output artifacts\primeqa_hybrid_structured_query_protocol_stage88.json --visualization-dir artifacts\primeqa_hybrid_structured_query_protocol_stage88_visuals
+```
+
+最终记录运行耗时：
+
+```text
+total: 0.000s
+```
+
+### 输入证据
+
+Stage88 只读取 public-safe artifacts：
+
+```text
+artifacts\primeqa_hybrid_second_wave_retrieval_candidate_design_stage84.json
+artifacts\primeqa_hybrid_lexical_cluster_diversity_stop_decision_stage87.json
+```
+
+Stage87 的真实 decision：
+
+```text
+status: primeqa_hybrid_lexical_cluster_diversity_route_stopped
+stopped_candidate_id: lexical_cluster_diversity_rerank_design
+next_candidate_id: structured_query_keyphrase_compaction_design
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+default_runtime_policy: unchanged
+```
+
+### Frozen protocol
+
+```text
+protocol_id: structured_query_keyphrase_compaction_train_dev_v1
+candidate_id: structured_query_keyphrase_compaction_design
+protocol_status: frozen_requires_user_confirmation_before_metric_run
+```
+
+冻结的 config grid：
+
+```text
+sqkc_action_error_product_v1: action_error_product_version_terms, max_terms=18
+sqkc_title_guarded_action_error_v1: title_guarded_action_error_product_terms, max_terms=16
+sqkc_error_first_compact_v1: error_identifier_first_terms, max_terms=14
+sqkc_noun_phrase_compact_v1: deterministic_noun_phrase_like_terms, max_terms=20
+```
+
+训练选择规则：
+
+```text
+selection_split: train
+validation_split: dev
+rule: train 上按 hit@10、hit@5、hit@1、MRR@10、top10 regression、rank-down within top10、平均 compacted token count、config_id 选择。
+dev_selection_forbidden: true
+test_selection_forbidden: true
+```
+
+### Guard checks
+
+全部通过：
+
+```text
+23 / 23 passed
+```
+
+关键 guard：
+
+- Stage84 report 是 Stage84。
+- Stage87 report 是 Stage87。
+- Stage87 已停止 LCDR route。
+- 用户确认的 candidate 与 Stage87 next candidate 一致。
+- Stage84 和 Stage87 都保持 final-test locked。
+- Stage84 和 Stage87 都禁止 test tuning。
+- Stage84 和 Stage87 都保持 runtime default unchanged。
+- protocol id 固定为 `structured_query_keyphrase_compaction_train_dev_v1`。
+- config grid 是预声明 4 项。
+- source `DOC_IDS` 被禁止作为 runtime feature。
+- report 字段只允许 public-safe id、rank、count。
+- Stage88 不运行指标、不跑 final metrics、不改 runtime 默认策略。
+
+### 可视化产物
+
+```text
+artifacts\primeqa_hybrid_structured_query_protocol_stage88_visuals\stage88_structured_query_config_token_limits.svg
+artifacts\primeqa_hybrid_structured_query_protocol_stage88_visuals\stage88_structured_query_feature_group_counts.svg
+artifacts\primeqa_hybrid_structured_query_protocol_stage88_visuals\stage88_structured_query_protocol_decision_flags.svg
+artifacts\primeqa_hybrid_structured_query_protocol_stage88_visuals\stage88_structured_query_guard_check_status.svg
+```
+
+Stage88 JSON SHA256：
+
+```text
+12A9045D7B65208EFF840E931E296FE56ED4D02A5852DA3C299011BA14767A7C
+```
+
+Visualization SHA256：
+
+```text
+stage88_structured_query_config_token_limits.svg: 2E3043E29343BEB0FBA12DE53131D8D5A4803AB1771870F08023BDA052F20326
+stage88_structured_query_feature_group_counts.svg: 90D455A2D32F7DD2647C8532E0E9F2CBADE6D612FC171C5350924EC3B0F1B2C1
+stage88_structured_query_guard_check_status.svg: 11F2670D9C3A9AD8058F91F383E6D0F13BBEAA072B887363FFB165A7AE0D3CA7
+stage88_structured_query_protocol_decision_flags.svg: 67FD7B7B6651A8209912306BD4030068F93EDDE389B38EF97DF46E8A2AF5B14B
+```
+
+### 问题、原因与修正
+
+- 问题 1：第一版测试夹具中故意塞入了 `example_raw_question`，暴露出如果整段写回 Stage84 candidate，未来可能把 raw 字段带入 Stage88 report。
+  - 原因：初版 `_selected_candidate` 直接返回 candidate dict。
+  - 修正：改成 explicit public candidate summary 白名单，只写出候选 id、状态、优先级、target contract 等 public-safe 字段。
+  - 影响：Stage88 report 更安全，真实 Stage84 artifact 没有 raw 字段，但代码现在能防止上游结构变化误带出 raw 字段。
+
+- 问题 2：第一版 safety scan 命中 `"answer_doc_id"`。
+  - 原因：它只出现在 prohibited runtime features 中，不是实际 report 字段或 runtime evidence，但字段名形式容易造成误判。
+  - 修正：改成自然语言禁止项 `answer document IDs`，保留禁止语义，同时让 raw/field safety scan 无命中。
+  - 影响：协议含义不变，产物更清晰。
+
+- 问题 3：第一次 lint 命中 `stage84_decision` 已读取但未使用。
+  - 原因：Stage88 初版只校验 Stage87 的锁定状态，没有把 Stage84 decision 的 final/test/default guard 加入。
+  - 修正：新增 Stage84 final-test locked、forbid test tuning、runtime default unchanged 三个 guard checks。
+  - 影响：guard checks 从 20 项扩展到 23 项，协议边界更完整。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_structured_query_protocol.py scripts\freeze_primeqa_hybrid_structured_query_protocol.py tests\test_primeqa_hybrid_structured_query_protocol.py
+pytest -q tests\test_primeqa_hybrid_structured_query_protocol.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+产物安全检查：
+
+```text
+Select-String raw question / answer / document / snippet field patterns over Stage88 JSON: no matches
+git check-ignore Stage88 JSON and SVG artifacts: ignored by .gitignore
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 229 passed
+git diff --check: passed
+```
+
+### 结论
+
+- Stage88 已冻结 `structured_query_keyphrase_compaction_train_dev_v1`。
+- Stage88 没有运行 retrieval metrics。
+- Stage88 没有读取 train/dev/test split。
+- Stage88 没有使用 test。
+- Stage88 没有跑 final metrics。
+- Stage88 没有使用 source `DOC_IDS` 作为 runtime 检索证据。
+- Stage88 没有改变 runtime 默认策略。
+- 现在只能在用户确认后进入 Stage89 train/dev-only metric run。
+
+### 我学到了
+
+- Protocol freeze 不能只写“下一候选是谁”，还要把来源链路写进 guard checks：Stage84 负责候选 contract，Stage87 负责确认上一条 route 已停止。
+- 对 public-safe report 来说，字段白名单比“相信输入 artifact 很干净”更可靠；尤其是后续上游结构可能扩展时。
+- 禁止项本身也要避免使用容易被误判的 raw 字段名；自然语言禁止项更适合写入 public-safe artifact。
+- Stage88 的价值不是证明 structured query 有效果，而是把下一次 train/dev metric run 的边界锁死，防止 dev/test 泄漏。
+
+### 下一步
+
+Stage89：在用户确认后，运行 frozen train/dev-only structured query keyphrase compaction comparison。
+
+Stage89 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。

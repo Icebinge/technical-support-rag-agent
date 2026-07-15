@@ -417,6 +417,13 @@ recorded in:
 docs/primeqa_hybrid_lexical_cluster_diversity_stop_decision.md
 ```
 
+The current PrimeQA/TechQA hybrid structured query protocol freeze is recorded
+in:
+
+```text
+docs/primeqa_hybrid_structured_query_protocol.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:
