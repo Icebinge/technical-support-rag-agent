@@ -25024,3 +25024,221 @@ Select-String Stage102 JSON for raw question / answer / document id / token fiel
 Stage103：基于 Stage102 的共同瓶颈，设计 train/dev-only candidate intervention protocol。
 优先方向是 `evidence_selection_and_answerability_candidate_design`，但仍不能读取 test、不能运行
 final metrics、不能改 runtime 默认策略、不能加入 fallback strategy。
+
+## 2026-07-15 Stage103：冻结 evidence/answerability candidate protocol
+
+### 本阶段目标
+
+Stage103 的目标不是跑新指标，而是把 Stage102 暴露出来的共同瓶颈转成下一步可执行的
+train/dev-only candidate protocol。输入只允许使用 Stage102 已保存的 public-safe aggregate JSON，
+不读取 train/dev/test split，不读取 corpus documents，不运行 retrieval/answer/final metrics，不改 runtime 默认策略，
+不加入 fallback strategy。
+
+### 新增内容
+
+代码与脚本：
+
+```text
+src\ts_rag_agent\application\primeqa_hybrid_evidence_answerability_candidate_protocol.py
+scripts\design_primeqa_hybrid_evidence_answerability_candidates.py
+tests\test_primeqa_hybrid_evidence_answerability_candidate_protocol.py
+```
+
+文档：
+
+```text
+docs\primeqa_hybrid_evidence_answerability_candidate_protocol.md
+docs\evaluation_strategy.md
+docs\data_strategy.md
+docs\learning_journal.md
+```
+
+产物：
+
+```text
+artifacts\primeqa_hybrid_evidence_answerability_candidate_protocol_stage103.json
+artifacts\primeqa_hybrid_evidence_answerability_candidate_protocol_stage103.console.txt
+artifacts\primeqa_hybrid_evidence_answerability_candidate_protocol_stage103_visuals\stage103_shared_bottleneck_counts.svg
+artifacts\primeqa_hybrid_evidence_answerability_candidate_protocol_stage103_visuals\stage103_shared_bottleneck_rates.svg
+artifacts\primeqa_hybrid_evidence_answerability_candidate_protocol_stage103_visuals\stage103_candidate_priority_scores.svg
+artifacts\primeqa_hybrid_evidence_answerability_candidate_protocol_stage103_visuals\stage103_candidate_target_case_counts.svg
+artifacts\primeqa_hybrid_evidence_answerability_candidate_protocol_stage103_visuals\stage103_candidate_feature_group_counts.svg
+artifacts\primeqa_hybrid_evidence_answerability_candidate_protocol_stage103_visuals\stage103_protocol_decision_flags.svg
+artifacts\primeqa_hybrid_evidence_answerability_candidate_protocol_stage103_visuals\stage103_guard_check_status.svg
+```
+
+### 真实运行结果
+
+运行命令：
+
+```text
+python scripts\design_primeqa_hybrid_evidence_answerability_candidates.py --user-confirmed-protocol --confirmation-note "Stage103 user-confirmed design freeze after Stage102 decomposition"
+```
+
+真实返回：
+
+```text
+stage103_exit_code=0
+```
+
+Stage103 decision：
+
+```text
+status: primeqa_hybrid_evidence_answerability_candidate_protocol_frozen
+design_id: evidence_selection_and_answerability_candidate_design_v1
+recommended_direction: evidence_answerability_train_dev_candidate_comparison
+requires_user_confirmation_before_train_dev_run: true
+can_continue_train_dev_development: true
+can_run_train_dev_candidate_comparison_after_user_confirmation: true
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+fallback_strategies_enabled: false
+default_runtime_policy: unchanged
+```
+
+Stage103 只读取：
+
+```text
+artifacts\primeqa_hybrid_answer_pipeline_error_decomposition_stage102.json
+```
+
+Stage103 没有读取：
+
+```text
+artifacts\primeqa_hybrid_split_stage68_splits\primeqa_hybrid_split_stage68_train.jsonl
+artifacts\primeqa_hybrid_split_stage68_splits\primeqa_hybrid_split_stage68_dev.jsonl
+artifacts\primeqa_hybrid_split_stage68_splits\primeqa_hybrid_split_stage68_test.jsonl
+data\raw\primeqa_techqa\TechQA\training_and_dev\training_dev_technotes.sections.json
+```
+
+### Stage102 共同瓶颈
+
+```text
+answerability_false_answer:
+train: 180 / 562 = 0.3203
+dev: 41 / 121 = 0.3388
+combined: 221
+
+gold_span_beats_selected_answer:
+train: 174 / 562 = 0.3096
+dev: 41 / 121 = 0.3388
+combined: 215
+
+retrieval_context_miss:
+train: 125 / 562 = 0.2224
+dev: 23 / 121 = 0.1901
+combined: 148
+
+evidence_selection_miss:
+train: 67 / 562 = 0.1192
+dev: 12 / 121 = 0.0992
+combined: 79
+```
+
+结论：Stage103 把前两个作为 primary candidate target，把 `evidence_selection_miss` 作为 evidence
+secondary context，把 `retrieval_context_miss` 作为 secondary context only，不重新开启新的 retrieval-route family。
+
+### 冻结的候选协议
+
+候选策略：
+
+```text
+answerability_margin_gate_candidate_v1
+- target: answerability_false_answer
+- target_combined_case_count: 221
+- priority_score: 271.2996
+
+evidence_window_reselector_candidate_v1
+- target: gold_span_beats_selected_answer + evidence_selection_miss
+- target_combined_case_count: 294
+- priority_score: 313.1271
+
+joint_gate_then_window_candidate_v1
+- target: answerability_false_answer + gold_span_beats_selected_answer + evidence_selection_miss
+- target_combined_case_count: 515
+- priority_score: 366.6990
+```
+
+推荐 Stage104 执行顺序：
+
+```text
+1. joint_gate_then_window_candidate_v1
+2. evidence_window_reselector_candidate_v1
+3. answerability_margin_gate_candidate_v1
+```
+
+这个顺序只是 Stage104 的候选比较顺序，不是 runtime 默认策略，也不是最终上线结论。
+
+### 问题、原因与修正
+
+- 问题 1：Stage102 的最大瓶颈不是单一模块，`answerability_false_answer` 和
+  `gold_span_beats_selected_answer` 在 train/dev 都很高。
+  - 原因：只调 retrieval route 已经进入收益耗尽区；当前错误更像 answerability gate 与 evidence/window
+    selection 的耦合问题。
+  - 修正：Stage103 不继续开 retrieval route，而是冻结 answerability gate、evidence window reselector、
+    joint gate-then-window 三个候选协议。
+
+- 问题 2：下一步如果直接调阈值，容易把 dev 变成 tuning 数据。
+  - 原因：候选策略会涉及 threshold/grid，若允许 dev 参与选择，就会破坏 train/dev/test 边界。
+  - 修正：Stage103 明确 Stage104 的 `candidate_thresholds_selected_on: train_only`、
+    `dev_threshold_tuning_allowed: false`、`test_access_allowed: false`。
+
+- 问题 3：候选协议需要说明哪些特征能作为 runtime signal，哪些必须禁止。
+  - 原因：Stage102 内部可以用 gold labels 评估 bucket，但这些不能变成 runtime evidence 或 public output。
+  - 修正：Stage103 明确允许 question/retrieval/evidence/composition observable features；
+    禁止 gold answers、gold spans、answer document identifiers、source DOC_IDS、test labels、
+    dev-selected thresholds 和 raw private strings。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_evidence_answerability_candidate_protocol.py scripts\design_primeqa_hybrid_evidence_answerability_candidates.py tests\test_primeqa_hybrid_evidence_answerability_candidate_protocol.py
+pytest -q tests\test_primeqa_hybrid_evidence_answerability_candidate_protocol.py
+python scripts\design_primeqa_hybrid_evidence_answerability_candidates.py ...: stage103_exit_code=0
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 5 passed
+Stage103 run: passed
+guard checks: 31 / 31 passed
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 279 passed
+git diff --check: passed
+```
+
+产物安全检查：
+
+```text
+Allowed output fields intersect forbidden fields: []
+Stage103 source_files 只记录 Stage102 JSON，不记录 train/dev/test split 或 corpus document 路径。
+字段名扫描会在 forbidden_fields / explicit_exclusions 清单里命中 question_text、answer_doc_id 等禁止字段名；
+这些是预期的禁止清单，不是 allowed output fields，也不是 raw private values。
+```
+
+### 我学到了
+
+- 当 Stage102 已经表明主要错误跨越 answerability 和 evidence/composition 时，下一步不能再用单点 retrieval
+  思维硬试；应该先冻结候选干预协议，再跑 train/dev-only 比较。
+- 设计阶段也要有 guard checks 和可视化，否则后续实验容易忘记边界，尤其是 train-only selection 与 dev validation
+  的区别。
+- 候选策略里的 runtime features 必须写清楚允许和禁止项；否则很容易把评估标签、oracle doc id 或 dev tuning
+  偷偷混进方案。
+- 可视化不一定只服务最终指标，这一阶段用 bottleneck counts/rates、candidate priority、feature groups 和
+  guard status 图，可以让下一步选择更可检查。
+
+### 下一步
+
+Stage104：在用户确认后，运行 frozen train/dev-only evidence-answerability candidate comparison，
+对比 Stage102 verified baseline。Stage104 仍然不能读取 test，不能运行 final metrics，不能用 dev 调阈值，
+不能改 runtime 默认策略，不能加入 fallback strategy。

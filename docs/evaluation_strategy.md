@@ -789,3 +789,10 @@ in:
 ```text
 docs/primeqa_hybrid_answer_pipeline_error_decomposition.md
 ```
+
+The current Stage 103 evidence/answerability candidate protocol freeze is
+recorded in:
+
+```text
+docs/primeqa_hybrid_evidence_answerability_candidate_protocol.md
+```
