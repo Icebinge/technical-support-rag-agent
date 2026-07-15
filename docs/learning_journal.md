@@ -25517,7 +25517,7 @@ python scripts\run_primeqa_hybrid_evidence_answerability_comparison.py --user-co
 ```text
 exit_code: 0
 timing_seconds.total: 368.557
-guard_checks: 29 / 29 passed
+guard_checks: 25 / 25 passed
 ```
 
 ### 数据和 baseline
@@ -25653,7 +25653,7 @@ python scripts\run_primeqa_hybrid_evidence_answerability_comparison.py --user-co
 ```text
 targeted pytest: 2 passed
 Stage105 run: passed
-guard checks: 29 / 29 passed
+guard checks: 25 / 25 passed
 ```
 
 全量验证：
@@ -25681,4 +25681,190 @@ Stage106：记录 evidence-answerability candidate family 的 stop/redesign deci
 为什么 dev 上看起来更好的非 selectable configs 不能被反选；
 是否停止这条 Stage103/104 candidate family；
 如果 redesign，新的方案必须继续保持 train/dev-only、test locked、runtime defaults unchanged、no fallback strategies。
+```
+
+## Stage106：记录 evidence-answerability family stop decision
+
+### 目标
+
+本阶段不再跑新指标，而是把 Stage105 的失败结果正式转成可审计的 stop/redesign decision。Stage106 的边界：
+
+```text
+只读 Stage104 protocol report 和 Stage105 comparison report
+不读取 train/dev/test split
+不读取 corpus documents
+不运行 retrieval metrics
+不运行 answer metrics
+不运行 final test metrics
+不从 dev-only observations 反选 config
+不改 runtime default
+不加入 fallback strategy
+```
+
+### 新增和修改
+
+代码：
+
+```text
+src\ts_rag_agent\application\primeqa_hybrid_evidence_answerability_stop_decision.py
+scripts\decide_primeqa_hybrid_evidence_answerability_stop.py
+tests\test_primeqa_hybrid_evidence_answerability_stop_decision.py
+```
+
+文档：
+
+```text
+docs\primeqa_hybrid_evidence_answerability_stop_decision.md
+docs\primeqa_hybrid_evidence_answerability_comparison.md
+docs\learning_journal.md
+```
+
+本地产物：
+
+```text
+artifacts\primeqa_hybrid_evidence_answerability_stop_decision_stage106.json
+artifacts\primeqa_hybrid_evidence_answerability_stop_decision_stage106.console.txt
+artifacts\primeqa_hybrid_evidence_answerability_stop_decision_stage106_visuals\stage106_evidence_answerability_target_deltas.svg
+artifacts\primeqa_hybrid_evidence_answerability_stop_decision_stage106_visuals\stage106_train_selectability_by_family.svg
+artifacts\primeqa_hybrid_evidence_answerability_stop_decision_stage106_visuals\stage106_train_guard_failure_reasons.svg
+artifacts\primeqa_hybrid_evidence_answerability_stop_decision_stage106_visuals\stage106_stop_decision_flags.svg
+artifacts\primeqa_hybrid_evidence_answerability_stop_decision_stage106_visuals\stage106_stop_guard_check_status.svg
+```
+
+### 事实修正
+
+Stage106 期间重新读取了 Stage105 JSON，确认 Stage105 的真实 guard check 数量是：
+
+```text
+25 / 25 passed
+```
+
+我之前在 Stage105 人工总结和文档里写成了 `29 / 29 passed`。这不是数据变化，而是人工汇总错误。本阶段已经把
+`docs\primeqa_hybrid_evidence_answerability_comparison.md` 和本 learning journal 中对应位置修正为 `25 / 25 passed`。
+
+### 真实运行命令
+
+```text
+python scripts\decide_primeqa_hybrid_evidence_answerability_stop.py --user-confirmed-stop --confirmation-note "user confirmed Stage106 evidence-answerability stop decision on 2026-07-15 after Stage105 dev validation failed; test locked; runtime defaults unchanged; no fallback strategies"
+```
+
+真实运行结果：
+
+```text
+exit_code: 0
+guard_checks: 30 / 30 passed
+```
+
+### Stage105 证据
+
+Train-selected config：
+
+```text
+selected_config_id: amg_bm25_evidence8_rank3_v1
+selected_candidate_id: answerability_margin_gate_candidate_v1
+selectable_config_count: 2 / 9
+selected_train_weighted_target_delta: 0.0
+```
+
+Dev validation：
+
+```text
+dev_validation_passed: false
+dev_weighted_target_delta: 0.0
+dev_changed_answer_count: 0
+answerability_false_answer delta: 0
+gold_span_beats_selected_answer delta: 0
+evidence_selection_miss delta: 0
+answerable_refusal_rate delta: 0.0
+gold_doc_citation_rate delta: 0.0
+average_token_f1 delta: 0.0
+```
+
+Dev 上更好的 non-selectable configs：
+
+```text
+jgw_answer_window_mcpd5_evidence8_rank2_v1: dev delta -29.15, train delta -133.90, failed answerable refusal + gold citation guards
+ewr_answer_window_mcpd3_evidence7_rank3_v1: dev delta -17.05, train delta -89.25, failed answerable refusal + gold citation guards
+ewr_answer_window_mcpd5_evidence7_rank3_v1: dev delta -17.05, train delta -89.25, failed answerable refusal + gold citation guards
+jgw_answer_window_mcpd3_evidence8_rank3_v1: dev delta -17.05, train delta -89.25, failed answerable refusal + gold citation guards
+ewr_hybrid_window_mcpd3_evidence7_rank3_v1: dev delta -3.90, train delta -16.60, failed answerable refusal guard
+jgw_hybrid_window_mcpd3_evidence8_rank3_v1: dev delta -3.90, train delta -16.60, failed answerable refusal guard
+amg_bm25_evidence8_rank2_v1: dev delta -3.10, train delta -29.25, failed answerable refusal guard
+```
+
+### 决策
+
+```text
+status: primeqa_hybrid_evidence_answerability_candidate_family_stopped
+stopped_family_id: evidence_answerability_candidate_family
+stopped_protocol_id: evidence_answerability_candidate_train_dev_comparison_v1
+current_route_defaultization: blocked
+redesign_required_before_any_runtime_or_test_gate: true
+recommended_next_direction: evidence_answerability_redesign_decision
+can_continue_train_dev_development: true
+requires_user_confirmation_before_next_protocol: true
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+fallback_strategies_enabled: false
+default_runtime_policy: unchanged
+```
+
+结论：当前 Stage103/104 evidence-answerability candidate family 停止，不能进入 runtime，不能打开 test gate。下一步如果继续，只能在用户确认后做新的 train/dev-only redesign protocol；不能从 dev 反选现有 config。
+
+### 问题、原因与修正
+
+- 问题 1：Stage105 的人工总结 guard 数写错。
+  - 原因：根据 console 人工整理时把 guard 数误写成 29，真实 Stage105 JSON 是 25。
+  - 修正：Stage106 重新读取 JSON 后纠正文档与 journal，并在 Stage106 文档中显式记录这个事实修正。
+- 问题 2：Dev 上有明显更好的 config，但不能推进。
+  - 原因：Stage104 协议明确禁止 dev selection，且这些 config 全部没有过 train selectability guards。
+  - 修正：Stage106 把这些 config 单独列为 `dev_better_nonselectable_configs`，说明它们是观察证据，不是选择依据。
+- 问题 3：停止当前 family 后是否马上 redesign 存在选择空间。
+  - 原因：redesign 会引入新的实验协议和设计取舍，不能在 stop decision 里悄悄决定。
+  - 修正：Stage106 只记录 family stopped，并把 Stage107 定义为“只有用户确认后才冻结新的 train/dev-only redesign protocol”。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check --fix src\ts_rag_agent\application\primeqa_hybrid_evidence_answerability_stop_decision.py scripts\decide_primeqa_hybrid_evidence_answerability_stop.py tests\test_primeqa_hybrid_evidence_answerability_stop_decision.py
+pytest -q tests\test_primeqa_hybrid_evidence_answerability_stop_decision.py
+python scripts\decide_primeqa_hybrid_evidence_answerability_stop.py --user-confirmed-stop ...
+```
+
+结果：
+
+```text
+targeted pytest: 3 passed
+Stage106 run: passed
+guard checks: 30 / 30 passed
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 289 passed
+git diff --check: passed
+```
+
+### 我学到了
+
+- Stop decision 不只是“失败记录”，还要把不能推进的原因拆开：selected config 没提升、dev-better config 不可选、runtime/test gate 仍锁定。
+- 对人工总结的数字必须回查 JSON；Stage105 guard 数从报告看是 25，不是 29。
+- “redesign”本身是新协议，不应该被 stop decision 偷偷决定；只能作为下一阶段、用户确认后的动作。
+- 可视化在 stop 阶段同样有价值：target deltas、family selectability、guard failure reasons 和 decision flags 能直接解释为什么停。
+
+### 下一步
+
+Stage107：只有在用户确认后，冻结新的 train/dev-only evidence-answerability redesign protocol，或者明确转向其他研究方向。Stage107 必须继续保持：
+
+```text
+test locked
+no final metrics
+no dev-only selection
+runtime defaults unchanged
+no fallback strategies
 ```

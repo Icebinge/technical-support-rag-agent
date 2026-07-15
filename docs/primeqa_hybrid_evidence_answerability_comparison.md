@@ -188,7 +188,7 @@ the final test gate.
 
 ## Guard Checks
 
-All `29 / 29` Stage105 guard checks passed.
+All `25 / 25` Stage105 guard checks passed.
 
 Key checks:
 
