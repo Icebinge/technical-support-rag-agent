@@ -202,8 +202,12 @@ default_runtime_policy: unchanged
 
 ## Next Step
 
-Stage85 should confirm and freeze the train/dev-only protocol for
-`lexical_cluster_diversity_rerank_design` before any train/dev metric run. The
-frozen test split remains locked, final metrics must not be run, source
-`DOC_IDS` must not be used as runtime retrieval evidence, and runtime defaults
-remain unchanged.
+Stage85 confirmed and froze the train/dev-only protocol for
+`lexical_cluster_diversity_rerank_design` as
+`lexical_cluster_diversity_rerank_train_dev_v1`. No train/dev metrics were run
+in Stage85.
+
+The current next step is Stage86: after user confirmation, run the frozen
+train/dev-only lexical cluster diversity rerank comparison. The frozen test
+split remains locked, final metrics must not be run, source `DOC_IDS` must not
+be used as runtime retrieval evidence, and runtime defaults remain unchanged.

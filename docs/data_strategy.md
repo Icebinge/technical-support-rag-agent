@@ -396,6 +396,13 @@ recorded in:
 docs/primeqa_hybrid_second_wave_retrieval_candidate_design.md
 ```
 
+The current PrimeQA/TechQA hybrid lexical cluster diversity protocol freeze is
+recorded in:
+
+```text
+docs/primeqa_hybrid_lexical_cluster_diversity_protocol.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:

@@ -541,6 +541,8 @@ artifacts/primeqa_hybrid_retrieval_recall_exhaustion_summary_stage83.json
 artifacts/primeqa_hybrid_retrieval_recall_exhaustion_summary_stage83_visuals/
 artifacts/primeqa_hybrid_second_wave_retrieval_candidate_design_stage84.json
 artifacts/primeqa_hybrid_second_wave_retrieval_candidate_design_stage84_visuals/
+artifacts/primeqa_hybrid_lexical_cluster_diversity_protocol_stage85.json
+artifacts/primeqa_hybrid_lexical_cluster_diversity_protocol_stage85_visuals/
 ```
 
 The current Stage 67 protocol is recorded in:
@@ -649,4 +651,10 @@ The current Stage 84 second-wave retrieval candidate design is recorded in:
 
 ```text
 docs/primeqa_hybrid_second_wave_retrieval_candidate_design.md
+```
+
+The current Stage 85 lexical cluster diversity protocol freeze is recorded in:
+
+```text
+docs/primeqa_hybrid_lexical_cluster_diversity_protocol.md
 ```

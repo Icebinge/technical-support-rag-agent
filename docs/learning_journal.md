@@ -20336,3 +20336,241 @@ git diff --check: passed
 Stage85：先确认并冻结 `lexical_cluster_diversity_rerank_design` 的 train/dev-only protocol，再考虑运行 train/dev 指标。
 
 Stage85 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。
+
+## Stage85：lexical cluster diversity rerank protocol freeze
+
+### 目标
+
+Stage85 的目标是冻结 Stage84 推荐候选 `lexical_cluster_diversity_rerank_design` 的 train/dev-only 运行协议。
+
+本阶段只做 protocol freeze：
+
+- 固定 protocol id、baseline、候选配置网格、feature contract 和 train selection rule。
+- 不运行 train/dev retrieval metrics。
+- 不触碰 test，不跑 final metrics。
+- 不使用 source `DOC_IDS` 作为 runtime 检索证据。
+- 不改变 runtime 默认策略。
+
+### 候选确认
+
+本轮用户说“好下一步”，我按上一轮 Stage84 推荐理解为确认进入推荐候选：
+
+```text
+confirmed: true
+confirmed_candidate_id: lexical_cluster_diversity_rerank_design
+confirmation_note: user confirmed recommended Stage85 candidate in current turn
+```
+
+### 本次改动
+
+新增：
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_lexical_cluster_diversity_protocol.py
+scripts/freeze_primeqa_hybrid_lexical_cluster_diversity_protocol.py
+tests/test_primeqa_hybrid_lexical_cluster_diversity_protocol.py
+docs/primeqa_hybrid_lexical_cluster_diversity_protocol.md
+```
+
+更新：
+
+```text
+docs/primeqa_hybrid_second_wave_retrieval_candidate_design.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+docs/learning_journal.md
+```
+
+### 真实运行命令
+
+```text
+python scripts\freeze_primeqa_hybrid_lexical_cluster_diversity_protocol.py --user-confirmed-candidate --confirmed-candidate-id lexical_cluster_diversity_rerank_design --confirmation-note "user confirmed recommended Stage85 candidate in current turn" --output artifacts\primeqa_hybrid_lexical_cluster_diversity_protocol_stage85.json --visualization-dir artifacts\primeqa_hybrid_lexical_cluster_diversity_protocol_stage85_visuals
+```
+
+运行耗时：
+
+```text
+total: 0.000s
+```
+
+### 冻结协议
+
+```text
+protocol_id: lexical_cluster_diversity_rerank_train_dev_v1
+candidate_id: lexical_cluster_diversity_rerank_design
+protocol_status: frozen_requires_user_confirmation_before_metric_run
+```
+
+baseline：
+
+```text
+config_id: full_document_bm25_baseline
+bm25_k1: 1.5
+bm25_b: 0.75
+candidate_depth: 50
+primary_top_k: 10
+```
+
+候选配置网格：
+
+```text
+lcdr_penalty_0_03_title_query_cluster: duplicate_penalty_weight 0.03
+lcdr_penalty_0_06_title_query_cluster: duplicate_penalty_weight 0.06
+lcdr_penalty_0_09_title_query_cluster: duplicate_penalty_weight 0.09
+lcdr_penalty_0_12_title_query_cluster: duplicate_penalty_weight 0.12
+```
+
+rerank formula：
+
+```text
+adjusted_score =
+  baseline_bm25_score
+  - duplicate_penalty_weight * top1_bm25_score * cluster_duplicate_index
+```
+
+train selection rule：
+
+```text
+Select the candidate config on train by hit@10, then hit@5, hit@1, MRR@10,
+fewer top10 regressions, fewer rank-down within top10, then config_id.
+Dev is validation only.
+```
+
+### Runtime evidence boundary
+
+允许 runtime 特征：
+
+```text
+query_token_count
+query_unique_token_count
+baseline_bm25_rank
+baseline_bm25_score
+score_margin_to_top1
+score_margin_to_previous
+query_overlap_count
+title_query_overlap_count
+document_token_count
+title_query_overlap_hash
+lexical_cluster_hash
+cluster_duplicate_index
+cluster_size_in_candidate_depth
+```
+
+禁止 runtime 特征：
+
+```text
+source_DOC_IDS
+answer_doc_id
+gold_document_rank
+gold_label
+frozen_test_split_membership
+```
+
+changed-case 只允许 public-safe 字段：
+
+```text
+sample_id
+split
+baseline_rank
+challenger_rank
+baseline_cluster_duplicate_index
+challenger_cluster_duplicate_index
+config_id
+```
+
+### Guard checks
+
+全部通过：
+
+```text
+source_report_is_stage84: passed
+user_confirmed_recommended_candidate: passed
+confirmed_candidate_matches_stage84_recommendation: passed
+candidate_is_recommended_for_protocol_design: passed
+stage84_requires_confirmation_before_train_dev_run: passed
+stage84_final_test_metrics_locked: passed
+stage84_forbids_test_tuning: passed
+stage84_runtime_default_unchanged: passed
+protocol_id_is_fixed: passed
+candidate_config_grid_is_predeclared: passed
+source_doc_ids_forbidden_in_runtime_features: passed
+report_fields_are_public_safe: passed
+stage85_freezes_protocol_without_metrics: passed
+stage85_final_test_metrics_not_run: passed
+stage85_default_runtime_policy_unchanged: passed
+```
+
+### 可视化产物
+
+```text
+artifacts\primeqa_hybrid_lexical_cluster_diversity_protocol_stage85_visuals\stage85_lcdr_candidate_config_penalties.svg
+artifacts\primeqa_hybrid_lexical_cluster_diversity_protocol_stage85_visuals\stage85_lcdr_feature_group_counts.svg
+artifacts\primeqa_hybrid_lexical_cluster_diversity_protocol_stage85_visuals\stage85_lcdr_protocol_decision_flags.svg
+artifacts\primeqa_hybrid_lexical_cluster_diversity_protocol_stage85_visuals\stage85_lcdr_guard_check_status.svg
+```
+
+Stage85 JSON SHA256：
+
+```text
+A8A1AF1F38937EDDD87F146DE320C2DF45E798FF96ACBDE45A2E0F386303D814
+```
+
+### 问题、原因与修正
+
+- 问题 1：首次 artifact 安全检查命中了 `prohibited_report_fields` 中的 raw-field key 名。
+  - 原因：这些字符串是禁止字段清单，不是原文数据，但会让 raw-field pattern 检查产生噪声。
+  - 修正：把禁止字段清单改成自然语言描述，例如 `question text`、`document body text`，然后重新生成 Stage85 artifact。
+  - 影响：只影响报告描述字段名；protocol 逻辑、guard checks 和结论不变。重跑后安全检查无命中。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_lexical_cluster_diversity_protocol.py scripts\freeze_primeqa_hybrid_lexical_cluster_diversity_protocol.py tests\test_primeqa_hybrid_lexical_cluster_diversity_protocol.py
+pytest -q tests\test_primeqa_hybrid_lexical_cluster_diversity_protocol.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+产物安全检查：
+
+```text
+Select-String raw question / answer / document / snippet field patterns over Stage85 JSON: no matches after prohibited-field wording fix
+git check-ignore Stage85 JSON and SVG artifacts: ignored by .gitignore
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 220 passed
+git diff --check: passed
+```
+
+### 结论
+
+- Stage85 已冻结 `lexical_cluster_diversity_rerank_train_dev_v1`。
+- Stage85 没有运行 train/dev retrieval metrics。
+- Stage85 没有使用 test。
+- Stage85 没有运行 final test metrics。
+- Stage85 没有使用 source `DOC_IDS` 作为 runtime 检索证据。
+- 默认 runtime policy 保持 unchanged。
+- 下一步经确认后可以运行 train/dev-only 指标。
+
+### 我学到了
+
+- protocol freeze artifact 自身也要避免出现 raw-field key 名，否则安全扫描会产生噪声。
+- 第二波候选涉及 rerank 公式时，必须先把 feature contract 和禁止特征写清楚，再谈任何指标。
+- `can_run_train_dev_metrics_after_user_confirmation: true` 只表示协议已准备好，不表示已经运行 train/dev 指标。
+
+### 下一步
+
+Stage86：在用户确认后，运行 frozen protocol `lexical_cluster_diversity_rerank_train_dev_v1` 的 train/dev-only comparison。
+
+Stage86 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。
