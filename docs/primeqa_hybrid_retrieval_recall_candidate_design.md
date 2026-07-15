@@ -157,10 +157,13 @@ Stage 83 summarized the exhausted Stage76 retrieval-recall candidate set. All
 five allowed candidates were accounted for, zero candidates advanced to runtime,
 and the source `DOC_IDS` oracle union candidate remains blocked.
 
-The current next step is Stage 84: confirm the next train/dev-only route before
-any new metrics are run. The recommended route is
-`second_wave_retrieval_candidate_design`, which should aggregate Stage75 and
-Stage77-82 changed-case evidence before designing another retrieval candidate
-set. The frozen test split remains locked, final metrics must not be run,
+Stage 84 confirmed the `second_wave_retrieval_candidate_design` route and
+designed a second-wave retrieval candidate set. The highest-priority candidate
+is `lexical_cluster_diversity_rerank_design`; this is a design result, not a
+runtime change.
+
+The current next step is Stage 85: confirm and freeze the train/dev-only
+protocol for `lexical_cluster_diversity_rerank_design` before any train/dev
+metric run. The frozen test split remains locked, final metrics must not be run,
 source `DOC_IDS` must not be used as runtime retrieval evidence, and the default
 runtime policy remains unchanged.

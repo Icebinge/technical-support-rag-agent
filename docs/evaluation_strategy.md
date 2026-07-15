@@ -539,6 +539,8 @@ artifacts/primeqa_hybrid_bm25_k1_b_grid_stage82.json
 artifacts/primeqa_hybrid_bm25_k1_b_grid_stage82_visuals/
 artifacts/primeqa_hybrid_retrieval_recall_exhaustion_summary_stage83.json
 artifacts/primeqa_hybrid_retrieval_recall_exhaustion_summary_stage83_visuals/
+artifacts/primeqa_hybrid_second_wave_retrieval_candidate_design_stage84.json
+artifacts/primeqa_hybrid_second_wave_retrieval_candidate_design_stage84_visuals/
 ```
 
 The current Stage 67 protocol is recorded in:
@@ -641,4 +643,10 @@ The current Stage 83 retrieval-recall exhaustion summary is recorded in:
 
 ```text
 docs/primeqa_hybrid_retrieval_recall_exhaustion_summary.md
+```
+
+The current Stage 84 second-wave retrieval candidate design is recorded in:
+
+```text
+docs/primeqa_hybrid_second_wave_retrieval_candidate_design.md
 ```

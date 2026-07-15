@@ -20079,3 +20079,260 @@ Stage84：先确认下一条 train/dev-only 路线，再运行任何新指标。
 推荐路线是 `second_wave_retrieval_candidate_design`：汇总 Stage75 和 Stage77-82 changed-case evidence，设计第二波 retrieval candidate set。
 
 Stage84 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。
+
+## Stage84：第二波 retrieval candidate design
+
+### 目标
+
+Stage84 的目标是在 Stage83 已确认第一波 Stage76 retrieval-recall 候选全部耗尽之后，设计第二波 retrieval candidate set。
+
+本阶段只做设计和排序：
+
+- 汇总 Stage75 miss drivers。
+- 汇总 Stage77-82 的 changed-case / metric lessons。
+- 确认 source `DOC_IDS` oracle union 仍然 blocked。
+- 产出下一轮候选和推荐顺序。
+- 不运行新的 retrieval metrics。
+- 不触碰 test，不跑 final metrics，不改变 runtime 默认策略。
+
+### 路线确认
+
+Stage83 要求 Stage84 路线必须先确认。本轮用户说“好下一步”，我按上一轮推荐路线解释为确认：
+
+```text
+route_id: second_wave_retrieval_candidate_design
+confirmed: true
+confirmation_note: user confirmed recommended Stage84 route in current turn
+```
+
+### 本次改动
+
+新增：
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_second_wave_retrieval_candidate_design.py
+scripts/design_primeqa_hybrid_second_wave_retrieval_candidates.py
+tests/test_primeqa_hybrid_second_wave_retrieval_candidate_design.py
+docs/primeqa_hybrid_second_wave_retrieval_candidate_design.md
+```
+
+更新：
+
+```text
+docs/primeqa_hybrid_retrieval_recall_exhaustion_summary.md
+docs/primeqa_hybrid_retrieval_recall_candidate_design.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+docs/learning_journal.md
+```
+
+### 真实运行命令
+
+```text
+python scripts\design_primeqa_hybrid_second_wave_retrieval_candidates.py --user-confirmed-route --confirmation-note "user confirmed recommended Stage84 route in current turn" --output artifacts\primeqa_hybrid_second_wave_retrieval_candidate_design_stage84.json --visualization-dir artifacts\primeqa_hybrid_second_wave_retrieval_candidate_design_stage84_visuals
+```
+
+运行耗时：
+
+```text
+total: 0.006s
+```
+
+### Stage75 miss summary
+
+```text
+evaluated_questions: 446
+hit_at_top_k: 0.6682
+miss_count: 148
+train misses: 125
+dev misses: 23
+not_found_top50: 110
+rank_21_to_50: 24
+rank_11_to_20: 14
+unique_terms_16_plus: 125
+top1_query_overlap_exceeds_gold: 103
+source_doc_ids_oracle_presence_count: 148
+```
+
+`source_doc_ids_oracle_presence_count: 148` 仍然只是诊断事实，不能转成 runtime 检索证据。
+
+### 第一波路线 lesson
+
+```text
+Stage77 query-view ablation:
+  selected_dev_hit10_delta: -0.0395
+  selected_dev_top10_net: -3
+
+Stage78 fielded title/text BM25:
+  selected_dev_hit10_delta: 0.0000
+  selected_dev_top10_net: 0
+  selected_dev_mrr_delta: +0.0219
+
+Stage79 section BM25 rollup:
+  selected_dev_hit10_delta: -0.0527
+  selected_dev_top10_net: -4
+  dev_search_depth_net: -1
+
+Stage81 dense+sparse RRF:
+  selected_dev_hit10_delta: -0.0132
+  selected_dev_top10_net: -1
+  selected_dev_not_found_delta: -6
+  selected_dev_search_depth_net: +6
+
+Stage82 BM25 k1/b grid:
+  selected_dev_hit10_delta: 0.0000
+  best_dev_non_selected_config_id: bm25_grid__k1_1_20__b_0_95
+  best_dev_non_selected_hit10_delta: +0.0131
+```
+
+Stage82 的 `b=0.95` 仍然不能被 dev 反选，只能作为后续设计线索。
+
+### 第二波候选
+
+```text
+lexical_cluster_diversity_rerank_design:
+  priority: 210
+  target_miss_count: 143
+  dev_targets: 22
+  prior_signal_score: 0.50
+
+structured_query_keyphrase_compaction_design:
+  priority: 207
+  target_miss_count: 143
+  dev_targets: 22
+  prior_signal_score: 0.35
+
+section_signal_guarded_expansion_design:
+  priority: 174
+  target_miss_count: 119
+  dev_targets: 17
+  prior_signal_score: 0.45
+
+score_margin_bm25_normalization_gate_design:
+  priority: 171
+  target_miss_count: 111
+  dev_targets: 18
+  prior_signal_score: 0.48
+
+selective_dense_sparse_low_overlap_gate_design:
+  priority: 159
+  target_miss_count: 111
+  dev_targets: 17
+  prior_signal_score: 0.68
+
+source_doc_ids_oracle_union_blocked:
+  status: blocked_from_train_dev_experiment
+  target_miss_count: 148
+```
+
+推荐顺序：
+
+```text
+lexical_cluster_diversity_rerank_design
+structured_query_keyphrase_compaction_design
+section_signal_guarded_expansion_design
+score_margin_bm25_normalization_gate_design
+selective_dense_sparse_low_overlap_gate_design
+```
+
+### Guard checks
+
+全部通过：
+
+```text
+source_reports_are_expected_stages: passed
+user_confirmed_stage84_recommended_route: passed
+stage83_recommended_route_matches_stage84: passed
+stage83_required_confirmation_was_respected: passed
+stage76_candidates_are_exhausted: passed
+stage83_has_no_runtime_advancing_candidate: passed
+source_doc_ids_candidate_not_reintroduced: passed
+source_doc_ids_candidate_remains_blocked: passed
+all_source_decisions_keep_final_test_locked: passed
+all_source_decisions_forbid_test_tuning: passed
+all_source_decisions_keep_runtime_defaults_unchanged: passed
+stage84_design_only_no_new_retrieval_metrics: passed
+stage84_final_test_metrics_not_run: passed
+stage84_default_runtime_policy_unchanged: passed
+```
+
+### 可视化产物
+
+```text
+artifacts\primeqa_hybrid_second_wave_retrieval_candidate_design_stage84_visuals\stage84_second_wave_candidate_priority_scores.svg
+artifacts\primeqa_hybrid_second_wave_retrieval_candidate_design_stage84_visuals\stage84_second_wave_candidate_target_misses.svg
+artifacts\primeqa_hybrid_second_wave_retrieval_candidate_design_stage84_visuals\stage84_second_wave_candidate_dev_targets.svg
+artifacts\primeqa_hybrid_second_wave_retrieval_candidate_design_stage84_visuals\stage84_second_wave_candidate_prior_signal_scores.svg
+artifacts\primeqa_hybrid_second_wave_retrieval_candidate_design_stage84_visuals\stage84_second_wave_allowed_vs_blocked_candidates.svg
+```
+
+Stage84 JSON SHA256：
+
+```text
+AB09F566ADF085A05DDBB28BF7065B4FD9320C8148D7E2F723D73D73F50EB8EF
+```
+
+### 问题、原因与修正
+
+- 问题 1：探索现有源码时，一个带 Windows 不兼容 glob 的 `rg` 命令失败。
+  - 原因：PowerShell/Windows 对该路径 glob 表达式解析为非法文件名。
+  - 修正：改用明确文件路径和 Python 摘要脚本读取报告结构。
+  - 影响：只影响探索命令，不影响 Stage84 artifact。
+- 问题 2：Stage84 新模块首次 `ruff` 报两处字符串行过长。
+  - 原因：`runtime_evidence_policy` 中两条说明超过项目行宽。
+  - 修正：拆分字符串，逻辑未变化。
+  - 影响：只影响格式检查，不影响报告结果。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_second_wave_retrieval_candidate_design.py scripts\design_primeqa_hybrid_second_wave_retrieval_candidates.py tests\test_primeqa_hybrid_second_wave_retrieval_candidate_design.py
+pytest -q tests\test_primeqa_hybrid_second_wave_retrieval_candidate_design.py
+```
+
+结果：
+
+```text
+ruff: passed after line-length fix
+pytest: 2 passed
+```
+
+产物安全检查：
+
+```text
+Select-String raw question / answer / document / snippet field patterns over Stage84 JSON: no matches
+git check-ignore Stage84 JSON and SVG artifacts: ignored by .gitignore
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 217 passed
+git diff --check: passed
+```
+
+### 结论
+
+- Stage84 已完成第二波 retrieval candidate design。
+- Stage84 没有运行新的 retrieval metrics。
+- Stage84 没有使用 test。
+- Stage84 没有运行 final test metrics。
+- Stage84 没有把 source `DOC_IDS` 重新引入候选。
+- 默认 runtime policy 保持 unchanged。
+- 推荐下一候选为 `lexical_cluster_diversity_rerank_design`。
+
+### 我学到了
+
+- 第一波路线失败后，不能简单“换一个检索器继续跑”；应该把失败 lesson 转成更细的第二波候选约束。
+- dense route 虽然有 not-found 改善信号，但 top10 regression 仍然说明它不能无条件推进。
+- dev-only signal 可以帮助设计下一轮 hypothesis，但不能作为选择策略的证据。
+- 第二波候选开始涉及 gate / diversity / selective expansion，必须先冻结 protocol，再考虑 train/dev metric run，不能直接改 runtime。
+
+### 下一步
+
+Stage85：先确认并冻结 `lexical_cluster_diversity_rerank_design` 的 train/dev-only protocol，再考虑运行 train/dev 指标。
+
+Stage85 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。

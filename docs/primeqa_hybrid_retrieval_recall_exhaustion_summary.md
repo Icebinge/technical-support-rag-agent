@@ -142,9 +142,12 @@ default_runtime_policy: unchanged
 
 ## Next Step
 
-Stage84 should confirm the next train/dev-only route before any new metrics are
-run. The recommended route is `second_wave_retrieval_candidate_design`: aggregate
-Stage75 and Stage77-82 changed-case evidence, then design a second-wave
-retrieval candidate set. The frozen test split remains locked, final metrics
-must not be run, source `DOC_IDS` must not be used as runtime retrieval
-evidence, and runtime defaults remain unchanged.
+Stage84 confirmed the `second_wave_retrieval_candidate_design` route and
+designed a second-wave retrieval candidate set. The recommended next candidate
+is `lexical_cluster_diversity_rerank_design`.
+
+The current next step is Stage85: confirm and freeze the train/dev-only protocol
+for `lexical_cluster_diversity_rerank_design` before any train/dev metric run.
+The frozen test split remains locked, final metrics must not be run, source
+`DOC_IDS` must not be used as runtime retrieval evidence, and runtime defaults
+remain unchanged.

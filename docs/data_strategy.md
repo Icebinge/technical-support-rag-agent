@@ -389,6 +389,13 @@ recorded in:
 docs/primeqa_hybrid_retrieval_recall_exhaustion_summary.md
 ```
 
+The current PrimeQA/TechQA hybrid second-wave retrieval candidate design is
+recorded in:
+
+```text
+docs/primeqa_hybrid_second_wave_retrieval_candidate_design.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:
