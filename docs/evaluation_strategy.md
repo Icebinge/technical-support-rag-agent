@@ -763,3 +763,9 @@ The current Stage 98 selective dense+sparse train/dev comparison is recorded in:
 ```text
 docs/primeqa_hybrid_selective_dense_sparse_comparison.md
 ```
+
+The current Stage 99 selective dense+sparse stop decision is recorded in:
+
+```text
+docs/primeqa_hybrid_selective_dense_sparse_stop_decision.md
+```

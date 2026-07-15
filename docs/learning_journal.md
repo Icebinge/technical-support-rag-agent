@@ -24266,3 +24266,152 @@ Stage99：停止 selective dense+sparse route，并记录 stop decision。Stage9
 不能读取 test，不能运行 final metrics，不能调 dev threshold，不能改 runtime
 默认策略。它的目标是把 Stage97-Stage98 的证据总结为 route stop，而不是继续
 微调这个 gate。
+## Stage99：停止 selective dense+sparse route
+
+### 学习时间
+
+2026-07-15
+
+### 本阶段目标
+
+根据 Stage98 的真实 train/dev-only comparison 结果，停止
+`selective_dense_sparse_low_overlap_gate_design` route，并记录 stop decision。
+本阶段是决策检查点，不是新实验：不读取 train/dev/test split 文件，不运行新的
+retrieval metrics，不运行 final metrics，不调 dev threshold，不改变 runtime 默认
+策略。
+
+### 本阶段做了什么
+
+新增并验证了 Stage99 stop-decision 链路：
+
+```text
+src\ts_rag_agent\application\primeqa_hybrid_selective_dense_sparse_stop_decision.py
+scripts\decide_primeqa_hybrid_selective_dense_sparse_stop.py
+tests\test_primeqa_hybrid_selective_dense_sparse_stop_decision.py
+docs\primeqa_hybrid_selective_dense_sparse_stop_decision.md
+```
+
+同步更新：
+
+```text
+docs\evaluation_strategy.md
+docs\data_strategy.md
+docs\learning_journal.md
+```
+
+Stage99 只读取 public-safe 报告：
+
+```text
+artifacts\primeqa_hybrid_second_wave_retrieval_candidate_design_stage84.json
+artifacts\primeqa_hybrid_selective_dense_sparse_protocol_stage97.json
+artifacts\primeqa_hybrid_selective_dense_sparse_comparison_stage98.json
+```
+
+### 真实运行结果
+
+Stage99 真实命令 exit code 为 `0`：
+
+```text
+status: primeqa_hybrid_selective_dense_sparse_route_stopped
+stopped_candidate_id: selective_dense_sparse_low_overlap_gate_design
+stopped_protocol_id: selective_dense_sparse_low_overlap_gate_train_dev_v1
+current_route_defaultization: blocked
+next_candidate_id: null
+remaining_actionable_candidate_count: 0
+route_family_exhausted: true
+can_continue_train_dev_development: false
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+default_runtime_policy: unchanged
+```
+
+停止依据：
+
+```text
+selected_policy_id: sdsl_minilm_low_overlap_conservative_v1
+dev hit@10 delta: +0.0000
+dev hit@1 delta: +0.0000
+dev not-found@50 delta: 0
+dev top10 improvements: 0
+dev top10 regressions: 0
+dev gate activations: 0
+dev promotions: 0
+primary_contract_passed: false
+secondary_contract_passed: false
+guard_contract_passed: true
+```
+
+结论：Stage99 停止 selective dense+sparse route。Stage84 second-wave
+retrieval actionable candidates 已经耗尽；`source_doc_ids_oracle_union_blocked`
+仍然只是 blocked diagnostic，不能作为 train/dev experiment 或 runtime default。
+
+### 可视化结果
+
+```text
+artifacts\primeqa_hybrid_selective_dense_sparse_stop_decision_stage99_visuals\stage99_selective_dense_sparse_train_dev_hit10_delta.svg
+artifacts\primeqa_hybrid_selective_dense_sparse_stop_decision_stage99_visuals\stage99_selective_dense_sparse_dev_contract_deltas.svg
+artifacts\primeqa_hybrid_selective_dense_sparse_stop_decision_stage99_visuals\stage99_selective_dense_sparse_gate_actions.svg
+artifacts\primeqa_hybrid_selective_dense_sparse_stop_decision_stage99_visuals\stage99_second_wave_route_status.svg
+artifacts\primeqa_hybrid_selective_dense_sparse_stop_decision_stage99_visuals\stage99_selective_dense_sparse_stop_decision_flags.svg
+artifacts\primeqa_hybrid_selective_dense_sparse_stop_decision_stage99_visuals\stage99_selective_dense_sparse_stop_guard_check_status.svg
+```
+
+### 问题、原因与修正
+
+- 问题 1：Stage99 不能简单说“Stage98 没提升，所以停止”，必须验证停止动作本身
+  没有越过评估边界。
+  - 原因：stop decision 也是项目事实的一部分，如果没有 guard，后面容易误以为
+    route 可以继续调 dev threshold 或打开 final-test gate。
+  - 修正：新增 37 个 guard，确认 Stage97 protocol、Stage98 comparison、合同失败、
+    test/final/defaultization 锁定、artifact safety、队列耗尽都成立。
+  - 影响：停止结论可复现，不依赖口头判断。
+- 问题 2：宽泛 raw-field 扫描会命中 `raw_question_text_written` 这类安全 flag 和
+  `source DOC_IDS` policy 文本。
+  - 原因：Stage99 合法记录了禁止字段名称和安全 flag。
+  - 修正：安全记录区分“禁止字段名作为 policy/flag 出现”和“真实 raw/private
+    内容写入”；并扫描具体 private fixture snippet 与 PrimeQA 原始行字段。
+  - 影响：避免把合规的安全声明误判为数据泄漏。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_selective_dense_sparse_stop_decision.py scripts\decide_primeqa_hybrid_selective_dense_sparse_stop.py tests\test_primeqa_hybrid_selective_dense_sparse_stop_decision.py
+pytest -q tests\test_primeqa_hybrid_selective_dense_sparse_stop_decision.py
+python scripts\decide_primeqa_hybrid_selective_dense_sparse_stop.py ...: exit code 0
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+Stage99 run: passed
+guard checks: 37 / 37 passed
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 263 passed
+git diff --check: passed
+```
+
+### 我学到了
+
+- 停止路线也需要工程化产物：代码、测试、报告、guard 和可视化，而不是只在聊天里
+  总结一句“这条不行”。
+- 当所有 second-wave retrieval candidates 耗尽后，下一步不应该继续局部微调某个
+  已失败 gate；更合理的是做 route-exhaustion summary，重新从现有 train/dev 证据
+  选择下一条研究方向。
+- 对 public-safe report 来说，禁止字段名可以作为 policy/flag 出现，但真实问题、
+  答案、文档正文、query terms 仍然不能写入报告。
+
+### 下一步
+
+Stage100：总结 second-wave retrieval route exhaustion，并基于现有 train/dev 证据
+决定下一条研究方向。Stage100 仍然不能读取 test，不能运行 final metrics，不能把
+blocked source `DOC_IDS` diagnostic 变成 runtime/default policy。
