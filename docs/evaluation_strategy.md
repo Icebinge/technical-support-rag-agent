@@ -796,3 +796,10 @@ recorded in:
 ```text
 docs/primeqa_hybrid_evidence_answerability_candidate_protocol.md
 ```
+
+The current Stage 104 evidence/answerability comparison-grid protocol freeze is
+recorded in:
+
+```text
+docs/primeqa_hybrid_evidence_answerability_comparison_protocol.md
+```
