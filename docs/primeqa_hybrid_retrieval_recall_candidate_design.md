@@ -153,8 +153,14 @@ user-confirmed small grid. It selected the existing
 dev hit@10, but using them would require dev-set selection and is therefore not
 allowed.
 
-The current next step is Stage 83: summarize the exhausted Stage76
-retrieval-recall candidates and decide the next train/dev-only improvement
-route. The frozen test split remains locked, final metrics must not be run,
+Stage 83 summarized the exhausted Stage76 retrieval-recall candidate set. All
+five allowed candidates were accounted for, zero candidates advanced to runtime,
+and the source `DOC_IDS` oracle union candidate remains blocked.
+
+The current next step is Stage 84: confirm the next train/dev-only route before
+any new metrics are run. The recommended route is
+`second_wave_retrieval_candidate_design`, which should aggregate Stage75 and
+Stage77-82 changed-case evidence before designing another retrieval candidate
+set. The frozen test split remains locked, final metrics must not be run,
 source `DOC_IDS` must not be used as runtime retrieval evidence, and the default
 runtime policy remains unchanged.

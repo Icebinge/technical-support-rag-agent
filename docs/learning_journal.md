@@ -19906,3 +19906,176 @@ pytest: 2 passed
 Stage83：汇总 Stage76 的 retrieval-recall 候选全部结果，判断下一条 train/dev-only 改进路线。
 
 Stage83 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。
+
+## Stage83：retrieval-recall 候选耗尽汇总
+
+### 目标
+
+Stage83 的目标不是再跑一个新检索实验，而是把 Stage76 设计出的全部 retrieval-recall 候选做一次收口：
+
+- 确认 Stage77 到 Stage82 是否已经覆盖全部 allowed candidates。
+- 确认有没有任何候选能进入 runtime/default 策略。
+- 明确 source `DOC_IDS` oracle union 仍然 blocked，不能作为 runtime 检索证据。
+- 给出 Stage84 的 train/dev-only 下一路线选项。
+- 继续锁住 frozen test split，不运行 final metrics。
+
+### 本次改动
+
+新增：
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_retrieval_recall_exhaustion_summary.py
+scripts/summarize_primeqa_hybrid_retrieval_recall_exhaustion.py
+tests/test_primeqa_hybrid_retrieval_recall_exhaustion_summary.py
+docs/primeqa_hybrid_retrieval_recall_exhaustion_summary.md
+```
+
+更新：
+
+```text
+docs/primeqa_hybrid_bm25_k1_b_grid.md
+docs/primeqa_hybrid_retrieval_recall_candidate_design.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+docs/learning_journal.md
+```
+
+### 真实运行命令
+
+```text
+python scripts\summarize_primeqa_hybrid_retrieval_recall_exhaustion.py --output artifacts\primeqa_hybrid_retrieval_recall_exhaustion_summary_stage83.json --visualization-dir artifacts\primeqa_hybrid_retrieval_recall_exhaustion_summary_stage83_visuals
+```
+
+运行耗时：
+
+```text
+total: 0.002s
+```
+
+### 真实结果
+
+Stage76 的 5 个 allowed retrieval-recall candidates 均已覆盖：
+
+```text
+query_view_ablation_full_title_dedup: Stage77, dev hit@10 delta -0.0395, not advanced
+fielded_title_text_bm25_score_fusion: Stage78, dev hit@10 delta 0.0000, not advanced
+section_bm25_doc_rollup_train_dev_probe: Stage79, dev hit@10 delta -0.0527, not advanced
+dense_sparse_rrf_train_dev_probe: Stage81, dev hit@10 delta -0.0132, not advanced
+bm25_k1_b_grid_train_to_dev: Stage82, dev hit@10 delta 0.0000, not advanced
+```
+
+汇总：
+
+```text
+allowed_stage76_candidate_count: 5
+allowed_candidate_outcome_count: 5
+allowed_candidates_completed: true
+blocked_candidate_count: 1
+runtime_advancing_candidate_count: 0
+best_selected_dev_hit10_delta: 0.0
+stage76_retrieval_recall_set_exhausted: true
+```
+
+Stage82 有两个 dev-only observation：
+
+```text
+bm25_grid__k1_1_20__b_0_95 dev hit@10: 0.7105, baseline: 0.6974, delta: +0.0131
+bm25_grid__k1_1_50__b_0_95 dev hit@10: 0.7105, baseline: 0.6974, delta: +0.0131
+```
+
+但它们没有被 train-only rule 选中，因此不能用 dev 反选，不能推进 runtime。
+
+### Guard checks
+
+全部通过：
+
+```text
+source_reports_are_expected_stages: passed
+stage76_allowed_candidates_all_accounted_for: passed
+source_doc_ids_candidate_remains_blocked: passed
+no_allowed_candidate_advanced_to_runtime: passed
+all_source_decisions_keep_final_test_locked: passed
+all_source_decisions_forbid_test_tuning: passed
+all_source_decisions_keep_runtime_defaults_unchanged: passed
+stage83_runs_summary_only_no_new_retrieval_metrics: passed
+stage83_final_test_metrics_not_run: passed
+stage83_default_runtime_policy_unchanged: passed
+```
+
+### 可视化产物
+
+```text
+artifacts\primeqa_hybrid_retrieval_recall_exhaustion_summary_stage83_visuals\stage83_candidate_dev_hit10_deltas.svg
+artifacts\primeqa_hybrid_retrieval_recall_exhaustion_summary_stage83_visuals\stage83_candidate_top10_net_changes.svg
+artifacts\primeqa_hybrid_retrieval_recall_exhaustion_summary_stage83_visuals\stage83_candidate_advancement_status.svg
+artifacts\primeqa_hybrid_retrieval_recall_exhaustion_summary_stage83_visuals\stage83_next_route_options.svg
+```
+
+Stage83 JSON SHA256：
+
+```text
+8A775C08F867C0E6C6DFB2E62606CF04BD53AC449EA0C85B75A674450FA8C7B4
+```
+
+### 问题、原因与修正
+
+- 问题 1：Stage83 artifact 已成功生成后，我用 Bash 风格的 `python - <<'PY'` 在 PowerShell 中读取摘要，命令失败。
+  - 原因：PowerShell 不支持 Bash here-doc 重定向写法。
+  - 修正：改用 PowerShell here-string 管道到 `python -`，重新读取 Stage83 JSON 摘要成功。
+  - 影响：该问题只影响人工校验摘要读取命令，不影响 Stage83 artifact、指标、guard checks 或文档结论。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_retrieval_recall_exhaustion_summary.py scripts\summarize_primeqa_hybrid_retrieval_recall_exhaustion.py tests\test_primeqa_hybrid_retrieval_recall_exhaustion_summary.py
+pytest -q tests\test_primeqa_hybrid_retrieval_recall_exhaustion_summary.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+产物安全检查：
+
+```text
+Select-String raw question / answer / document / snippet field patterns over Stage83 JSON: no matches
+git check-ignore Stage83 JSON and SVG artifacts: ignored by .gitignore
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 215 passed
+git diff --check: passed
+```
+
+### 结论
+
+- Stage83 已完成 Stage76 retrieval-recall candidate set 收口。
+- 5 个 allowed candidates 全部已经验证或可行性检查完成。
+- 没有任何 allowed candidate 可以推进到 runtime/default policy。
+- source `DOC_IDS` oracle union candidate 仍然 blocked。
+- Stage83 没有使用 test。
+- Stage83 没有运行 final test metrics。
+- Stage83 没有运行新的 retrieval metrics。
+- 默认 runtime policy 保持 unchanged。
+
+### 我学到了
+
+- 当第一波 retrieval-recall candidate 全部没有通过 train/dev gate 时，下一步不应该直接打开 test，也不应该把 dev-only observation 当成选择依据。
+- stage summary 本身也需要 guard checks，否则很容易把“已经试过很多路线”误写成“可以放宽测试集边界”。
+- dev 上更好的 BM25 参数仍然只能是后续设计线索，不能成为当前策略选择。
+
+### 下一步
+
+Stage84：先确认下一条 train/dev-only 路线，再运行任何新指标。
+
+推荐路线是 `second_wave_retrieval_candidate_design`：汇总 Stage75 和 Stage77-82 changed-case evidence，设计第二波 retrieval candidate set。
+
+Stage84 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。

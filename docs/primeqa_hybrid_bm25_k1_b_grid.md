@@ -178,7 +178,11 @@ default_runtime_policy: unchanged
 
 ## Next Step
 
-Stage83 should summarize the exhausted Stage76 retrieval-recall candidates and
-decide the next train/dev-only improvement route. The frozen test split remains
-locked, final metrics must not be run, and runtime defaults must remain
-unchanged unless a later train/dev gate justifies a guarded runtime experiment.
+Stage83 summarized the exhausted Stage76 retrieval-recall candidates. None of
+the five allowed Stage76 candidates advanced to runtime, and the source
+`DOC_IDS` candidate remains blocked.
+
+The current next step is Stage84: confirm the next train/dev-only route before
+any new metrics are run. The recommended route is
+`second_wave_retrieval_candidate_design`. The frozen test split remains locked,
+final metrics must not be run, and runtime defaults must remain unchanged.

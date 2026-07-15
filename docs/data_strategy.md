@@ -382,6 +382,13 @@ recorded in:
 docs/primeqa_hybrid_bm25_k1_b_grid.md
 ```
 
+The current PrimeQA/TechQA hybrid retrieval-recall exhaustion summary is
+recorded in:
+
+```text
+docs/primeqa_hybrid_retrieval_recall_exhaustion_summary.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:
