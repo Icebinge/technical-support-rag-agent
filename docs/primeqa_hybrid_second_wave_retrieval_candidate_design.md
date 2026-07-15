@@ -207,7 +207,15 @@ Stage85 confirmed and froze the train/dev-only protocol for
 `lexical_cluster_diversity_rerank_train_dev_v1`. No train/dev metrics were run
 in Stage85.
 
-The current next step is Stage86: after user confirmation, run the frozen
-train/dev-only lexical cluster diversity rerank comparison. The frozen test
-split remains locked, final metrics must not be run, source `DOC_IDS` must not
-be used as runtime retrieval evidence, and runtime defaults remain unchanged.
+Stage86 then ran that frozen protocol after user confirmation. It selected
+`lcdr_penalty_0_06_title_query_cluster` on train, but the selected config had
+`dev hit@10 delta = 0.0000`. Because the Stage84 target metric contract
+requires dev hit@10 to improve over BM25 baseline, lexical cluster diversity
+does not advance to runtime.
+
+The current next step is Stage87: stop lexical cluster diversity as a
+retrieval-recall route unless a new train/dev-only protocol is explicitly
+confirmed, then move to the next confirmed second-wave candidate. The frozen
+test split remains locked, final metrics must not be run, source `DOC_IDS` must
+not be used as runtime retrieval evidence, and runtime defaults remain
+unchanged.

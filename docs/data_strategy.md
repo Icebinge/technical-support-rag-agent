@@ -403,6 +403,13 @@ recorded in:
 docs/primeqa_hybrid_lexical_cluster_diversity_protocol.md
 ```
 
+The current PrimeQA/TechQA hybrid lexical cluster diversity train/dev
+comparison is recorded in:
+
+```text
+docs/primeqa_hybrid_lexical_cluster_diversity_comparison.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:

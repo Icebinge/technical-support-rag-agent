@@ -543,6 +543,8 @@ artifacts/primeqa_hybrid_second_wave_retrieval_candidate_design_stage84.json
 artifacts/primeqa_hybrid_second_wave_retrieval_candidate_design_stage84_visuals/
 artifacts/primeqa_hybrid_lexical_cluster_diversity_protocol_stage85.json
 artifacts/primeqa_hybrid_lexical_cluster_diversity_protocol_stage85_visuals/
+artifacts/primeqa_hybrid_lexical_cluster_diversity_comparison_stage86.json
+artifacts/primeqa_hybrid_lexical_cluster_diversity_comparison_stage86_visuals/
 ```
 
 The current Stage 67 protocol is recorded in:
@@ -657,4 +659,10 @@ The current Stage 85 lexical cluster diversity protocol freeze is recorded in:
 
 ```text
 docs/primeqa_hybrid_lexical_cluster_diversity_protocol.md
+```
+
+The current Stage 86 lexical cluster diversity train/dev comparison is recorded in:
+
+```text
+docs/primeqa_hybrid_lexical_cluster_diversity_comparison.md
 ```

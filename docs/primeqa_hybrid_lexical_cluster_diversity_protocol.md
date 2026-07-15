@@ -230,7 +230,15 @@ default_runtime_policy: unchanged
 
 ## Next Step
 
-Stage86 can run the frozen train/dev-only lexical cluster diversity rerank
-comparison after user confirmation. The frozen test split remains locked, final
-metrics must not be run, source `DOC_IDS` must not be used as runtime retrieval
-evidence, and runtime defaults remain unchanged.
+Stage86 has run the frozen train/dev-only lexical cluster diversity rerank
+comparison after user confirmation. It selected
+`lcdr_penalty_0_06_title_query_cluster` on train, but the selected config had
+`dev hit@10 delta = 0.0000`, with zero dev top10 improvements and zero dev
+top10 regressions.
+
+The current next step is Stage87: stop lexical cluster diversity as a
+retrieval-recall route unless a new train/dev-only protocol is explicitly
+confirmed, then move to the next confirmed second-wave candidate. The frozen
+test split remains locked, final metrics must not be run, source `DOC_IDS` must
+not be used as runtime retrieval evidence, and runtime defaults remain
+unchanged.

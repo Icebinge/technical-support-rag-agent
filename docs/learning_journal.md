@@ -20574,3 +20574,290 @@ git diff --check: passed
 Stage86：在用户确认后，运行 frozen protocol `lexical_cluster_diversity_rerank_train_dev_v1` 的 train/dev-only comparison。
 
 Stage86 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。
+
+## Stage86：lexical cluster diversity rerank train/dev comparison
+
+### 目标
+
+Stage86 的目标是在用户当前回合确认后，运行 Stage85 已冻结的
+`lexical_cluster_diversity_rerank_train_dev_v1` train/dev-only comparison。
+
+本阶段只允许：
+
+- 读取冻结的 Stage68 train/dev split。
+- 读取 Stage75 BM25 baseline report。
+- 读取 Stage85 frozen protocol。
+- 用 runtime 可见的 query/title token、BM25 rank/score、cluster hash 和 duplicate index 做 rerank。
+- 在 train 上选择 config，在 dev 上验证。
+
+本阶段明确禁止：
+
+- 读取 test split。
+- 跑 final test metrics。
+- 用 source `DOC_IDS` 作为 runtime 检索证据。
+- 输出 raw question、answer、document title/body text 或 raw token。
+- 修改 runtime 默认策略。
+
+### 用户确认
+
+这次确认发生在当前回合，记录如下：
+
+```text
+confirmed: true
+confirmed_protocol_id: lexical_cluster_diversity_rerank_train_dev_v1
+confirmation_note: user confirmed Stage86 train/dev metric run in current turn
+```
+
+### 新增文件
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_lexical_cluster_diversity_comparison.py
+scripts/run_primeqa_hybrid_lexical_cluster_diversity_comparison.py
+tests/test_primeqa_hybrid_lexical_cluster_diversity_comparison.py
+docs/primeqa_hybrid_lexical_cluster_diversity_comparison.md
+```
+
+### 更新文件
+
+```text
+docs/primeqa_hybrid_lexical_cluster_diversity_protocol.md
+docs/primeqa_hybrid_second_wave_retrieval_candidate_design.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+docs/learning_journal.md
+```
+
+### 真实运行命令
+
+```text
+python scripts\run_primeqa_hybrid_lexical_cluster_diversity_comparison.py --user-confirmed-protocol --confirmed-protocol-id lexical_cluster_diversity_rerank_train_dev_v1 --confirmation-note "user confirmed Stage86 train/dev metric run in current turn" --output artifacts\primeqa_hybrid_lexical_cluster_diversity_comparison_stage86.json --visualization-dir artifacts\primeqa_hybrid_lexical_cluster_diversity_comparison_stage86_visuals
+```
+
+运行耗时：
+
+```text
+total: 29.330s
+```
+
+### 实现内容
+
+Stage86 新增了一个独立的 train/dev comparison 模块：
+
+- `_BM25CandidateIndex`：一次建立 full-document BM25 index，复用 Stage75 baseline 参数 `k1=1.5, b=0.75`。
+- `LexicalClusterDiversityConfig`：承载 Stage85 冻结的四个 duplicate penalty config。
+- `cluster hash`：使用 sorted normalized title tokens 与 query tokens 的交集做 SHA256，截断为 16 位；报告只写 hash 和聚合计数，不写 raw token。
+- `cluster_duplicate_index`：沿 baseline BM25 rank 顺序统计同一 cluster 中已经出现过的候选数量。
+- rerank 公式：
+
+```text
+adjusted_score =
+  baseline_bm25_score
+  - duplicate_penalty_weight * top1_bm25_score * cluster_duplicate_index
+```
+
+tie breakers：
+
+```text
+higher baseline_bm25_score
+lower baseline_bm25_rank
+lower stable document id sort key
+```
+
+未确认时的行为：
+
+- 如果 `--user-confirmed-protocol` 未提供，或 confirmed protocol id 不匹配，模块会生成 blocked report。
+- blocked report 不计算 train/dev retrieval metrics。
+- 这保证“未确认不跑指标”是代码行为，不只是文档约束。
+
+### Train 结果
+
+Train-selected config：
+
+```text
+lcdr_penalty_0_06_title_query_cluster
+```
+
+Train baseline：
+
+```text
+hit@1: 0.4243
+hit@5: 0.6054
+hit@10: 0.6622
+MRR@10: 0.5023
+not_found@50: 93
+rank_11_to_50: 32
+```
+
+Train selected config：
+
+```text
+hit@1: 0.4243
+hit@5: 0.6054
+hit@10: 0.6676
+MRR@10: 0.5031
+not_found@50: 93
+rank_11_to_50: 30
+```
+
+Train delta：
+
+```text
+hit@10_delta: +0.0054
+top10_improvement_count: 4
+top10_regression_count: 2
+rank_up_within_top10_count: 2
+rank_down_within_top10_count: 0
+rank_11_to_50_count_delta: -2
+```
+
+### Dev 结果
+
+Dev baseline：
+
+```text
+hit@1: 0.4342
+hit@5: 0.6579
+hit@10: 0.6974
+MRR@10: 0.5331
+not_found@50: 17
+rank_11_to_50: 6
+```
+
+Dev selected config：
+
+```text
+hit@1: 0.4342
+hit@5: 0.6579
+hit@10: 0.6974
+MRR@10: 0.5331
+not_found@50: 17
+rank_11_to_50: 6
+```
+
+Dev delta：
+
+```text
+hit@10_delta: +0.0000
+top10_improvement_count: 0
+top10_regression_count: 0
+rank_up_within_top10_count: 0
+rank_down_within_top10_count: 0
+not_found_count_at_50_delta: 0
+rank_11_to_50_count_delta: 0
+```
+
+### Guard checks
+
+全部通过：
+
+```text
+analysis_splits_are_train_dev_only: passed
+top_k_values_include_primary_top10: passed
+search_depth_covers_primary_top10: passed
+source_stage85_report_is_stage85: passed
+stage85_protocol_id_matches: passed
+stage85_candidate_id_matches: passed
+user_confirmed_frozen_protocol: passed
+confirmed_protocol_id_matches: passed
+stage85_allows_train_dev_metrics_after_confirmation: passed
+stage85_final_test_metrics_locked: passed
+stage85_default_runtime_policy_unchanged: passed
+candidate_config_grid_matches_frozen_protocol: passed
+source_stage75_report_is_stage75: passed
+baseline_train_hit10_matches_stage75: passed
+baseline_dev_hit10_matches_stage75: passed
+source_doc_ids_not_used_as_runtime_evidence: passed
+changed_case_fields_public_safe: passed
+final_test_metrics_not_run: passed
+default_runtime_policy_unchanged: passed
+```
+
+### 可视化产物
+
+```text
+artifacts\primeqa_hybrid_lexical_cluster_diversity_comparison_stage86_visuals\stage86_lcdr_train_hit_at_10.svg
+artifacts\primeqa_hybrid_lexical_cluster_diversity_comparison_stage86_visuals\stage86_lcdr_dev_hit_at_10.svg
+artifacts\primeqa_hybrid_lexical_cluster_diversity_comparison_stage86_visuals\stage86_lcdr_dev_delta_hit_at_10.svg
+artifacts\primeqa_hybrid_lexical_cluster_diversity_comparison_stage86_visuals\stage86_lcdr_dev_top10_changes.svg
+artifacts\primeqa_hybrid_lexical_cluster_diversity_comparison_stage86_visuals\stage86_lcdr_dev_answer_duplicate_buckets.svg
+```
+
+Stage86 JSON SHA256：
+
+```text
+2F00764F52AA1279A7F526E5ACF0735E6FA90C6D27E63026FE011630D7EB4195
+```
+
+Visualization SHA256：
+
+```text
+stage86_lcdr_dev_answer_duplicate_buckets.svg: C106089E411BC1977C3C181150D5929F4A71801533432AB10BD157B95FD932D0
+stage86_lcdr_dev_delta_hit_at_10.svg: 6F5E95E5EDCDDB9B510E091B26B477D9B482F5EC03F167A2816F2623A9DDB0B5
+stage86_lcdr_dev_hit_at_10.svg: 001C0AF383446EBD801A6B43A1AAB1994C049F276A9FD2B6401E59E30949D640
+stage86_lcdr_dev_top10_changes.svg: 66682BE713A073DC0CDFD0E7322A298A0511BEE36907765CEABF0822AC568445
+stage86_lcdr_train_hit_at_10.svg: 89C9C170D88643E6EE90DF1B65A6731143D964C4CC60C25E2D762A01B90F1E09
+```
+
+### 问题、原因与修正
+
+- 问题 1：新增测试夹具第一次没有产生 rank-up。
+  - 原因：夹具中 answer 的 BM25 分数约 `0.99`，重复 cluster 候选分数约 `1.44`；即使用 12% penalty，第二个重复候选仍高于 answer。
+  - 修正：调整小型单测夹具，让 answer 分数真实地处于“略低于第二个重复候选、但高于惩罚后重复候选”的区间；这只是测试夹具，不影响真实 Stage86 指标。
+  - 影响：测试从“希望发生 rank-up”改成“在可解释分数条件下真实验证 rank-up”。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_lexical_cluster_diversity_comparison.py scripts\run_primeqa_hybrid_lexical_cluster_diversity_comparison.py tests\test_primeqa_hybrid_lexical_cluster_diversity_comparison.py
+pytest -q tests\test_primeqa_hybrid_lexical_cluster_diversity_comparison.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+产物安全检查：
+
+```text
+Select-String raw question / answer / document / snippet field patterns over Stage86 JSON: no matches
+git check-ignore Stage86 JSON and SVG artifacts: ignored by .gitignore
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 223 passed
+git diff --check: passed
+```
+
+### 结论
+
+- Stage86 已完成 frozen protocol 的 train/dev-only comparison。
+- Train 选中了 `lcdr_penalty_0_06_title_query_cluster`。
+- Train hit@10 有小幅提升：`+0.0054`。
+- Dev hit@10 没有提升：`+0.0000`。
+- Dev top10 improvements/regressions 都是 `0`。
+- Stage84 的 target metric contract 要求 dev hit@10 必须提升，所以 lexical cluster diversity 不能进入 runtime。
+- Stage86 没有使用 test。
+- Stage86 没有跑 final metrics。
+- Stage86 没有使用 source `DOC_IDS` 作为 runtime 检索证据。
+- 默认 runtime policy 保持 unchanged。
+
+### 我学到了
+
+- train-only selection 可以产生看起来不错的小幅增益，但如果 dev 没有提升，就不能把它当成泛化成功。
+- diversity rerank 的收益上限受 baseline top50 召回限制：它能重排候选，但不能找回 baseline top50 之外的 answer document。
+- 对 cluster 方案来说，公开报告必须特别克制：hash、计数、rank 变化可以记录，raw title/query/answer/token 不能写出。
+- 未确认不跑指标应该固化在代码门禁里，而不是只靠流程说明。
+
+### 下一步
+
+Stage87：停止 lexical cluster diversity 作为 retrieval-recall route，除非用户明确确认一个新的 train/dev-only protocol；推荐转向下一个 second-wave candidate protocol。
+
+Stage87 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。
