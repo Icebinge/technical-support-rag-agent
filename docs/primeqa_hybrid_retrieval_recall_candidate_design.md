@@ -147,8 +147,14 @@ Stage 81 ran the user-confirmed
 train, but that challenger regressed dev hit@10 by `-0.0132`. The dense+sparse
 RRF route should not advance to a runtime/default policy change.
 
-The current next step is Stage 82: run the remaining
-`bm25_k1_b_grid_train_to_dev` candidate on train/dev only. Stage82 must keep the
-frozen test split locked, must not run final test metrics, must not use source
-`DOC_IDS` as runtime retrieval evidence, and must not change the default runtime
-policy.
+Stage 82 ran the remaining `bm25_k1_b_grid_train_to_dev` candidate with the
+user-confirmed small grid. It selected the existing
+`full_document_bm25_baseline` on train. Some `b=0.95` settings looked better on
+dev hit@10, but using them would require dev-set selection and is therefore not
+allowed.
+
+The current next step is Stage 83: summarize the exhausted Stage76
+retrieval-recall candidates and decide the next train/dev-only improvement
+route. The frozen test split remains locked, final metrics must not be run,
+source `DOC_IDS` must not be used as runtime retrieval evidence, and the default
+runtime policy remains unchanged.

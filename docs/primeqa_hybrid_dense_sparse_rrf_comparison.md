@@ -172,11 +172,15 @@ can_use_test_for_tuning: false
 default_runtime_policy: unchanged
 ```
 
-## Next Step
+## Next Step Status
 
-Stage 82 should move to the remaining Stage76 candidate:
-`bm25_k1_b_grid_train_to_dev`.
+Stage82 ran the remaining Stage76 candidate,
+`bm25_k1_b_grid_train_to_dev`, after the user confirmed the small grid.
 
-This next step must still use only train/dev, keep test locked, select by train,
-validate on dev, avoid source `DOC_IDS` as runtime retrieval evidence, not run
-final test metrics, and not change runtime defaults.
+Stage82 selected the existing `full_document_bm25_baseline` on train, so the
+BM25 parameter-grid route did not justify a runtime/default policy change. The
+Stage82 record is:
+
+```text
+docs\primeqa_hybrid_bm25_k1_b_grid.md
+```

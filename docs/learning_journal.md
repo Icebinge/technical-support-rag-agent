@@ -19716,3 +19716,193 @@ pytest: 2 passed
 Stage82：进入 Stage76 剩余候选 `bm25_k1_b_grid_train_to_dev`。
 
 Stage82 仍然只能使用 train/dev，不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。
+
+## Stage82：BM25 k1/b 小网格 train/dev 实验
+时间：2026-07-15
+
+### 目标
+
+运行 Stage76 剩余候选 `bm25_k1_b_grid_train_to_dev`。
+
+用户确认选择 A 路线：小网格。
+
+固定网格：
+
+```text
+k1: 1.2, 1.5, 1.8
+b: 0.55, 0.75, 0.95
+```
+
+边界：
+- 只跑 train/dev；
+- 不读取 test split；
+- 不运行 final test metrics；
+- 不使用 source `DOC_IDS` 作为 runtime 检索证据；
+- 不能用 dev 反选参数；
+- 不改变 runtime 默认策略。
+
+### 我做了什么
+
+新增实现：
+
+```text
+src\ts_rag_agent\application\primeqa_hybrid_bm25_k1_b_grid.py
+scripts\run_primeqa_hybrid_bm25_k1_b_grid.py
+tests\test_primeqa_hybrid_bm25_k1_b_grid.py
+docs\primeqa_hybrid_bm25_k1_b_grid.md
+```
+
+真实运行命令：
+
+```text
+python scripts\run_primeqa_hybrid_bm25_k1_b_grid.py `
+  --output artifacts\primeqa_hybrid_bm25_k1_b_grid_stage82.json `
+  --visualization-dir artifacts\primeqa_hybrid_bm25_k1_b_grid_stage82_visuals
+```
+
+最终成功运行耗时：
+
+```text
+total: 93.445s
+```
+
+### 真实结果
+
+train-only selection 选中：
+
+```text
+full_document_bm25_baseline
+```
+
+train 关键指标：
+
+```text
+baseline hit@10: 0.6622
+bm25_grid__k1_1_20__b_0_75 hit@10: 0.6622
+```
+
+`bm25_grid__k1_1_20__b_0_75` 与 baseline 的 train hit@10 持平，但 hit@5 低于 baseline：
+
+```text
+baseline train hit@5: 0.6054
+bm25_grid__k1_1_20__b_0_75 train hit@5: 0.6027
+```
+
+所以按预设 train-only tie-breaker，baseline 胜出。
+
+dev 上的事后观察：
+
+```text
+bm25_grid__k1_1_20__b_0_95 dev hit@10: 0.7105
+bm25_grid__k1_1_50__b_0_95 dev hit@10: 0.7105
+baseline dev hit@10: 0.6974
+```
+
+但这两个 `b=0.95` 配置没有在 train 上被选中，不能用 dev 反选，因此不能推进为 runtime/default 策略。
+
+Stage82 决策：
+
+```text
+status: primeqa_hybrid_bm25_k1_b_grid_completed
+selected_config_id: full_document_bm25_baseline
+selected_dev_hit10_delta: 0.0
+selected_dev_top10_improvements: 0
+selected_dev_top10_regressions: 0
+selected_dev_not_found_at_search_depth_delta: 0
+selected_dev_rank_11_to_50_count_delta: 0
+can_continue_train_dev_development: true
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+default_runtime_policy: unchanged
+```
+
+### Guard checks
+
+全部通过：
+
+```text
+analysis_splits_are_train_dev_only
+top_k_values_include_primary_top10
+search_depth_covers_primary_top10
+stage75_source_report_is_stage75
+stage76_source_report_is_stage76
+stage76_bm25_grid_candidate_is_allowed
+stage76_requires_fixed_grid_values
+stage81_source_report_is_stage81
+stage81_did_not_open_final_test_gate
+stage81_recommends_bm25_grid_next
+user_confirmed_small_grid_protocol
+grid_values_fixed_before_run
+grid_includes_stage75_baseline
+baseline_train_hit10_matches_stage75
+baseline_dev_hit10_matches_stage75
+source_doc_ids_not_used_as_runtime_evidence
+final_test_metrics_not_run
+default_runtime_policy_unchanged
+```
+
+### 可视化产物
+
+```text
+artifacts\primeqa_hybrid_bm25_k1_b_grid_stage82_visuals\stage82_bm25_grid_train_hit_at_10.svg
+artifacts\primeqa_hybrid_bm25_k1_b_grid_stage82_visuals\stage82_bm25_grid_dev_hit_at_10.svg
+artifacts\primeqa_hybrid_bm25_k1_b_grid_stage82_visuals\stage82_bm25_grid_dev_delta_hit_at_10.svg
+artifacts\primeqa_hybrid_bm25_k1_b_grid_stage82_visuals\stage82_bm25_grid_dev_near_miss_11_to_50.svg
+artifacts\primeqa_hybrid_bm25_k1_b_grid_stage82_visuals\stage82_bm25_grid_dev_top10_changes.svg
+```
+
+Stage82 JSON SHA256：
+
+```text
+EB9E0D5EC66401418E6254381A9638316EDE0A040156B0EF49C95CF6BDD786CA
+```
+
+### 问题、原因与修正
+
+- 问题 1：第一版真实运行超时。
+  - 原因：实现对 train/dev 和每个 grid 配置重复建 BM25 索引，真实 corpus 下成本过高。
+  - 修正：改为 Stage82 专用共享 BM25 grid index；每个 split 只建一次倒排表，并在同一 query 上计算 9 个配置的 rank。
+- 问题 2：第二次运行生成了 blocked 报告。
+  - 原因：guard 只接受 Stage81 next-step 中的内部 candidate ID，但 Stage81 文档写的是人类可读的 `BM25 k1/b grid candidate`。
+  - 修正：guard 同时接受内部 ID 和人类可读名称，然后覆盖重跑最终报告。
+- 问题 3：dev 上存在更高 hit@10 的配置，容易被误认为可用。
+  - 原因：`b=0.95` 的两个配置 dev hit@10 达到 `0.7105`，但不是 train-selected。
+  - 修正：记录为事后观察，明确禁止用 dev 反选。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_bm25_k1_b_grid.py scripts\run_primeqa_hybrid_bm25_k1_b_grid.py tests\test_primeqa_hybrid_bm25_k1_b_grid.py
+pytest -q tests\test_primeqa_hybrid_bm25_k1_b_grid.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+### 结论
+
+- Stage82 已完成 BM25 k1/b 小网格 train/dev 实验。
+- Stage82 没有使用 test。
+- Stage82 没有运行 final test metrics。
+- Stage82 没有使用 source `DOC_IDS` 作为 runtime 检索证据。
+- 默认 runtime policy 保持 unchanged。
+- BM25 参数网格 route 不能推进：train-only selection 选择了现有 baseline。
+
+### 我学到了
+
+- dev 上更好的参数不是可部署证据；只要它不是 train 选出来的，就只能作为后续研究线索。
+- 小网格虽然低风险，但对当前 frozen train/dev 来说没有给出可验证的 runtime 参数替代。
+- 实验 guard 既要严格，也要匹配前序记录的真实表达；否则会产生“实际可解释但报告被格式误伤”的 blocked artifact。
+
+### 下一步
+
+Stage83：汇总 Stage76 的 retrieval-recall 候选全部结果，判断下一条 train/dev-only 改进路线。
+
+Stage83 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。

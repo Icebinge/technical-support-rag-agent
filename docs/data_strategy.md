@@ -375,6 +375,13 @@ recorded in:
 docs/primeqa_hybrid_dense_sparse_rrf_comparison.md
 ```
 
+The current PrimeQA/TechQA hybrid BM25 k1/b grid train/dev experiment is
+recorded in:
+
+```text
+docs/primeqa_hybrid_bm25_k1_b_grid.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:
