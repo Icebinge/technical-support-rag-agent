@@ -555,6 +555,8 @@ artifacts/primeqa_hybrid_structured_query_stop_decision_stage90.json
 artifacts/primeqa_hybrid_structured_query_stop_decision_stage90_visuals/
 artifacts/primeqa_hybrid_section_signal_protocol_stage91.json
 artifacts/primeqa_hybrid_section_signal_protocol_stage91_visuals/
+artifacts/primeqa_hybrid_section_signal_comparison_stage92.json
+artifacts/primeqa_hybrid_section_signal_comparison_stage92_visuals/
 ```
 
 The current Stage 67 protocol is recorded in:
@@ -705,4 +707,10 @@ The current Stage 91 section signal protocol freeze is recorded in:
 
 ```text
 docs/primeqa_hybrid_section_signal_protocol.md
+```
+
+The current Stage 92 section signal train/dev comparison is recorded in:
+
+```text
+docs/primeqa_hybrid_section_signal_comparison.md
 ```

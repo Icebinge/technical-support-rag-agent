@@ -240,7 +240,13 @@ Stage91 confirmed and froze the train/dev-only protocol for
 `section_signal_guarded_expansion_design` as
 `section_signal_guarded_expansion_train_dev_v1`.
 
-The current next step is Stage92: run the frozen train/dev-only section signal
-guarded expansion comparison after user confirmation. The frozen test split
-remains locked, final metrics must not be run, source `DOC_IDS` must not be used
-as runtime retrieval evidence, and runtime defaults remain unchanged.
+Stage92 ran the frozen train/dev-only section signal guarded expansion
+comparison. The train-selected config was
+`ssgx_section_top50_injection_guard_v1`, but it had dev hit@10 delta `0.0000`
+and dev search-depth net improvement `0`, so the route does not advance.
+
+The current next step is Stage93: stop section signal guarded expansion as a
+retrieval-recall route unless a new train/dev-only protocol is explicitly
+confirmed. The frozen test split remains locked, final metrics must not be run,
+source `DOC_IDS` must not be used as runtime retrieval evidence, and runtime
+defaults remain unchanged.
