@@ -841,3 +841,10 @@ The current Stage 110 failure-pattern redesign stop decision is recorded in:
 ```text
 docs/primeqa_hybrid_failure_pattern_redesign_stop_decision.md
 ```
+
+The current Stage 111 retrieval-context-miss root-cause audit protocol freeze is
+recorded in:
+
+```text
+docs/primeqa_hybrid_retrieval_context_miss_audit_protocol.md
+```

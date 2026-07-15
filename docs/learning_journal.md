@@ -25869,6 +25869,241 @@ runtime defaults unchanged
 no fallback strategies
 ```
 
+## Stage111：冻结 retrieval_context_miss 根因审计协议
+
+### 目标
+
+用户选择路线 A 后，本阶段只做协议冻结，不运行审计实验。目标是把
+`retrieval_context_miss` 的下一轮 train/dev-only 根因分析边界先写死，避免
+Stage112 在读取 corpus 和 gold doc id 之后，把离线诊断信号误用成 runtime
+策略。
+
+### 新增内容
+
+新增协议实现：
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_retrieval_context_miss_audit_protocol.py
+```
+
+新增运行脚本：
+
+```text
+scripts/freeze_primeqa_hybrid_retrieval_context_miss_audit_protocol.py
+```
+
+新增测试：
+
+```text
+tests/test_primeqa_hybrid_retrieval_context_miss_audit_protocol.py
+```
+
+新增正式记录：
+
+```text
+docs/primeqa_hybrid_retrieval_context_miss_audit_protocol.md
+```
+
+同时更新索引：
+
+```text
+docs/data_strategy.md
+docs/evaluation_strategy.md
+```
+
+### 真实运行结果
+
+命令：
+
+```text
+python scripts\freeze_primeqa_hybrid_retrieval_context_miss_audit_protocol.py --user-confirmed-protocol --confirmation-note "user selected route A and confirmed Stage111 retrieval-context-miss root-cause audit protocol on 2026-07-16; protocol freeze only; test locked; runtime defaults unchanged; no fallback strategies"
+```
+
+输出：
+
+```text
+artifacts\primeqa_hybrid_retrieval_context_miss_audit_protocol_stage111.json
+```
+
+结果：
+
+```text
+stage: Stage 111
+protocol_id: primeqa_hybrid_retrieval_context_miss_audit_protocol_v1
+route_id: retrieval_context_miss_root_cause_audit_protocol
+status: primeqa_hybrid_retrieval_context_miss_audit_protocol_frozen
+recommended_next_direction: run_retrieval_context_miss_root_cause_audit_train_dev
+guard checks: 24 / 24 passed
+timing total: 0.002s
+```
+
+本阶段只读取 Stage102、Stage107、Stage110 的 public-safe 报告，没有读取
+train/dev/test split 文件，没有读取 corpus 文档，没有运行 retrieval 或 answer
+metrics，也没有打开最终 test gate。
+
+### 冻结的审计维度
+
+Stage112 允许审计但不能 runtime 使用的维度：
+
+```text
+query_expression_gap
+title_heading_mismatch
+section_boundary_or_span_locality
+long_document_score_dilution
+entity_version_error_code_mismatch
+bm25_field_weighting_or_index_structure
+```
+
+这些维度都是离线诊断用，不是候选策略，也不是上线特征。
+
+### 使用的证据
+
+Stage102 说明 retrieval_context_miss 仍是明显失败桶：
+
+```text
+train_retrieval_context_miss_count: 125
+dev_retrieval_context_miss_count: 23
+train_answerability_false_answer_count: 180
+dev_answerability_false_answer_count: 41
+train_verified_average_token_f1: 0.2017
+dev_verified_average_token_f1: 0.204
+```
+
+Stage107 说明 dev answerable failure 中存在 gold context absent：
+
+```text
+answerable_gold_context_absent_count: 23
+answerable_gold_context_absent_rate: 0.3026
+answerable_gold_context_present_count: 53
+context_present_failure_count: 53
+```
+
+Stage110 说明上一条 failure-pattern redesign family 已停止：
+
+```text
+decision_status: primeqa_hybrid_failure_pattern_redesign_family_stopped
+stage109_selectable_config_count: 0
+stage109_config_count: 7
+requires_user_confirmation_before_next_protocol: true
+```
+
+### Stage112 合同
+
+Stage112 只有在用户确认后才允许执行。确认后可读取：
+
+```text
+Stage111 frozen protocol
+Stage68 train split
+Stage68 dev split
+PrimeQA training/dev corpus sections
+Stage102 public-safe report for baseline bucket targets
+```
+
+继续禁止：
+
+```text
+test split
+final-test labels
+runtime oracle document identifiers
+raw question, answer, or document text in public outputs
+```
+
+关键边界：
+
+```text
+reported_splits: train, dev
+retrieval_depth_for_diagnostic_only: 50
+stage112_may_use_gold_doc_id_for_offline_labeling: true
+gold_doc_id_allowed_as_runtime_feature: false
+selection_or_threshold_tuning_allowed: false
+candidate_defaultization_allowed: false
+final_test_metrics_allowed: false
+fallback_strategies_enabled: false
+default_runtime_policy: unchanged
+```
+
+### 可视化结果
+
+本阶段生成了 5 个 SVG 诊断图：
+
+```text
+artifacts\primeqa_hybrid_retrieval_context_miss_audit_protocol_stage111_visuals\stage111_retrieval_context_miss_counts.svg
+artifacts\primeqa_hybrid_retrieval_context_miss_audit_protocol_stage111_visuals\stage111_audit_dimension_priorities.svg
+artifacts\primeqa_hybrid_retrieval_context_miss_audit_protocol_stage111_visuals\stage111_stage112_data_access_contract.svg
+artifacts\primeqa_hybrid_retrieval_context_miss_audit_protocol_stage111_visuals\stage111_protocol_decision_flags.svg
+artifacts\primeqa_hybrid_retrieval_context_miss_audit_protocol_stage111_visuals\stage111_guard_check_status.svg
+```
+
+### 问题、原因和处理
+
+问题：Stage110 之后不能直接设计新 retrieval 策略，否则会跳过根因验证。
+
+原因：Stage109 已证明 answer-pipeline 方向可以降低部分失败桶，但代价是过多拒答
+answerable 样本；现在更关键的问题是 gold context 为什么没进检索上下文。
+
+处理：先冻结 Stage111 协议，把 Stage112 的可读数据、禁止数据、输出字段、
+gold doc id 使用边界和 visualizations 全部写清楚。
+
+### 验证
+
+目标验证：
+
+```text
+python -m ruff check src\ts_rag_agent\application\primeqa_hybrid_retrieval_context_miss_audit_protocol.py scripts\freeze_primeqa_hybrid_retrieval_context_miss_audit_protocol.py tests\test_primeqa_hybrid_retrieval_context_miss_audit_protocol.py
+python -m pytest tests\test_primeqa_hybrid_retrieval_context_miss_audit_protocol.py -q
+python scripts\freeze_primeqa_hybrid_retrieval_context_miss_audit_protocol.py --user-confirmed-protocol ...
+```
+
+结果：
+
+```text
+targeted ruff: passed
+targeted pytest: 3 passed
+Stage111 run: passed
+guard checks: 24 / 24 passed
+```
+
+全仓验证：
+
+```text
+python -m ruff check .
+python -m pytest -q
+git diff --check
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 303 passed
+git diff --check: passed
+```
+
+### 我学到了
+
+- 现在不能急着做新 retrieval 策略，必须先知道 `retrieval_context_miss` 是查询表达、
+  标题/heading、section locality、长文档稀释、实体版本码，还是 index 结构问题。
+- gold doc id 可以用于 Stage112 离线标注，但必须明确禁止进入 runtime 特征。
+- 协议冻结阶段也要生成可视化，这样下一步执行审计时能直接对照边界。
+- 当前仍然没有使用 test；test 继续锁住。
+
+### 下一步
+
+Stage112：在用户确认后，运行 frozen train/dev-only
+`retrieval_context_miss` 根因审计。要求：
+
+```text
+use train/dev only
+report train/dev separately
+gold doc id offline labeling only
+no test
+no final metrics
+no dev-only selection
+no threshold tuning
+runtime defaults unchanged
+no fallback strategies
+```
+
 ## Stage107：冻结并运行 validation failure pattern analysis
 
 ### 目标

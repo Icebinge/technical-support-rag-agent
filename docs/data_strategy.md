@@ -573,6 +573,13 @@ recorded in:
 docs/primeqa_hybrid_failure_pattern_redesign_stop_decision.md
 ```
 
+The current PrimeQA/TechQA hybrid retrieval-context-miss root-cause audit
+protocol freeze is recorded in:
+
+```text
+docs/primeqa_hybrid_retrieval_context_miss_audit_protocol.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:
