@@ -54,6 +54,8 @@ query-view ablation, and found that title-only and deduplicated full-question
 queries underperform the full-question BM25 baseline on train/dev.
 Stage 78 ran the second retrieval-recall candidate, fielded title/text BM25
 score fusion, and found no dev hit@10 gain from the train-selected challenger.
+Stage 79 ran the third retrieval-recall candidate, section BM25 max-section
+document rollup, and found a dev hit@10 regression.
 The frozen test split remains locked and must not be used for tuning.
 
 ### nvidia/TechQA-RAG-Eval
@@ -347,6 +349,13 @@ The current PrimeQA/TechQA hybrid fielded BM25 fusion experiment is recorded in:
 
 ```text
 docs/primeqa_hybrid_fielded_bm25_fusion.md
+```
+
+The current PrimeQA/TechQA hybrid section BM25 doc-rollup experiment is recorded
+in:
+
+```text
+docs/primeqa_hybrid_section_bm25_doc_rollup.md
 ```
 
 ## Leakage Checks

@@ -1,6 +1,6 @@
 # Evaluation Strategy
 
-This document records the current evaluation strategy after Stage 78.
+This document records the current evaluation strategy after Stage 79.
 
 The active route is now the project-owned PrimeQA/TechQA hybrid split
 `primeqa_hybrid_stage68_v1`. Stage 68 froze local split artifacts, and Stage 69
@@ -16,7 +16,9 @@ designed train/dev-only retrieval-recall candidate experiments from those miss
 drivers. Stage 77 ran the first candidate, query-view ablation, and found that
 it underperforms the full-question BM25 baseline. Stage 78 ran the second
 candidate, fielded title/text BM25 score fusion, and found no dev hit@10 gain.
-The frozen test split remains locked for future final evaluation.
+Stage 79 ran the third candidate, section BM25 max-section document rollup, and
+found a dev hit@10 regression. The frozen test split remains locked for future
+final evaluation.
 
 ## Current Facts
 
@@ -232,6 +234,30 @@ final test metrics: not run
 default runtime policy: unchanged
 ```
 
+- Stage 79 ran section BM25 max-section document rollup on train/dev only:
+
+```text
+section index documents: 28482
+section index sections: 216648
+section rollup: max_section_score_per_parent_document
+
+train full_document_bm25_baseline hit@10: 0.6622
+train section_bm25_max_section_rollup hit@10: 0.5919
+train hit@10 delta: -0.0703
+train top10 improvements/regressions: 8 / 34
+train not_found@50 delta: +1
+
+dev full_document_bm25_baseline hit@10: 0.6974
+dev section_bm25_max_section_rollup hit@10: 0.6447
+dev hit@10 delta: -0.0527
+dev top10 improvements/regressions: 1 / 5
+dev not_found@50 delta: +1
+
+decision: section_bm25_doc_rollup_does_not_advance
+final test metrics: not run
+default runtime policy: unchanged
+```
+
 - Stage 71 ran train-only candidate-reranker grouped CV and train-to-dev guarded
   policy validation for both `logistic_best_candidate` and
   `ridge_candidate_token_f1`:
@@ -266,7 +292,7 @@ train/dev, so any quality metric reported as held-out would be misleading.
 
 ### Project-Owned PrimeQA/TechQA Hybrid Split
 
-Status: Stage 78 completed fielded title/text BM25 score fusion and did not
+Status: Stage 79 completed section BM25 max-section document rollup and did not
 advance that route; final metrics not run.
 
 This route preserves the final target: document-style RAG over TechQA technotes.
@@ -338,9 +364,10 @@ default_runtime_policy: unchanged
 
 Required next step:
 
-Stage 79 should run a train/dev-only retrieval-recall experiment for
-`section_bm25_doc_rollup_train_dev_probe`, the next allowed Stage76 candidate.
-Do not use test for evaluation or tuning.
+Stage 80 should check `dense_sparse_rrf_train_dev_probe` feasibility before any
+train/dev run. Record local model/cache identity, do not download or choose
+external dense retrieval dependencies silently, and do not use test for
+evaluation or tuning.
 
 ## Parked Paths
 
@@ -385,15 +412,17 @@ designed allowed train/dev retrieval-recall candidates and blocked source
 and did not advance that route because both challenger views underperformed the
 baseline. Stage 78 completed fielded title/text BM25 score fusion and did not
 advance that route because the train-selected challenger produced no dev hit@10
-gain. Until a future stage explicitly opens final evaluation:
+gain. Stage 79 completed section BM25 max-section document rollup and did not
+advance that route because dev hit@10 regressed. Until a future stage explicitly
+opens final evaluation:
 
 - do not run final metrics;
 - do not change the default runtime;
 - do not defaultize the current candidate-reranker policy;
 - do not continue the current reranker-policy route without a new user-confirmed
   train/dev-only plan;
-- do not use the frozen test split while running Stage 79 retrieval-recall
-  experiments;
+- do not use the frozen test split while running Stage 80 feasibility checks or
+  retrieval-recall experiments;
 - do not use source `DOC_IDS` as runtime retrieval evidence;
 - do not tune Stage 51 against the frozen test split;
 - do not use NVIDIA `train.json` as held-out evidence;
@@ -466,6 +495,8 @@ artifacts/primeqa_hybrid_query_view_ablation_stage77.json
 artifacts/primeqa_hybrid_query_view_ablation_stage77_visuals/
 artifacts/primeqa_hybrid_fielded_bm25_fusion_stage78.json
 artifacts/primeqa_hybrid_fielded_bm25_fusion_stage78_visuals/
+artifacts/primeqa_hybrid_section_bm25_doc_rollup_stage79.json
+artifacts/primeqa_hybrid_section_bm25_doc_rollup_stage79_visuals/
 ```
 
 The current Stage 67 protocol is recorded in:
@@ -538,4 +569,10 @@ The current Stage 78 fielded BM25 fusion experiment is recorded in:
 
 ```text
 docs/primeqa_hybrid_fielded_bm25_fusion.md
+```
+
+The current Stage 79 section BM25 doc-rollup experiment is recorded in:
+
+```text
+docs/primeqa_hybrid_section_bm25_doc_rollup.md
 ```

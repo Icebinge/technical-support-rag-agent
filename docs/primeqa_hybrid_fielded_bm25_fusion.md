@@ -252,8 +252,13 @@ default_runtime_policy: unchanged
 
 ## Next Step
 
-Stage 79 should move to the next Stage76 candidate:
-`section_bm25_doc_rollup_train_dev_probe`.
+Stage 79 moved to the next Stage76 candidate,
+`section_bm25_doc_rollup_train_dev_probe`, and did not advance the route because
+dev hit@10 regressed.
 
-Stage 79 must remain train/dev-only, keep the frozen test split locked, avoid
-source `DOC_IDS` as runtime retrieval evidence, and not run final test metrics.
+The current next step is Stage 80:
+check `dense_sparse_rrf_train_dev_probe` feasibility before any train/dev run.
+
+Stage 80 must keep the frozen test split locked, avoid source `DOC_IDS` as
+runtime retrieval evidence, not run final test metrics, and not download or
+choose dense retrieval dependencies silently.

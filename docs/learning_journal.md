@@ -19046,3 +19046,258 @@ git diff --check: passed
 Stage79：运行 `section_bm25_doc_rollup_train_dev_probe` 的 train/dev-only retrieval-recall 实验。
 
 Stage79 仍然不能使用 test 做评估或 tuning，不能运行 final test metrics，也不能使用 source `DOC_IDS` 作为 runtime 检索证据。
+
+## Stage79：section BM25 doc rollup 召回实验
+
+时间：2026-07-15
+
+### 目标
+
+继续解决 Stage75 暴露的 BM25 top10 召回不足问题。本阶段按照 Stage76 的第三个候选方向，评估 `section_bm25_doc_rollup_train_dev_probe`：
+
+- 仍然只使用 Stage68 冻结后的 train/dev split；
+- 不读取 test split 做评估或调参；
+- 不运行 final test metrics；
+- 不使用 source `DOC_IDS` 作为 runtime 检索证据；
+- 不下载或静默选择新的 dense retrieval 依赖；
+- 不改变默认 runtime policy；
+- 输出可视化结果，比较 full-document BM25 baseline 与 section BM25 max-section rollup。
+
+### 我做了什么
+
+新增 Stage79 train/dev-only 实验实现：
+
+```text
+src\ts_rag_agent\application\primeqa_hybrid_section_bm25_doc_rollup.py
+scripts\run_primeqa_hybrid_section_bm25_doc_rollup.py
+tests\test_primeqa_hybrid_section_bm25_doc_rollup.py
+docs\primeqa_hybrid_section_bm25_doc_rollup.md
+```
+
+本阶段使用项目已有的 `SectionBM25Retriever` 语义：
+
+```text
+section_bm25_max_section_rollup:
+  先对 section 建 BM25 index；
+  对每个 query 检索 section；
+  父文档分数取该文档最高 section score；
+  返回 parent document ranking。
+```
+
+对比对象：
+
+```text
+full_document_bm25_baseline:
+  title + full document text 的 BM25 baseline
+```
+
+真实运行命令：
+
+```text
+python scripts\run_primeqa_hybrid_section_bm25_doc_rollup.py `
+  --output artifacts\primeqa_hybrid_section_bm25_doc_rollup_stage79.json `
+  --visualization-dir artifacts\primeqa_hybrid_section_bm25_doc_rollup_stage79_visuals `
+  --search-depth 50
+```
+
+运行耗时：
+
+```text
+load_splits: 0.011s
+load_documents_sections_and_reports: 2.353s
+bm25_indexes: 9.768s
+section_rollup_evaluate: 446.859s
+guard_checks: 0.004s
+total: 458.995s
+```
+
+加载的 section index：
+
+```text
+document_count: 28482
+section_count: 216648
+documents_with_sections: 28482
+documents_without_sections: 0
+average_sections_per_document: 7.6065
+```
+
+### 真实结果
+
+Train baseline：
+
+```text
+hit@1: 0.4243
+hit@5: 0.6054
+hit@10: 0.6622
+MRR@10: 0.5023
+not_found@50: 93
+```
+
+Train section BM25 max-section rollup：
+
+```text
+hit@1: 0.4054
+hit@5: 0.5324
+hit@10: 0.5919
+MRR@10: 0.4631
+not_found@50: 94
+```
+
+Train delta：
+
+```text
+hit@1 delta: -0.0189
+hit@5 delta: -0.0730
+hit@10 delta: -0.0703
+MRR@10 delta: -0.0392
+not_found@50 delta: +1
+top10 improvements/regressions: 8 / 34
+search-depth improvements/regressions: 17 / 18
+```
+
+Dev baseline：
+
+```text
+hit@1: 0.4342
+hit@5: 0.6579
+hit@10: 0.6974
+MRR@10: 0.5331
+not_found@50: 17
+```
+
+Dev section BM25 max-section rollup：
+
+```text
+hit@1: 0.4342
+hit@5: 0.6184
+hit@10: 0.6447
+MRR@10: 0.4974
+not_found@50: 18
+```
+
+Dev delta：
+
+```text
+hit@1 delta: +0.0000
+hit@5 delta: -0.0395
+hit@10 delta: -0.0527
+MRR@10 delta: -0.0357
+not_found@50 delta: +1
+top10 improvements/regressions: 1 / 5
+search-depth improvements/regressions: 2 / 3
+```
+
+### 可视化产物
+
+```text
+artifacts\primeqa_hybrid_section_bm25_doc_rollup_stage79_visuals\stage79_section_bm25_train_hit_at_10.svg
+artifacts\primeqa_hybrid_section_bm25_doc_rollup_stage79_visuals\stage79_section_bm25_dev_hit_at_10.svg
+artifacts\primeqa_hybrid_section_bm25_doc_rollup_stage79_visuals\stage79_section_bm25_dev_delta_hit_at_10.svg
+artifacts\primeqa_hybrid_section_bm25_doc_rollup_stage79_visuals\stage79_section_bm25_dev_not_found_at_50.svg
+artifacts\primeqa_hybrid_section_bm25_doc_rollup_stage79_visuals\stage79_section_bm25_dev_top10_changes.svg
+```
+
+Stage79 JSON SHA256：
+
+```text
+32A6B0CF36E041E9C67AE430569AD4B4587EC07210C93D9654C8A4305406E1E7
+```
+
+### Guard checks
+
+```text
+analysis_splits_are_train_dev_only: passed
+top_k_values_include_primary_top10: passed
+search_depth_covers_primary_top10: passed
+stage75_source_report_is_stage75: passed
+stage78_source_report_is_stage78: passed
+baseline_train_hit10_matches_stage75: passed
+baseline_dev_hit10_matches_stage75: passed
+stage78_did_not_open_final_test_gate: passed
+section_index_has_nonempty_sections: passed
+source_doc_ids_not_used_as_runtime_evidence: passed
+final_test_metrics_not_run: passed
+default_runtime_policy_unchanged: passed
+```
+
+额外 raw-text 检查：
+
+```text
+Select-String over Stage79 JSON for question_title, question_text, gold_answer,
+candidate_sentence, document_title, document_text, and known raw-text snippets:
+no matches
+```
+
+artifact 忽略状态：
+
+```text
+.gitignore:19:artifacts/* artifacts\primeqa_hybrid_section_bm25_doc_rollup_stage79.json
+.gitignore:19:artifacts/* artifacts\primeqa_hybrid_section_bm25_doc_rollup_stage79_visuals\stage79_section_bm25_dev_hit_at_10.svg
+```
+
+### 问题、原因与修正
+
+- 问题 1：section BM25 max-section rollup 没有提升 top10 召回，反而回退。
+  - 原因：max-section rollup 会强化局部片段匹配，但也会丢失 full-document BM25 中对父文档整体上下文有帮助的信号。
+  - 修正：不推进 section BM25 doc-rollup route，不进入 final-test gate，不改变 runtime 默认策略。
+- 问题 2：not_found@50 没有下降。
+  - 原因：section 级索引确实找回了一些 baseline top50 外的样本，但也丢掉了一些 baseline 已在 top50 内的样本；dev search-depth improvements/regressions 为 `2 / 3`。
+  - 修正：报告同时记录 top10 changes 与 search-depth changes，避免只看单个改善案例。
+- 问题 3：下一个 Stage76 候选 `dense_sparse_rrf_train_dev_probe` 涉及模型/cache/依赖选择。
+  - 原因：Stage76 已把 dense+sparse 标为 high risk，并要求确认本地模型/cache 可用性。
+  - 修正：下一步先做 feasibility check，记录本地模型/cache identity；不静默下载模型，不静默选择外部 dense retrieval 依赖。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_section_bm25_doc_rollup.py scripts\run_primeqa_hybrid_section_bm25_doc_rollup.py tests\test_primeqa_hybrid_section_bm25_doc_rollup.py
+pytest -q tests\test_primeqa_hybrid_section_bm25_doc_rollup.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+提交前完整验证：
+
+```text
+ruff check .
+pytest -q
+git diff --check
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 207 passed
+git diff --check: passed
+```
+
+### 结论
+
+- Stage79 已完成 section BM25 max-section document rollup 实验。
+- Stage79 没有使用测试集。
+- Stage79 没有运行 final test metrics。
+- Stage79 没有使用 source `DOC_IDS` 作为 runtime 检索证据。
+- Stage79 没有下载或静默选择 dense retrieval 依赖。
+- 默认 runtime policy 保持 unchanged。
+- section BM25 doc-rollup route 不推进：dev hit@10 delta 为 `-0.0527`，top10 improvements/regressions 为 `1 / 5`，not_found@50 delta 为 `+1`。
+- 当前最合适下一步是 Stage80：先检查 `dense_sparse_rrf_train_dev_probe` 的本地模型/cache 可行性。
+
+### 我学到的
+
+- 更细粒度的 section 检索不必然提升文档级召回；max-section 聚合可能牺牲父文档整体上下文。
+- 对召回实验，除了 top10 improvements/regressions，还必须看 search-depth improvements/regressions；否则会误判“找回了几个 top50 外样本”这一局部信号。
+- 涉及 dense retrieval 的下一步必须先确认模型和缓存边界，不能为了推进实验而静默下载或选型。
+
+### 下一步
+
+Stage80：检查 `dense_sparse_rrf_train_dev_probe` 的本地模型/cache 可行性，并记录可用模型、缓存路径、是否需要用户确认。
+
+Stage80 仍然不能使用 test 做评估或 tuning，不能运行 final test metrics，不能使用 source `DOC_IDS` 作为 runtime 检索证据，也不能静默下载或选择新的 dense retrieval 依赖。
