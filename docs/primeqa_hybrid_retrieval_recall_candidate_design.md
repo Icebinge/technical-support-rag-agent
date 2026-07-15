@@ -124,8 +124,13 @@ default_runtime_policy: unchanged
 
 ## Next Step
 
-Stage 77 should run a train/dev-only retrieval-recall experiment for the
-highest-priority allowed candidate: `query_view_ablation_full_title_dedup`.
+Stage 77 ran a train/dev-only retrieval-recall experiment for the
+highest-priority allowed candidate, `query_view_ablation_full_title_dedup`, and
+did not advance the route because the challenger query views underperformed the
+full-question BM25 baseline.
 
-Stage 77 must keep the frozen test split locked, must not run final test
+The current next step is Stage 78:
+`fielded_title_text_bm25_score_fusion`.
+
+Stage 78 must keep the frozen test split locked, must not run final test
 metrics, and must not change the default runtime policy.

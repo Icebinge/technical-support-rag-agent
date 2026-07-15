@@ -18528,3 +18528,235 @@ git diff --check: passed
 Stage77：运行 `query_view_ablation_full_title_dedup` 的 train/dev-only retrieval-recall 实验。
 
 Stage77 仍然不能使用 test 做评估或 tuning，也不能运行 final test metrics。
+
+## Stage77：query view ablation 召回实验
+
+时间：2026-07-15
+
+### 目标
+
+运行 Stage76 推荐优先级最高的 retrieval-recall candidate：
+`query_view_ablation_full_title_dedup`。
+
+实验设计：
+
+- 同一个 BM25 document index；
+- 同一组 frozen Stage68 train/dev split；
+- 对比不同 query view；
+- train 上选择 challenger，dev 只做验证；
+- 不读取 test；
+- 不运行 final test metrics；
+- 不用 source `DOC_IDS` 作为 runtime retrieval evidence；
+- 不改变默认 runtime policy。
+
+### 本次新增
+
+- 新增 `src/ts_rag_agent/application/primeqa_hybrid_query_view_ablation.py`。
+- 新增 `scripts/run_primeqa_hybrid_query_view_ablation.py`。
+- 新增 `tests/test_primeqa_hybrid_query_view_ablation.py`。
+- 新增 `docs/primeqa_hybrid_query_view_ablation.md`。
+- 更新 `docs/evaluation_strategy.md`。
+- 更新 `docs/data_strategy.md`。
+- 更新 `docs/primeqa_hybrid_retrieval_recall_candidate_design.md`。
+- 更新 `docs/learning_journal.md`。
+
+### 真实运行命令
+
+```text
+python scripts\run_primeqa_hybrid_query_view_ablation.py `
+  --output artifacts\primeqa_hybrid_query_view_ablation_stage77.json `
+  --visualization-dir artifacts\primeqa_hybrid_query_view_ablation_stage77_visuals
+```
+
+真实运行耗时：
+
+```text
+load_splits: 0.025s
+load_documents_and_stage75: 0.930s
+bm25_index: 4.520s
+query_view_evaluate: 212.609s
+total: 218.083s
+```
+
+### Query views
+
+```text
+full_question_baseline:
+  current retrieval query: question title plus question text
+
+title_only:
+  question title only
+
+full_question_dedup_terms:
+  tokenized full question with duplicate lexical terms removed while preserving
+  first occurrence order
+```
+
+### 真实结果
+
+Train：
+
+```text
+full_question_baseline:
+  hit@1: 0.4243
+  hit@5: 0.6054
+  hit@10: 0.6622
+  MRR: 0.5023
+
+title_only:
+  hit@1: 0.3865
+  hit@5: 0.5486
+  hit@10: 0.6054
+  MRR: 0.4589
+  hit@10 delta vs baseline: -0.0568
+
+full_question_dedup_terms:
+  hit@1: 0.4135
+  hit@5: 0.5892
+  hit@10: 0.6432
+  MRR: 0.4908
+  hit@10 delta vs baseline: -0.0190
+```
+
+Dev：
+
+```text
+full_question_baseline:
+  hit@1: 0.4342
+  hit@5: 0.6579
+  hit@10: 0.6974
+  MRR: 0.5331
+
+title_only:
+  hit@1: 0.3947
+  hit@5: 0.5789
+  hit@10: 0.6184
+  MRR: 0.4638
+  hit@10 delta vs baseline: -0.0790
+  top10 improvements/regressions: 1 / 7
+
+full_question_dedup_terms:
+  hit@1: 0.4342
+  hit@5: 0.6053
+  hit@10: 0.6579
+  MRR: 0.5116
+  hit@10 delta vs baseline: -0.0395
+  top10 improvements/regressions: 1 / 4
+```
+
+Train selected challenger：
+
+```text
+selected_view_id: full_question_dedup_terms
+selected_dev_hit@10_delta: -0.0395
+selected_dev_top10_improvements: 1
+selected_dev_top10_regressions: 4
+```
+
+### 可视化产物
+
+```text
+artifacts\primeqa_hybrid_query_view_ablation_stage77_visuals\stage77_query_view_train_hit_at_10.svg
+artifacts\primeqa_hybrid_query_view_ablation_stage77_visuals\stage77_query_view_dev_hit_at_10.svg
+artifacts\primeqa_hybrid_query_view_ablation_stage77_visuals\stage77_query_view_dev_delta_hit_at_10.svg
+artifacts\primeqa_hybrid_query_view_ablation_stage77_visuals\stage77_query_view_dev_top10_changes.svg
+```
+
+Stage77 JSON SHA256：
+
+```text
+CD0DE3D3B864C06261D6147D2C34947A93CA671E2604B0ED10CD25CE7E9F03DC
+```
+
+### Guard checks
+
+```text
+analysis_splits_are_train_dev_only: passed
+top_k_values_include_primary_top10: passed
+stage75_source_report_is_stage75: passed
+baseline_train_hit10_matches_stage75: passed
+baseline_dev_hit10_matches_stage75: passed
+source_doc_ids_not_used_as_runtime_evidence: passed
+final_test_metrics_not_run: passed
+default_runtime_policy_unchanged: passed
+```
+
+额外 raw-text 检查：
+
+```text
+Select-String over Stage77 JSON for question_title, question_text, gold_answer,
+candidate_sentence, document_title, document_text, and known raw-text snippets:
+no matches
+```
+
+artifact 忽略状态：
+
+```text
+.gitignore:19:artifacts/* artifacts\primeqa_hybrid_query_view_ablation_stage77.json
+.gitignore:19:artifacts/* artifacts\primeqa_hybrid_query_view_ablation_stage77_visuals\stage77_query_view_dev_hit_at_10.svg
+```
+
+### 问题、原因与修正
+
+- 问题 1：query-view challenger 没有超过 baseline。
+  - 原因：无论 title-only 还是 full-question dedup，都会丢失一部分对 BM25 有帮助的词频或上下文信号。
+  - 修正：不推进 query-view route，不进入 final-test gate，下一步转到 Stage76 第二候选 fielded title/text BM25 score fusion。
+- 问题 2：train-selected challenger 在 dev 上也退化。
+  - 原因：即便 `full_question_dedup_terms` 是两个 challenger 中 train 表现最好的，它仍低于 full-question baseline；dev hit@10 delta 为 `-0.0395`。
+  - 修正：报告明确区分 baseline 与 challenger；选择 challenger 只用于验证候选，不意味着可 defaultize。
+- 问题 3：query view 实验需要读取 train/dev 原始问题字段来构造查询。
+  - 原因：检索本身必须使用问题文本作为 runtime query。
+  - 修正：脚本允许读取 train/dev split 中的 query 字段，但报告和文档只输出 public-safe 的指标、样本 ID、rank 和聚合结果，不输出 raw question/answer/document text。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_query_view_ablation.py scripts\run_primeqa_hybrid_query_view_ablation.py tests\test_primeqa_hybrid_query_view_ablation.py
+pytest -q tests\test_primeqa_hybrid_query_view_ablation.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+提交前完整验证：
+
+```text
+ruff check .
+pytest -q
+git diff --check
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 203 passed
+git diff --check: passed
+```
+
+### 结论
+
+- Stage77 已完成 query-view ablation。
+- Stage77 没有使用测试集。
+- Stage77 没有运行 final test metrics。
+- 默认 runtime policy 保持 unchanged。
+- query-view route 不推进：两个 challenger 都低于 full-question baseline。
+- 当前最合适下一步是进入 Stage76 第二候选 `fielded_title_text_bm25_score_fusion`。
+
+### 我学到的
+
+- 简单缩短 query 或去重 query terms 不一定能改善 BM25 召回；BM25 可能正在利用问题正文中的上下文词和词频信号。
+- 对召回实验，必须同时看 improvements 和 regressions；`full_question_dedup_terms` 在 dev 上只新增 1 个 top10 hit，却丢掉 4 个原本命中的样本。
+- train/dev-only 的候选验证也需要明确“不推进”的结论，否则容易把一个退化候选误认为只是还没调好。
+
+### 下一步
+
+Stage78：运行 `fielded_title_text_bm25_score_fusion` 的 train/dev-only retrieval-recall 实验。
+
+Stage78 仍然不能使用 test 做评估或 tuning，也不能运行 final test metrics。

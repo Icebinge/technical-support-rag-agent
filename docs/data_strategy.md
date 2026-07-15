@@ -49,7 +49,9 @@ Stage 75 then analyzed BM25 top10 misses on train/dev only and showed that
 retrieval recall is the next blocking issue. Stage 76 designed train/dev-only
 retrieval-recall candidate experiments and explicitly blocked source `DOC_IDS`
 oracle union because those IDs are dataset metadata rather than runtime
-user-query evidence.
+user-query evidence. Stage 77 ran the first retrieval-recall candidate,
+query-view ablation, and found that title-only and deduplicated full-question
+queries underperform the full-question BM25 baseline on train/dev.
 The frozen test split remains locked and must not be used for tuning.
 
 ### nvidia/TechQA-RAG-Eval
@@ -331,6 +333,12 @@ in:
 
 ```text
 docs/primeqa_hybrid_retrieval_recall_candidate_design.md
+```
+
+The current PrimeQA/TechQA hybrid query-view ablation is recorded in:
+
+```text
+docs/primeqa_hybrid_query_view_ablation.md
 ```
 
 ## Leakage Checks

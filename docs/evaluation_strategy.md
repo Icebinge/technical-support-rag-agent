@@ -1,6 +1,6 @@
 # Evaluation Strategy
 
-This document records the current evaluation strategy after Stage 76.
+This document records the current evaluation strategy after Stage 77.
 
 The active route is now the project-owned PrimeQA/TechQA hybrid split
 `primeqa_hybrid_stage68_v1`. Stage 68 froze local split artifacts, and Stage 69
@@ -13,7 +13,9 @@ top10 answer proxy diagnostic. Stage 74 stopped the current reranker-policy
 development route as non-actionable for now. Stage 75 analyzed BM25 top10
 misses and showed that retrieval recall is now the blocking issue. Stage 76
 designed train/dev-only retrieval-recall candidate experiments from those miss
-drivers. The frozen test split remains locked for future final evaluation.
+drivers. Stage 77 ran the first candidate, query-view ablation, and found that
+it underperforms the full-question BM25 baseline. The frozen test split remains
+locked for future final evaluation.
 
 ## Current Facts
 
@@ -189,6 +191,26 @@ final test metrics: not run
 default runtime policy: unchanged
 ```
 
+- Stage 77 ran query-view ablation on train/dev only:
+
+```text
+train full_question_baseline hit@10: 0.6622
+train title_only hit@10: 0.6054
+train full_question_dedup_terms hit@10: 0.6432
+
+dev full_question_baseline hit@10: 0.6974
+dev title_only hit@10: 0.6184
+dev full_question_dedup_terms hit@10: 0.6579
+
+train-selected challenger: full_question_dedup_terms
+selected challenger dev hit@10 delta: -0.0395
+selected challenger dev top10 improvements/regressions: 1 / 4
+
+decision: query_view_ablation_does_not_advance
+final test metrics: not run
+default runtime policy: unchanged
+```
+
 - Stage 71 ran train-only candidate-reranker grouped CV and train-to-dev guarded
   policy validation for both `logistic_best_candidate` and
   `ridge_candidate_token_f1`:
@@ -223,8 +245,8 @@ train/dev, so any quality metric reported as held-out would be misleading.
 
 ### Project-Owned PrimeQA/TechQA Hybrid Split
 
-Status: Stage 76 completed retrieval-recall candidate design from the Stage75
-miss drivers; final metrics not run.
+Status: Stage 77 completed query-view ablation and did not advance the query
+view route; final metrics not run.
 
 This route preserves the final target: document-style RAG over TechQA technotes.
 It accepts that old Stage 31-66 model-selection evidence cannot be treated as
@@ -295,9 +317,9 @@ default_runtime_policy: unchanged
 
 Required next step:
 
-Stage 77 should run a train/dev-only retrieval-recall experiment for
-`query_view_ablation_full_title_dedup`, the highest-priority allowed Stage76
-candidate. Do not use test for evaluation or tuning.
+Stage 78 should run a train/dev-only retrieval-recall experiment for
+`fielded_title_text_bm25_score_fusion`, the next allowed Stage76 candidate.
+Do not use test for evaluation or tuning.
 
 ## Parked Paths
 
@@ -338,15 +360,16 @@ Stage 73 completed a train/dev-only top10 diagnostic. Stage 74 stopped the
 current candidate-reranker policy route. Stage 75 completed BM25 top10 miss
 analysis and identified retrieval recall as the next blocking issue. Stage 76
 designed allowed train/dev retrieval-recall candidates and blocked source
-`DOC_IDS` oracle union as non-deployable. Until a future stage explicitly opens
-final evaluation:
+`DOC_IDS` oracle union as non-deployable. Stage 77 completed query-view ablation
+and did not advance that route because both challenger views underperformed the
+baseline. Until a future stage explicitly opens final evaluation:
 
 - do not run final metrics;
 - do not change the default runtime;
 - do not defaultize the current candidate-reranker policy;
 - do not continue the current reranker-policy route without a new user-confirmed
   train/dev-only plan;
-- do not use the frozen test split while running Stage 77 retrieval-recall
+- do not use the frozen test split while running Stage 78 retrieval-recall
   experiments;
 - do not use source `DOC_IDS` as runtime retrieval evidence;
 - do not tune Stage 51 against the frozen test split;
@@ -416,6 +439,8 @@ artifacts/primeqa_hybrid_bm25_top10_miss_analysis_stage75.json
 artifacts/primeqa_hybrid_bm25_top10_miss_analysis_stage75_visuals/
 artifacts/primeqa_hybrid_retrieval_recall_candidate_design_stage76.json
 artifacts/primeqa_hybrid_retrieval_recall_candidate_design_stage76_visuals/
+artifacts/primeqa_hybrid_query_view_ablation_stage77.json
+artifacts/primeqa_hybrid_query_view_ablation_stage77_visuals/
 ```
 
 The current Stage 67 protocol is recorded in:
@@ -476,4 +501,10 @@ The current Stage 76 retrieval-recall candidate design is recorded in:
 
 ```text
 docs/primeqa_hybrid_retrieval_recall_candidate_design.md
+```
+
+The current Stage 77 query-view ablation is recorded in:
+
+```text
+docs/primeqa_hybrid_query_view_ablation.md
 ```
