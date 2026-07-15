@@ -19301,3 +19301,245 @@ git diff --check: passed
 Stage80：检查 `dense_sparse_rrf_train_dev_probe` 的本地模型/cache 可行性，并记录可用模型、缓存路径、是否需要用户确认。
 
 Stage80 仍然不能使用 test 做评估或 tuning，不能运行 final test metrics，不能使用 source `DOC_IDS` 作为 runtime 检索证据，也不能静默下载或选择新的 dense retrieval 依赖。
+
+## Stage80：dense+sparse RRF 本地可行性检查
+
+时间：2026-07-15
+
+### 目标
+
+进入 Stage76 第四个候选 `dense_sparse_rrf_train_dev_probe` 前，先确认本地条件是否允许无下载、无静默选型地运行 dense+sparse RRF。
+
+本阶段只做 feasibility check：
+
+- 不运行 train/dev retrieval metrics；
+- 不读取 test split；
+- 不运行 final test metrics；
+- 不使用 source `DOC_IDS` 作为 runtime 检索证据；
+- 不下载模型；
+- 不静默选择 dense retrieval 模型或依赖；
+- 记录本地 package、dense cache、Hugging Face model cache 和下一步需要确认的选项。
+
+### 我做了什么
+
+新增 Stage80 feasibility 实现：
+
+```text
+src\ts_rag_agent\application\primeqa_hybrid_dense_sparse_rrf_feasibility.py
+scripts\check_primeqa_hybrid_dense_sparse_rrf_feasibility.py
+tests\test_primeqa_hybrid_dense_sparse_rrf_feasibility.py
+docs\primeqa_hybrid_dense_sparse_rrf_feasibility.md
+```
+
+真实运行命令：
+
+```text
+python scripts\check_primeqa_hybrid_dense_sparse_rrf_feasibility.py `
+  --output artifacts\primeqa_hybrid_dense_sparse_rrf_feasibility_stage80.json `
+  --visualization-dir artifacts\primeqa_hybrid_dense_sparse_rrf_feasibility_stage80_visuals
+```
+
+运行耗时：
+
+```text
+load_reports: 0.001s
+load_documents: 0.875s
+inspect_local_environment: 0.338s
+guard_checks: 0.000s
+total: 1.214s
+```
+
+### 真实发现
+
+本地依赖：
+
+```text
+numpy: available, 2.2.6
+sentence-transformers: available, 5.6.0
+transformers: available, 5.13.1
+torch: available, 2.13.0
+scikit-learn: available, 1.7.2
+scipy: available, 1.15.3
+huggingface-hub: available, 1.23.0
+faiss-cpu: not available, but not required for the existing NumPy RRF path
+```
+
+已有代码路径：
+
+```text
+src\ts_rag_agent\infrastructure\dense_retriever.py
+src\ts_rag_agent\infrastructure\dense_embedding_cache.py
+src\ts_rag_agent\infrastructure\hybrid_retriever.py
+scripts\evaluate_hybrid.py
+```
+
+兼容当前 corpus 的本地 dense cache：
+
+```text
+model: intfloat/e5-small-v2
+cache: data\indexes\dense\intfloat__e5-small-v2_512_passage.npz
+cache sha256: 91edc7db00363769d6ae4e6a4b1b5a9c23e8682f2d8fefff42f98d0015fb9d63
+document_text_max_chars: 512
+document_prefix: "passage: "
+embedding_shape: 28482 x 384
+document_ids_match_current_corpus: true
+can_run_without_reencoding_documents: true
+can_run_without_model_download: true
+huggingface snapshot: ffb93f3bd4047442299a41ebb6fa998a38507c52
+```
+
+```text
+model: sentence-transformers/all-MiniLM-L6-v2
+cache: data\indexes\dense\sentence-transformers__all-MiniLM-L6-v2_1600.npz
+cache sha256: 5f2d2ad64ecd5902e6859f0932f69d05c54309dd7216598b708d1fab52975008
+document_text_max_chars: 1600
+document_prefix: ""
+embedding_shape: 28482 x 384
+document_ids_match_current_corpus: true
+can_run_without_reencoding_documents: true
+can_run_without_model_download: true
+huggingface snapshot: 1110a243fdf4706b3f48f1d95db1a4f5529b4d41
+```
+
+历史 dense/hybrid metric artifact：
+
+```text
+artifacts\dense_dev_metrics.json
+artifacts\hybrid_dev_metrics.json
+artifacts\dense_e5_small_v2_512_dev_metrics.json
+artifacts\hybrid_e5_small_v2_512_dev_metrics.json
+```
+
+边界说明：这些旧 metric 只能证明本地 cache 和脚本曾经能运行，不能作为当前 Stage68 frozen split 的 train/dev 结论，更不能当 final-test evidence。
+
+### Candidate options
+
+Stage80 找到三个可选下一步。因为这是 dense 模型/cache 协议选择，必须先确认，不能静默进入 train/dev run。
+
+推荐选项：
+
+```text
+compare_existing_cached_dense_models
+```
+
+含义：
+
+```text
+在 Stage81 用两个已存在的本地 cache 都跑 train/dev-only dense+sparse RRF；
+只在 train 上选择；
+dev 只做验证；
+不下载模型；
+不碰 test。
+```
+
+其他可选项：
+
+```text
+single_cached_model::intfloat/e5-small-v2
+single_cached_model::sentence-transformers/all-MiniLM-L6-v2
+```
+
+### 可视化产物
+
+```text
+artifacts\primeqa_hybrid_dense_sparse_rrf_feasibility_stage80_visuals\stage80_dense_cache_readiness.svg
+artifacts\primeqa_hybrid_dense_sparse_rrf_feasibility_stage80_visuals\stage80_dependency_availability.svg
+artifacts\primeqa_hybrid_dense_sparse_rrf_feasibility_stage80_visuals\stage80_candidate_options.svg
+```
+
+Stage80 JSON SHA256：
+
+```text
+2441BB1CB1E7888299D3F57962B18CD59DF84E2086AC281105ABCACFC144880F
+```
+
+### Guard checks
+
+```text
+stage76_source_report_is_stage76: passed
+stage76_dense_sparse_candidate_is_allowed: passed
+stage79_source_report_is_stage79: passed
+stage79_did_not_open_final_test_gate: passed
+required_cached_rrf_packages_available: passed
+existing_dense_hybrid_code_available: passed
+compatible_local_dense_cache_available: passed
+no_model_download_attempted: passed
+train_dev_metrics_not_run: passed
+final_test_metrics_not_run: passed
+source_doc_ids_not_used_as_runtime_evidence: passed
+default_runtime_policy_unchanged: passed
+```
+
+额外 raw-text 检查：
+
+```text
+Exact raw-field Select-String over Stage80 JSON for question_title,
+question_text, gold_answer, candidate_sentence, document_title, document_text,
+and known raw text snippets:
+no matches
+
+Broader substring check matched document_text_max_chars. This is a config field,
+not raw document text.
+```
+
+artifact 和 cache 忽略状态：
+
+```text
+.gitignore:19:artifacts/* artifacts\primeqa_hybrid_dense_sparse_rrf_feasibility_stage80.json
+.gitignore:19:artifacts/* artifacts\primeqa_hybrid_dense_sparse_rrf_feasibility_stage80_visuals\stage80_dense_cache_readiness.svg
+.gitignore:18:data/indexes/* data\indexes\dense\intfloat__e5-small-v2_512_passage.npz
+```
+
+### 问题、原因与修正
+
+- 问题 1：本地有两个可运行 dense cache，不能静默选一个。
+  - 原因：模型/cache 选择会影响 Stage81 结论；Stage76 已把 dense+sparse route 标为 high risk。
+  - 修正：Stage80 只报告可行性和选项，不运行 train/dev metrics；下一步需要确认模型/cache protocol。
+- 问题 2：旧 dense/hybrid dev metric 容易被误认为当前证据。
+  - 原因：旧 metric 来自 Stage68 split 之前的 dev 文件，不是当前 frozen split 的 train/dev 证据。
+  - 修正：报告将这些 metric 标记为 `historical_pre_stage68_reference_only_not_current_split_evidence`。
+- 问题 3：raw-text 检查中出现 `document_text_max_chars` 假阳性。
+  - 原因：宽泛字符串 `document_text` 会匹配配置字段名。
+  - 修正：使用精确 raw-field 正则复查，确认没有 raw `document_text` 字段或已知原文片段。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_dense_sparse_rrf_feasibility.py scripts\check_primeqa_hybrid_dense_sparse_rrf_feasibility.py tests\test_primeqa_hybrid_dense_sparse_rrf_feasibility.py
+pytest -q tests\test_primeqa_hybrid_dense_sparse_rrf_feasibility.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+### 结论
+
+- Stage80 已完成 dense+sparse RRF 本地可行性检查。
+- Stage80 没有运行 train/dev retrieval metrics。
+- Stage80 没有使用测试集。
+- Stage80 没有运行 final test metrics。
+- Stage80 没有使用 source `DOC_IDS` 作为 runtime 检索证据。
+- Stage80 没有下载模型。
+- 默认 runtime policy 保持 unchanged。
+- 本地可无下载运行 dense+sparse RRF：两个 dense cache 都与当前 corpus document IDs 匹配。
+- 进入 Stage81 前需要确认 dense model/cache protocol。
+
+### 我学到的
+
+- feasibility check 和 retrieval metric run 必须分开；前者确认条件，后者才产出指标。
+- 已有缓存不等于可以静默默认化模型；模型/cache 协议本身就是实验设计的一部分。
+- 历史 metric 可以帮助判断成本和可运行性，但 split boundary 变化后不能当当前效果证据。
+
+### 下一步
+
+Stage81 需要先确认 dense model/cache protocol。
+
+推荐选项：`compare_existing_cached_dense_models`。
+
+该路线会在 Stage81 用两个已存在本地 cache 跑 train/dev-only dense+sparse RRF，对比后按 train 选择、dev 验证；仍然不碰 test、不跑 final metrics、不使用 source `DOC_IDS`、不下载模型。

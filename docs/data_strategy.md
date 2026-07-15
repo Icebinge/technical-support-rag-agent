@@ -56,6 +56,9 @@ Stage 78 ran the second retrieval-recall candidate, fielded title/text BM25
 score fusion, and found no dev hit@10 gain from the train-selected challenger.
 Stage 79 ran the third retrieval-recall candidate, section BM25 max-section
 document rollup, and found a dev hit@10 regression.
+Stage 80 checked dense+sparse RRF feasibility and found two compatible local
+dense caches, but did not run train/dev dense+sparse metrics because the
+model/cache protocol requires confirmation first.
 The frozen test split remains locked and must not be used for tuning.
 
 ### nvidia/TechQA-RAG-Eval
@@ -356,6 +359,13 @@ in:
 
 ```text
 docs/primeqa_hybrid_section_bm25_doc_rollup.md
+```
+
+The current PrimeQA/TechQA hybrid dense+sparse RRF feasibility check is recorded
+in:
+
+```text
+docs/primeqa_hybrid_dense_sparse_rrf_feasibility.md
 ```
 
 ## Leakage Checks

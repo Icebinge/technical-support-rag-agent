@@ -137,10 +137,15 @@ Stage 79 ran the third allowed candidate,
 `section_bm25_doc_rollup_train_dev_probe`, and did not advance the route because
 dev hit@10 regressed.
 
-The current next step is Stage 80:
-check `dense_sparse_rrf_train_dev_probe` feasibility before any train/dev run.
+Stage 80 checked `dense_sparse_rrf_train_dev_probe` feasibility and found two
+compatible local dense caches. It did not run train/dev metrics and did not
+download models.
 
-Stage 80 must keep the frozen test split locked, must not run final test
+The current next step is Stage 81, but it requires confirming the dense
+model/cache protocol first. The recommended option is
+`compare_existing_cached_dense_models`.
+
+Stage 81 must keep the frozen test split locked, must not run final test
 metrics, must not use source `DOC_IDS` as runtime retrieval evidence, must not
 download or choose dense retrieval dependencies silently, and must not change the
 default runtime policy.

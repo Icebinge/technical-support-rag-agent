@@ -1,6 +1,6 @@
 # Evaluation Strategy
 
-This document records the current evaluation strategy after Stage 79.
+This document records the current evaluation strategy after Stage 80.
 
 The active route is now the project-owned PrimeQA/TechQA hybrid split
 `primeqa_hybrid_stage68_v1`. Stage 68 froze local split artifacts, and Stage 69
@@ -17,8 +17,10 @@ drivers. Stage 77 ran the first candidate, query-view ablation, and found that
 it underperforms the full-question BM25 baseline. Stage 78 ran the second
 candidate, fielded title/text BM25 score fusion, and found no dev hit@10 gain.
 Stage 79 ran the third candidate, section BM25 max-section document rollup, and
-found a dev hit@10 regression. The frozen test split remains locked for future
-final evaluation.
+found a dev hit@10 regression. Stage 80 checked dense+sparse RRF feasibility
+and found two compatible local dense caches, but requires user confirmation
+before a train/dev run. The frozen test split remains locked for future final
+evaluation.
 
 ## Current Facts
 
@@ -258,6 +260,35 @@ final test metrics: not run
 default runtime policy: unchanged
 ```
 
+- Stage 80 checked dense+sparse RRF feasibility without running train/dev
+  metrics:
+
+```text
+required cached-RRF packages: available
+existing dense/hybrid code: available
+FAISS: not installed and not required for existing NumPy path
+compatible local dense cache count: 2
+
+local cache 1:
+  model: intfloat/e5-small-v2
+  document_text_max_chars: 512
+  document_prefix: passage:
+  embedding_shape: 28482 x 384
+  can_run_without_model_download: true
+
+local cache 2:
+  model: sentence-transformers/all-MiniLM-L6-v2
+  document_text_max_chars: 1600
+  document_prefix: empty
+  embedding_shape: 28482 x 384
+  can_run_without_model_download: true
+
+train/dev metrics: not run
+final test metrics: not run
+default runtime policy: unchanged
+requires_user_confirmation_before_train_dev_run: true
+```
+
 - Stage 71 ran train-only candidate-reranker grouped CV and train-to-dev guarded
   policy validation for both `logistic_best_candidate` and
   `ridge_candidate_token_f1`:
@@ -292,8 +323,9 @@ train/dev, so any quality metric reported as held-out would be misleading.
 
 ### Project-Owned PrimeQA/TechQA Hybrid Split
 
-Status: Stage 79 completed section BM25 max-section document rollup and did not
-advance that route; final metrics not run.
+Status: Stage 80 completed dense+sparse RRF feasibility and found local cached
+dense options, but no train/dev dense+sparse run has been approved yet; final
+metrics not run.
 
 This route preserves the final target: document-style RAG over TechQA technotes.
 It accepts that old Stage 31-66 model-selection evidence cannot be treated as
@@ -364,10 +396,11 @@ default_runtime_policy: unchanged
 
 Required next step:
 
-Stage 80 should check `dense_sparse_rrf_train_dev_probe` feasibility before any
-train/dev run. Record local model/cache identity, do not download or choose
-external dense retrieval dependencies silently, and do not use test for
-evaluation or tuning.
+Stage 81 should run only after confirming the dense model/cache protocol. The
+recommended option is `compare_existing_cached_dense_models`, which compares the
+two existing local dense caches on train/dev only, selects by train, validates
+on dev, does not download models, and does not use test for evaluation or
+tuning.
 
 ## Parked Paths
 
@@ -414,15 +447,16 @@ baseline. Stage 78 completed fielded title/text BM25 score fusion and did not
 advance that route because the train-selected challenger produced no dev hit@10
 gain. Stage 79 completed section BM25 max-section document rollup and did not
 advance that route because dev hit@10 regressed. Until a future stage explicitly
-opens final evaluation:
+opens final evaluation, and until Stage81 protocol is confirmed:
 
 - do not run final metrics;
 - do not change the default runtime;
 - do not defaultize the current candidate-reranker policy;
 - do not continue the current reranker-policy route without a new user-confirmed
   train/dev-only plan;
-- do not use the frozen test split while running Stage 80 feasibility checks or
+- do not use the frozen test split while running Stage 81 dense/sparse checks or
   retrieval-recall experiments;
+- do not download models or choose dense retrieval dependencies silently;
 - do not use source `DOC_IDS` as runtime retrieval evidence;
 - do not tune Stage 51 against the frozen test split;
 - do not use NVIDIA `train.json` as held-out evidence;
@@ -497,6 +531,8 @@ artifacts/primeqa_hybrid_fielded_bm25_fusion_stage78.json
 artifacts/primeqa_hybrid_fielded_bm25_fusion_stage78_visuals/
 artifacts/primeqa_hybrid_section_bm25_doc_rollup_stage79.json
 artifacts/primeqa_hybrid_section_bm25_doc_rollup_stage79_visuals/
+artifacts/primeqa_hybrid_dense_sparse_rrf_feasibility_stage80.json
+artifacts/primeqa_hybrid_dense_sparse_rrf_feasibility_stage80_visuals/
 ```
 
 The current Stage 67 protocol is recorded in:
@@ -575,4 +611,10 @@ The current Stage 79 section BM25 doc-rollup experiment is recorded in:
 
 ```text
 docs/primeqa_hybrid_section_bm25_doc_rollup.md
+```
+
+The current Stage 80 dense+sparse RRF feasibility check is recorded in:
+
+```text
+docs/primeqa_hybrid_dense_sparse_rrf_feasibility.md
 ```

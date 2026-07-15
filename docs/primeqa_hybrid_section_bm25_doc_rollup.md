@@ -210,9 +210,14 @@ default_runtime_policy: unchanged
 
 ## Next Step
 
-Stage 80 should check `dense_sparse_rrf_train_dev_probe` feasibility before any
-train/dev run. The check must record local model/cache identity and must not
-download models or choose external dense retrieval dependencies silently.
+Stage 80 checked `dense_sparse_rrf_train_dev_probe` feasibility and found two
+compatible local dense caches. It did not run train/dev metrics and did not
+download models.
 
-Stage 80 must keep the frozen test split locked, avoid source `DOC_IDS` as
-runtime retrieval evidence, and not run final test metrics.
+The current next step is Stage 81, but it requires confirming the dense
+model/cache protocol first. The recommended option is
+`compare_existing_cached_dense_models`.
+
+Stage 81 must keep the frozen test split locked, avoid source `DOC_IDS` as
+runtime retrieval evidence, not run final test metrics, and not download models
+silently.
