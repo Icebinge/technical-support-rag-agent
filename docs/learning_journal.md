@@ -21345,3 +21345,310 @@ git diff --check: passed
 Stage89：在用户确认后，运行 frozen train/dev-only structured query keyphrase compaction comparison。
 
 Stage89 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。
+
+## Stage89：structured query keyphrase compaction train/dev comparison
+
+### 目标
+
+Stage89 的目标是运行 Stage88 冻结的 `structured_query_keyphrase_compaction_train_dev_v1` train/dev-only comparison。
+
+本阶段只做 train/dev 指标对比：
+
+- 只读取 Stage68 frozen train/dev split。
+- 不读取 frozen test split。
+- 不运行 final metrics。
+- 不使用 source `DOC_IDS` 作为 runtime 检索证据。
+- 不把 raw question、compacted query、answer、document title/body 写入 report。
+- 不改变 runtime 默认策略。
+
+### 用户确认
+
+本轮用户说“好下一步”，我按 Stage88 已记录的下一步解释为确认运行 Stage89：
+
+```text
+confirmed: true
+confirmed_protocol_id: structured_query_keyphrase_compaction_train_dev_v1
+confirmation_note: user confirmed Stage89 train/dev metric run in current turn
+```
+
+### 新增文件
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_structured_query_comparison.py
+scripts/run_primeqa_hybrid_structured_query_comparison.py
+tests/test_primeqa_hybrid_structured_query_comparison.py
+docs/primeqa_hybrid_structured_query_comparison.md
+```
+
+### 更新文件
+
+```text
+docs/primeqa_hybrid_structured_query_protocol.md
+docs/primeqa_hybrid_second_wave_retrieval_candidate_design.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+docs/learning_journal.md
+```
+
+### 真实运行命令
+
+```text
+python scripts\run_primeqa_hybrid_structured_query_comparison.py --user-confirmed-protocol --confirmed-protocol-id structured_query_keyphrase_compaction_train_dev_v1 --confirmation-note "user confirmed Stage89 train/dev metric run in current turn" --output artifacts\primeqa_hybrid_structured_query_comparison_stage89.json --visualization-dir artifacts\primeqa_hybrid_structured_query_comparison_stage89_visuals
+```
+
+运行耗时：
+
+```text
+total: 44.736s
+```
+
+### 输入证据
+
+```text
+artifacts\primeqa_hybrid_split_stage68_splits\primeqa_hybrid_split_stage68_train.jsonl
+artifacts\primeqa_hybrid_split_stage68_splits\primeqa_hybrid_split_stage68_dev.jsonl
+data\raw\primeqa_techqa\TechQA\training_and_dev\training_dev_technotes.sections.json
+artifacts\primeqa_hybrid_bm25_top10_miss_analysis_stage75.json
+artifacts\primeqa_hybrid_structured_query_protocol_stage88.json
+```
+
+实际加载数据：
+
+```text
+document_count: 28482
+train rows: 562
+train answerable rows: 370
+dev rows: 121
+dev answerable rows: 76
+test_split_loaded: false
+```
+
+### Frozen grid
+
+```text
+sqkc_action_error_product_v1: action_error_product_version_terms, max_terms=18
+sqkc_title_guarded_action_error_v1: title_guarded_action_error_product_terms, max_terms=16
+sqkc_error_first_compact_v1: error_identifier_first_terms, max_terms=14
+sqkc_noun_phrase_compact_v1: deterministic_noun_phrase_like_terms, max_terms=20
+```
+
+### Train metrics
+
+```text
+full_document_bm25_baseline:
+  hit@10: 0.6622
+  mrr@10: 0.5023
+  not_found@50: 93
+  avg_compacted_terms: 55.1703
+
+sqkc_action_error_product_v1:
+  hit@10: 0.6351
+  mrr@10: 0.4921
+  not_found@50: 86
+  avg_compacted_terms: 14.6811
+
+sqkc_title_guarded_action_error_v1:
+  hit@10: 0.6595
+  mrr@10: 0.4940
+  not_found@50: 80
+  avg_compacted_terms: 13.5514
+
+sqkc_error_first_compact_v1:
+  hit@10: 0.6081
+  mrr@10: 0.4653
+  not_found@50: 98
+  avg_compacted_terms: 12.2649
+
+sqkc_noun_phrase_compact_v1:
+  hit@10: 0.6351
+  mrr@10: 0.4858
+  not_found@50: 92
+  avg_compacted_terms: 15.4243
+```
+
+Train-selected config：
+
+```text
+sqkc_title_guarded_action_error_v1
+```
+
+Train-selected comparison：
+
+```text
+hit@10_delta: -0.0027
+top10_improvement_count: 14
+top10_regression_count: 15
+top10_net_improvement_count: -1
+not_found_count_at_50_delta: -13
+rank_11_to_50_count_delta: +14
+average_compacted_query_token_count_delta: -41.6189
+```
+
+### Dev metrics
+
+```text
+full_document_bm25_baseline:
+  hit@10: 0.6974
+  mrr@10: 0.5331
+  not_found@50: 17
+  avg_compacted_terms: 49.6316
+
+sqkc_action_error_product_v1:
+  hit@10: 0.6316
+  mrr@10: 0.4991
+  not_found@50: 17
+  avg_compacted_terms: 14.8026
+
+sqkc_title_guarded_action_error_v1:
+  hit@10: 0.6447
+  mrr@10: 0.5124
+  not_found@50: 16
+  avg_compacted_terms: 13.5395
+
+sqkc_error_first_compact_v1:
+  hit@10: 0.6579
+  mrr@10: 0.5039
+  not_found@50: 16
+  avg_compacted_terms: 12.2632
+
+sqkc_noun_phrase_compact_v1:
+  hit@10: 0.6711
+  mrr@10: 0.5314
+  not_found@50: 18
+  avg_compacted_terms: 15.3947
+```
+
+Dev comparison for train-selected config：
+
+```text
+hit@10_delta: -0.0527
+top10_improvement_count: 1
+top10_regression_count: 5
+top10_net_improvement_count: -4
+rank_up_within_top10_count: 5
+rank_down_within_top10_count: 5
+not_found_count_at_50_delta: -1
+rank_11_to_50_count_delta: +5
+average_compacted_query_token_count_delta: -36.0921
+```
+
+### Guard checks
+
+全部通过：
+
+```text
+21 / 21 passed
+```
+
+关键 guard：
+
+- analysis splits 只有 train/dev。
+- Stage88 protocol id 和 candidate id 匹配。
+- 用户确认了 frozen protocol。
+- Stage88 允许确认后运行 train/dev metrics。
+- Stage88 final-test locked。
+- Stage88 forbid test tuning。
+- Stage88 runtime default unchanged。
+- candidate config grid 匹配 frozen protocol。
+- Stage75 baseline train/dev hit@10 与 Stage89 baseline 一致。
+- source `DOC_IDS` 没有作为 runtime evidence 使用。
+- changed-case fields public-safe。
+- raw/compacted query text 不写入 report。
+- final metrics not run。
+- runtime default unchanged。
+
+### 可视化产物
+
+```text
+artifacts\primeqa_hybrid_structured_query_comparison_stage89_visuals\stage89_structured_query_train_hit_at_10.svg
+artifacts\primeqa_hybrid_structured_query_comparison_stage89_visuals\stage89_structured_query_dev_hit_at_10.svg
+artifacts\primeqa_hybrid_structured_query_comparison_stage89_visuals\stage89_structured_query_dev_delta_hit_at_10.svg
+artifacts\primeqa_hybrid_structured_query_comparison_stage89_visuals\stage89_structured_query_dev_top10_changes.svg
+artifacts\primeqa_hybrid_structured_query_comparison_stage89_visuals\stage89_structured_query_average_compacted_terms.svg
+```
+
+Stage89 JSON SHA256：
+
+```text
+592EF83368BB8DB268114677E1BF9FDCAC1C4E37E8BC10099917CA7956BDF4A4
+```
+
+Visualization SHA256：
+
+```text
+stage89_structured_query_average_compacted_terms.svg: 3BA48FD64FCCA65D2D30CCC0600726A108392B5A1D417F97C9590A5779D50CDF
+stage89_structured_query_dev_delta_hit_at_10.svg: 2520DBEC41AE2263845D67DB1C4AACB3ADD29686655AA9EA9D080FE8616C6D94
+stage89_structured_query_dev_hit_at_10.svg: 1F27A1005A1074C5F5FE9C7F5E8846FF591E4D0712BF137268E3B68468E38327
+stage89_structured_query_dev_top10_changes.svg: 92150CEC7848DBDB319AD0C1A39D4DA98EAB5F44309F4310CE3D7BFA08A50A08
+stage89_structured_query_train_hit_at_10.svg: 62807A6A5CD10C34C6E85E88A644DED5008B67413D3A27764E7F8ACBC2A11B8A
+```
+
+### 问题、原因与修正
+
+- 问题 1：第一版单测试图构造一个 top10 rescue case，但真实 BM25 rank 里答案文档已经是 baseline rank1。
+  - 原因：答案文档匹配稀有关键项，噪声 stopword 文档不足以压过它。
+  - 修正：不硬造假 rescue，改成验证 noisy full question 能被 structured query 明显压缩，同时保持 public-safe 和边界 guard。
+  - 影响：测试更诚实；不再暗示 structured query 一定能 rescue。
+
+- 问题 2：第一版测试 Stage75 fixture 写了 baseline hit@10 = 0.0，但真实 baseline 是 1.0。
+  - 原因：夹具预期没有先用真实 rank 校验。
+  - 修正：把 fixture Stage75 baseline 改为真实的 1.0。
+  - 影响：guard check 的 baseline consistency 继续有效。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_structured_query_comparison.py scripts\run_primeqa_hybrid_structured_query_comparison.py tests\test_primeqa_hybrid_structured_query_comparison.py
+pytest -q tests\test_primeqa_hybrid_structured_query_comparison.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+产物安全检查：
+
+```text
+Select-String raw question / answer / document / snippet / query-term field patterns over Stage89 JSON: no matches
+git check-ignore Stage89 JSON and SVG artifacts: ignored by .gitignore
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 232 passed
+git diff --check: passed
+```
+
+### 结论
+
+- Stage89 已运行 frozen structured query train/dev-only comparison。
+- Stage89 没有读取 test。
+- Stage89 没有跑 final metrics。
+- Stage89 没有使用 source `DOC_IDS` 作为 runtime 检索证据。
+- Stage89 没有写出 raw question / compacted query / answer / document text。
+- Stage89 没有改变 runtime 默认策略。
+- structured query compaction 明显减少 query terms。
+- 但 train-selected config 在 dev 上 hit@10 下降 `-0.0527`。
+- dev top10 regression `5` 多于 improvement `1`。
+- primary contract 和 secondary contract 都没有通过。
+- 该路线不能进入 runtime，也不能打开 final-test gate。
+
+### 我学到了
+
+- 大幅压缩 query 不等于召回质量提升；当前 BM25 baseline 可能依赖长问题中的弱词累积来保住 gold doc。
+- train-only selection 非常重要：dev 上最接近 baseline 的 `sqkc_noun_phrase_compact_v1` 仍然不能被 dev-only 选择，而且它也没有超过 baseline。
+- 对 retrieval-recall route 来说，减少 not-found@50 不能抵消 hit@10 明显下降；最终目标仍是把答案文档放进 top10。
+- 测试夹具必须服从真实 rank，不应为了展示某种能力而写不真实的 Stage75 baseline。
+
+### 下一步
+
+Stage90：停止 structured query keyphrase compaction 作为 retrieval-recall route，除非用户明确确认一个新的 train/dev-only protocol；推荐转向下一个 second-wave candidate protocol。
+
+Stage90 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。

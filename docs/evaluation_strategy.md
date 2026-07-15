@@ -549,6 +549,8 @@ artifacts/primeqa_hybrid_lexical_cluster_diversity_stop_decision_stage87.json
 artifacts/primeqa_hybrid_lexical_cluster_diversity_stop_decision_stage87_visuals/
 artifacts/primeqa_hybrid_structured_query_protocol_stage88.json
 artifacts/primeqa_hybrid_structured_query_protocol_stage88_visuals/
+artifacts/primeqa_hybrid_structured_query_comparison_stage89.json
+artifacts/primeqa_hybrid_structured_query_comparison_stage89_visuals/
 ```
 
 The current Stage 67 protocol is recorded in:
@@ -681,4 +683,10 @@ The current Stage 88 structured query protocol freeze is recorded in:
 
 ```text
 docs/primeqa_hybrid_structured_query_protocol.md
+```
+
+The current Stage 89 structured query train/dev comparison is recorded in:
+
+```text
+docs/primeqa_hybrid_structured_query_comparison.md
 ```

@@ -239,7 +239,14 @@ default_runtime_policy: unchanged
 
 ## Next Step
 
-Stage89 should run the frozen train/dev-only structured query keyphrase
-compaction comparison after user confirmation. The frozen test split remains
-locked, final metrics must not be run, source `DOC_IDS` must not be used as
-runtime retrieval evidence, and runtime defaults remain unchanged.
+Stage89 has run the frozen train/dev-only structured query keyphrase compaction
+comparison after user confirmation. The train-selected config was
+`sqkc_title_guarded_action_error_v1`, and its dev hit@10 delta was `-0.0527`.
+It had `1` dev top10 improvement and `5` dev top10 regressions, so the Stage88
+target metric contract did not pass.
+
+The current next step is Stage90: stop structured query keyphrase compaction as
+a retrieval-recall route unless a new train/dev-only protocol is explicitly
+confirmed. The frozen test split remains locked, final metrics must not be run,
+source `DOC_IDS` must not be used as runtime retrieval evidence, and runtime
+defaults remain unchanged.

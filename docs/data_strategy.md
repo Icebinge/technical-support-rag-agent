@@ -424,6 +424,13 @@ in:
 docs/primeqa_hybrid_structured_query_protocol.md
 ```
 
+The current PrimeQA/TechQA hybrid structured query train/dev comparison is
+recorded in:
+
+```text
+docs/primeqa_hybrid_structured_query_comparison.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:

@@ -222,7 +222,15 @@ Stage88 confirmed and froze the train/dev-only protocol for
 `structured_query_keyphrase_compaction_train_dev_v1`. Stage88 did not run
 retrieval metrics and did not change runtime defaults.
 
-The current next step is Stage89: run the frozen train/dev-only structured query
-keyphrase compaction comparison after user confirmation. The frozen test split
-remains locked, final metrics must not be run, source `DOC_IDS` must not be used
-as runtime retrieval evidence, and runtime defaults remain unchanged.
+Stage89 then ran that frozen protocol after user confirmation. It selected
+`sqkc_title_guarded_action_error_v1` on train, but the selected config had
+`dev hit@10 delta = -0.0527`, with `1` dev top10 improvement and `5` dev top10
+regressions. Because the Stage88 target metric contract requires train-selected
+dev hit@10 to improve over BM25 baseline, structured query compaction does not
+advance to runtime.
+
+The current next step is Stage90: stop structured query keyphrase compaction as
+a retrieval-recall route unless a new train/dev-only protocol is explicitly
+confirmed. The frozen test split remains locked, final metrics must not be run,
+source `DOC_IDS` must not be used as runtime retrieval evidence, and runtime
+defaults remain unchanged.
