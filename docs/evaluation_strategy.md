@@ -564,6 +564,9 @@ artifacts/primeqa_hybrid_score_margin_bm25_protocol_stage94_visuals/
 artifacts/primeqa_hybrid_score_margin_bm25_comparison_stage95.json
 artifacts/primeqa_hybrid_score_margin_bm25_comparison_stage95.console.txt
 artifacts/primeqa_hybrid_score_margin_bm25_comparison_stage95_visuals/
+artifacts/primeqa_hybrid_score_margin_bm25_stop_decision_stage96.json
+artifacts/primeqa_hybrid_score_margin_bm25_stop_decision_stage96.console.txt
+artifacts/primeqa_hybrid_score_margin_bm25_stop_decision_stage96_visuals/
 ```
 
 The current Stage 67 protocol is recorded in:
@@ -738,4 +741,10 @@ The current Stage 95 score-margin BM25 train/dev comparison is recorded in:
 
 ```text
 docs/primeqa_hybrid_score_margin_bm25_comparison.md
+```
+
+The current Stage 96 score-margin BM25 stop decision is recorded in:
+
+```text
+docs/primeqa_hybrid_score_margin_bm25_stop_decision.md
 ```

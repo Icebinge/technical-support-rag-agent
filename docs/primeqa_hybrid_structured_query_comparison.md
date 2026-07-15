@@ -263,9 +263,15 @@ comparison after user confirmation. The train-selected config was
 `smbn_rank11_20_long_doc_b095_margin_v1`, but it had dev hit@10 delta `0.0000`
 and dev rank 11-50 count delta `0`, so the route does not advance.
 
-The current next step is Stage96: stop score-margin BM25 normalization as a
-retrieval-recall route unless a new train/dev-only protocol is explicitly
-confirmed. The frozen test split remains locked, final metrics must not be run,
-source `DOC_IDS` must not be used as runtime retrieval evidence, dev-only
-observations must not select runtime rules, and runtime defaults remain
-unchanged.
+Stage96 stopped score-margin BM25 normalization as a retrieval-recall route and
+left runtime defaults unchanged. The remaining Stage84 queue is:
+
+```text
+selective_dense_sparse_low_overlap_gate_design
+```
+
+The current next step is Stage97: confirm and freeze the train/dev-only
+protocol for `selective_dense_sparse_low_overlap_gate_design`. The frozen test
+split remains locked, final metrics must not be run, source `DOC_IDS` must not
+be used as runtime retrieval evidence, dev-only observations must not select
+runtime rules, and runtime defaults remain unchanged.

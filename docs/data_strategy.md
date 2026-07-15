@@ -469,6 +469,12 @@ recorded in:
 docs/primeqa_hybrid_score_margin_bm25_comparison.md
 ```
 
+The current PrimeQA/TechQA hybrid score-margin BM25 stop decision is recorded in:
+
+```text
+docs/primeqa_hybrid_score_margin_bm25_stop_decision.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:

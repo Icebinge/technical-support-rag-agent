@@ -23484,3 +23484,276 @@ git diff --check: passed
 Stage96：停止 score-margin BM25 normalization 作为 retrieval-recall route，除非用户明确确认一个新的 train/dev-only protocol；推荐转向 Stage84 队列中剩余的 `selective_dense_sparse_low_overlap_gate_design`。
 
 Stage96 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。
+
+## Stage96：停止 score-margin BM25 normalization route
+
+### 目标
+
+Stage96：把 Stage95 的 train/dev-only comparison 结果正式收束为 stop decision。
+
+这一步只读取 public-safe Stage84 / Stage95 reports，不读取 train/dev/test split 文件，不运行新的 retrieval metrics，不运行 final metrics，不使用 source `DOC_IDS` 作为 runtime 检索证据，不改变 runtime 默认策略。
+
+### 本次修改
+
+新增：
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_score_margin_bm25_stop_decision.py
+scripts/decide_primeqa_hybrid_score_margin_bm25_stop.py
+tests/test_primeqa_hybrid_score_margin_bm25_stop_decision.py
+docs/primeqa_hybrid_score_margin_bm25_stop_decision.md
+```
+
+更新：
+
+```text
+docs/learning_journal.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+docs/primeqa_hybrid_score_margin_bm25_comparison.md
+docs/primeqa_hybrid_score_margin_bm25_protocol.md
+docs/primeqa_hybrid_second_wave_retrieval_candidate_design.md
+docs/primeqa_hybrid_section_signal_stop_decision.md
+docs/primeqa_hybrid_section_signal_protocol.md
+docs/primeqa_hybrid_section_signal_comparison.md
+docs/primeqa_hybrid_structured_query_comparison.md
+docs/primeqa_hybrid_structured_query_stop_decision.md
+```
+
+### 执行命令
+
+```text
+python scripts\decide_primeqa_hybrid_score_margin_bm25_stop.py --user-confirmed-stop --confirmation-note "user confirmed Stage96 score-margin BM25 stop decision in current turn" --output artifacts\primeqa_hybrid_score_margin_bm25_stop_decision_stage96.json --visualization-dir artifacts\primeqa_hybrid_score_margin_bm25_stop_decision_stage96_visuals *> artifacts\primeqa_hybrid_score_margin_bm25_stop_decision_stage96.console.txt
+```
+
+### Stage96 使用的数据
+
+Stage96 只读取：
+
+```text
+artifacts\primeqa_hybrid_second_wave_retrieval_candidate_design_stage84.json
+artifacts\primeqa_hybrid_score_margin_bm25_comparison_stage95.json
+```
+
+Stage96 没有读取：
+
+```text
+data/processed/primeqa_hybrid_stage68_v1/test.jsonl
+```
+
+Stage96 没有运行新的 train/dev retrieval comparison，也没有运行 final-test metrics。
+
+### Stage95 证据
+
+Stage95 train-selected config：
+
+```text
+smbn_rank11_20_long_doc_b095_margin_v1
+```
+
+Train evidence：
+
+```text
+train hit@10 delta: +0.0000
+train rank 11-50 delta: 0
+train top10 improvements: 0
+train top10 regressions: 0
+train score-margin gate promotions: 1
+train length-band gate count: 1
+```
+
+Dev evidence：
+
+```text
+dev hit@10 delta: +0.0000
+dev rank 11-50 delta: 0
+dev top10 improvements: 0
+dev top10 regressions: 0
+dev rank-up within top10: 0
+dev rank-down within top10: 0
+dev not-found@50 delta: 0
+dev score-margin gate promotions: 0
+dev length-band gate count: 0
+```
+
+Stage84 / Stage94 contract：
+
+```text
+primary: train-selected rule must improve dev hit@10
+secondary: rank 11-50 near misses should decrease
+guard: dev-only b=0.95 observations cannot select a runtime rule
+```
+
+### Stage96 决策
+
+```text
+status: primeqa_hybrid_score_margin_bm25_route_stopped
+stopped_candidate_id: score_margin_bm25_normalization_gate_design
+stopped_protocol_id: score_margin_bm25_normalization_gate_train_dev_v1
+current_route_defaultization: blocked
+next_candidate_id: selective_dense_sparse_low_overlap_gate_design
+can_continue_train_dev_development: true
+requires_user_confirmation_before_next_protocol: true
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+default_runtime_policy: unchanged
+```
+
+原因：
+
+- train-selected config 在 dev 上没有 hit@10 提升。
+- train-selected config 在 dev 上没有减少 rank 11-50 near misses。
+- train-selected config 在 dev 上没有 score-margin promotion。
+- primary contract failed。
+- secondary contract failed。
+- guard contract passed，但 guard 通过只说明边界安全，不说明该 route 有收益。
+
+### Candidate Queue
+
+Stage84 原始顺序：
+
+```text
+lexical_cluster_diversity_rerank_design
+structured_query_keyphrase_compaction_design
+section_signal_guarded_expansion_design
+score_margin_bm25_normalization_gate_design
+selective_dense_sparse_low_overlap_gate_design
+```
+
+Stage96 停止后剩余：
+
+```text
+selective_dense_sparse_low_overlap_gate_design
+```
+
+下一候选：
+
+```text
+selective_dense_sparse_low_overlap_gate_design
+```
+
+Stage96 不冻结该候选的 protocol，也不运行该候选的 metrics；它只是把下一候选明确记录出来。
+
+### Guard Checks
+
+Stage96 guard：
+
+```text
+30 / 30 passed
+```
+
+关键 guard：
+
+```text
+source_stage84_report_is_stage84: passed
+source_stage95_report_is_stage95: passed
+user_confirmed_stage96_stop_decision: passed
+stage95_comparison_completed: passed
+stage95_candidate_matches_score_margin_bm25: passed
+stage95_protocol_matches_score_margin_bm25: passed
+stage84_candidate_metric_contract_requires_train_selected_dev_hit10_gain: passed
+stage84_candidate_metric_contract_requires_rank_11_to_50_decrease: passed
+stage84_candidate_guard_blocks_dev_only_b95_runtime_selection: passed
+stage95_primary_contract_failed: passed
+stage95_secondary_contract_failed: passed
+stage95_guard_contract_passed: passed
+stage95_train_selected_config_has_no_dev_hit10_gain: passed
+stage95_dev_rank_11_to_50_not_reduced: passed
+stage95_selected_config_has_no_dev_score_margin_promotions: passed
+stage96_no_new_retrieval_metrics_run: passed
+stage96_final_test_metrics_not_run: passed
+stage96_default_runtime_policy_unchanged: passed
+```
+
+### 可视化
+
+```text
+artifacts\primeqa_hybrid_score_margin_bm25_stop_decision_stage96_visuals\stage96_score_margin_bm25_train_dev_hit10_delta.svg
+artifacts\primeqa_hybrid_score_margin_bm25_stop_decision_stage96_visuals\stage96_score_margin_bm25_dev_change_counts.svg
+artifacts\primeqa_hybrid_score_margin_bm25_stop_decision_stage96_visuals\stage96_second_wave_remaining_candidate_priority.svg
+artifacts\primeqa_hybrid_score_margin_bm25_stop_decision_stage96_visuals\stage96_score_margin_bm25_stop_decision_flags.svg
+artifacts\primeqa_hybrid_score_margin_bm25_stop_decision_stage96_visuals\stage96_score_margin_bm25_stop_guard_check_status.svg
+```
+
+Stage96 JSON SHA256：
+
+```text
+1EF1180676209A5A311E2AB22A4745E07E12FBCBCAE594D1774CD9CD58634C87
+```
+
+Visualization SHA256：
+
+```text
+stage96_score_margin_bm25_dev_change_counts.svg: A8F65CFF117762A7B65F29A61C0177E0785ABEEB677309205A3413E54258C9A1
+stage96_score_margin_bm25_stop_decision_flags.svg: 437EEBD0F4508236D974B469BD8CC6ADE37F59EB4AC767230EDFC6248AB505DB
+stage96_score_margin_bm25_stop_guard_check_status.svg: D9A2EC65EAE7216D499BB5C7E0343E180BABE1C099354E5D6363BE84DF8C5BCC
+stage96_score_margin_bm25_train_dev_hit10_delta.svg: 072D4F52F9DE8F77FF69F8F7E98D5C4CE050A9E6DC339643E4EC81538128CF75
+stage96_second_wave_remaining_candidate_priority.svg: 6606310CDC836D6C433542C63C7B94F0F5A73C5F39BA96D8E390218A206B71D5
+```
+
+### 问题、原因与修正
+
+- 问题 1：Stage96 是 stop decision，不应继续调 threshold。
+  - 原因：Stage95 已经显示 train-selected config 在 dev 上没有任何 hit@10 / rank 11-50 改善。
+  - 修正：只做 stop-decision report，明确 `current_route_defaultization: blocked`，不新增候选阈值。
+  - 影响：避免在失败 route 上继续局部贪心调参。
+
+- 问题 2：宽泛 `Select-String` 中的 `document` 会命中 policy 文本。
+  - 原因：Stage96 JSON 合法包含 `answer document IDs` 这类安全策略描述。
+  - 修正：改用更具体的 raw/private field patterns 扫描，例如 `question_text`、`answer_text`、`document_text`、`snippet_text`、`query_terms`、`private_example_strings`。
+  - 影响：确认 Stage96 report 没有写出原始题目、答案、文档正文或样例文本，同时避免把安全说明误判为泄漏。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_score_margin_bm25_stop_decision.py scripts\decide_primeqa_hybrid_score_margin_bm25_stop.py tests\test_primeqa_hybrid_score_margin_bm25_stop_decision.py
+pytest -q tests\test_primeqa_hybrid_score_margin_bm25_stop_decision.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+产物安全检查：
+
+```text
+Select-String raw/private field patterns over Stage96 JSON: no matches
+git check-ignore Stage96 JSON, console, and SVG artifacts: ignored by .gitignore
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 253 passed
+git diff --check: passed
+```
+
+### 结论
+
+- Stage96 已停止 score-margin BM25 normalization route。
+- Stage96 没有读取 test。
+- Stage96 没有运行 final metrics。
+- Stage96 没有运行新的 retrieval metrics。
+- Stage96 没有使用 source `DOC_IDS` 作为 runtime 检索证据。
+- Stage96 没有改变 runtime 默认策略。
+- Stage96 没有把 artifacts 纳入 git。
+- Stage84 second-wave retrieval queue 只剩 `selective_dense_sparse_low_overlap_gate_design`。
+
+### 我学到了
+
+- score-margin / length-normalization gate 的实际动作太少，且无法移动 answer doc 的 top10/search-depth rank，因此不能继续作为有效召回路线。
+- stop decision 需要和 comparison 分离：comparison 负责给出度量，stop decision 负责冻结路线状态和候选队列状态。
+- 对 public-safe JSON 做安全扫描时，应该区分“安全策略里的 document ID 描述”和“原始 document text 泄漏”。
+
+### 下一步
+
+Stage97：确认并冻结 `selective_dense_sparse_low_overlap_gate_design` 的 train/dev-only protocol。
+
+Stage97 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。

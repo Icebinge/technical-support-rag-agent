@@ -265,8 +265,15 @@ git diff --check: passed
 
 ## Next Step
 
-Stage96 should stop score-margin BM25 normalization as a retrieval-recall route
-unless a new train/dev-only protocol is explicitly confirmed. The frozen test
+Stage96 stopped score-margin BM25 normalization as a retrieval-recall route and
+left runtime defaults unchanged. The remaining Stage84 queue is:
+
+```text
+selective_dense_sparse_low_overlap_gate_design
+```
+
+The current next step is Stage97: confirm and freeze the train/dev-only
+protocol for `selective_dense_sparse_low_overlap_gate_design`. The frozen test
 split remains locked, final metrics must not be run, source `DOC_IDS` must not
 be used as runtime retrieval evidence, dev-only observations must not select
 runtime rules, and runtime defaults remain unchanged.
