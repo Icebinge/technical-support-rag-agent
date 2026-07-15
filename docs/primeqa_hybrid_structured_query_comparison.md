@@ -236,7 +236,11 @@ Stage90 stopped structured query keyphrase compaction as a retrieval-recall
 route. The next candidate in the Stage84 queue is
 `section_signal_guarded_expansion_design`.
 
-The current next step is Stage91: confirm and freeze the train/dev-only
-protocol for `section_signal_guarded_expansion_design`. The frozen test split
+Stage91 confirmed and froze the train/dev-only protocol for
+`section_signal_guarded_expansion_design` as
+`section_signal_guarded_expansion_train_dev_v1`.
+
+The current next step is Stage92: run the frozen train/dev-only section signal
+guarded expansion comparison after user confirmation. The frozen test split
 remains locked, final metrics must not be run, source `DOC_IDS` must not be used
 as runtime retrieval evidence, and runtime defaults remain unchanged.

@@ -21946,3 +21946,259 @@ git diff --check: passed
 Stage91：确认并冻结 `section_signal_guarded_expansion_design` 的 train/dev-only protocol。
 
 Stage91 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。
+
+## 2026-07-15 - Stage91 section signal guarded expansion protocol freeze
+
+### 目标
+
+本阶段继续按 Stage90 的推荐路线推进，但仍然不是训练或评估阶段：
+
+- 确认并冻结 `section_signal_guarded_expansion_design` 的 train/dev-only protocol。
+- 只读取 Stage84 second-wave candidate design 和 Stage90 structured query stop decision 的 public-safe 报告。
+- 将 Stage79 的经验转成 guarded section-signal promotion protocol，而不是重复 ungated section BM25 replacement。
+- 不加载 train/dev/test split 文件。
+- 不运行 retrieval metrics。
+- 不运行 final metrics。
+- 不使用 source `DOC_IDS` 作为 runtime 检索证据。
+- 不改变 runtime 默认策略。
+
+### 新增和更新文件
+
+新增：
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_section_signal_protocol.py
+scripts/freeze_primeqa_hybrid_section_signal_protocol.py
+tests/test_primeqa_hybrid_section_signal_protocol.py
+docs/primeqa_hybrid_section_signal_protocol.md
+```
+
+更新：
+
+```text
+docs/primeqa_hybrid_structured_query_stop_decision.md
+docs/primeqa_hybrid_structured_query_comparison.md
+docs/primeqa_hybrid_second_wave_retrieval_candidate_design.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+docs/learning_journal.md
+```
+
+### 真实运行命令
+
+```text
+python scripts\freeze_primeqa_hybrid_section_signal_protocol.py --user-confirmed-candidate --confirmed-candidate-id section_signal_guarded_expansion_design --confirmation-note "user confirmed Stage91 section-signal protocol freeze in current turn" --output artifacts\primeqa_hybrid_section_signal_protocol_stage91.json --visualization-dir artifacts\primeqa_hybrid_section_signal_protocol_stage91_visuals
+```
+
+运行耗时：
+
+```text
+total: 0.001s
+```
+
+### 输入证据
+
+Stage91 只读取 public-safe 报告：
+
+```text
+artifacts\primeqa_hybrid_second_wave_retrieval_candidate_design_stage84.json
+artifacts\primeqa_hybrid_structured_query_stop_decision_stage90.json
+```
+
+本阶段没有加载 train/dev/test split 文件，没有运行 retrieval metrics，也没有读取原始问题、答案或文档正文。
+
+### 冻结协议
+
+```text
+candidate_id: section_signal_guarded_expansion_design
+protocol_id: section_signal_guarded_expansion_train_dev_v1
+status: primeqa_hybrid_section_signal_protocol_frozen
+```
+
+Stage84 target metric contract：
+
+```text
+primary: dev hit@10 must improve over BM25 baseline
+secondary: search-depth improvements must exceed regressions
+guard: section signal must not demote existing BM25 top10 hits by default
+```
+
+预声明 config grid：
+
+```text
+ssgx_shadow_no_top10_demotion_v1
+ssgx_rank11_20_margin_guard_v1
+ssgx_rank21_50_high_confidence_v1
+ssgx_section_top50_injection_guard_v1
+```
+
+协议选择规则：
+
+```text
+Select the candidate config on train by hit@10, then search-depth net improvements,
+fewer top10 regressions, hit@5, hit@1, MRR@10, lower top10 demotion budget,
+then config_id. Dev is validation only.
+```
+
+允许的 runtime evidence：
+
+```text
+document BM25 rank/score/margins
+best section BM25 rank/score
+section-to-document score ratio
+query/document/section overlap counts
+gate state features
+```
+
+明确禁止：
+
+```text
+source DOC_IDS
+answer document IDs
+gold document rank
+gold labels
+test split membership
+raw question / answer / document / section text
+dev-only config selection
+runtime default change
+```
+
+### Stage91 决策
+
+```text
+status: primeqa_hybrid_section_signal_protocol_frozen
+protocol_id: section_signal_guarded_expansion_train_dev_v1
+candidate_id: section_signal_guarded_expansion_design
+can_continue_train_dev_development: true
+requires_user_confirmation_before_train_dev_run: true
+can_run_train_dev_metrics_after_user_confirmation: true
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+default_runtime_policy: unchanged
+```
+
+### Guard checks
+
+全部通过：
+
+```text
+26 / 26 passed
+```
+
+关键 guard：
+
+- Stage84 报告确认为 Stage84。
+- Stage90 报告确认为 Stage90。
+- 用户已确认本轮 Stage91 protocol freeze。
+- Stage90 已停止 structured query route。
+- confirmed candidate 匹配 Stage90 next candidate。
+- Stage90 仍要求下一 protocol 前用户确认。
+- Stage90 final-test locked。
+- Stage90 forbid test tuning。
+- Stage90 runtime default unchanged。
+- Stage84 candidate 仍是 recommended_for_train_dev_protocol_design。
+- Stage84 metric contract 要求 dev hit@10 improvement。
+- Stage84 metric contract 要求 search-depth improvements exceed regressions。
+- Stage84 guard 要求不默认 demote existing BM25 top10 hits。
+- protocol id 固定。
+- config grid 预声明且包含 4 个 config。
+- section signal contract 只使用 runtime section/document scores。
+- promotion configs 都有 top10 promotion budget 和 protected top ranks。
+- source `DOC_IDS` 被禁止作为 runtime feature。
+- report fields 只包含 public-safe ids、rank、bucket 和 count。
+- Stage91 没有运行 retrieval metrics。
+- Stage91 没有运行 final-test metrics。
+- Stage91 没有改变 runtime default。
+
+### 可视化产物
+
+```text
+artifacts\primeqa_hybrid_section_signal_protocol_stage91_visuals\stage91_section_signal_config_promotion_budgets.svg
+artifacts\primeqa_hybrid_section_signal_protocol_stage91_visuals\stage91_section_signal_config_ratio_thresholds.svg
+artifacts\primeqa_hybrid_section_signal_protocol_stage91_visuals\stage91_section_signal_feature_group_counts.svg
+artifacts\primeqa_hybrid_section_signal_protocol_stage91_visuals\stage91_section_signal_protocol_decision_flags.svg
+artifacts\primeqa_hybrid_section_signal_protocol_stage91_visuals\stage91_section_signal_guard_check_status.svg
+```
+
+Stage91 JSON SHA256：
+
+```text
+41FC88ACD104042BBA8B9230477856D06359BC8A8F00DBC617564EAFA9707EA9
+```
+
+Visualization SHA256：
+
+```text
+stage91_section_signal_config_promotion_budgets.svg: 1BEDB21A2F540E26A1DDB84641AC4A0AC9C87BBC0861CEB46662C73110C1F8BC
+stage91_section_signal_config_ratio_thresholds.svg: 9BB1471F36CFBBBA901D92B82714CC2F3BEB9F78C9844E80C8315F3027F9E1DC
+stage91_section_signal_feature_group_counts.svg: 63EAB34291809D593A6B6AB7AB85A1073504E0C70F4B4C1E88264C55EC636D4F
+stage91_section_signal_guard_check_status.svg: C5FB2D262B1330B937F2D6A1AF8973A0A996DDEFD8A10754C7E888CE86BD3234
+stage91_section_signal_protocol_decision_flags.svg: 03AF6BFD684954FF00D2421E90E188AD57ED39A3AC95C62638AF3F37B55C6D5C
+```
+
+### 问题、原因与修正
+
+- 问题：第一版安全扫描命中了 `answer_doc_id`。
+  - 原因：命中位置是 `prohibited_runtime_features` 中的禁用字段名，不是实际样本字段或泄漏数据。
+  - 修正：把禁用项从字段式 `answer_doc_id` 改成描述式 `answer document IDs`，重新生成 Stage91 JSON 和 SVG，并重新计算哈希。
+  - 影响：安全扫描不再误报；禁用语义保持不变。
+
+- 问题：section signal 路线如果直接复用 Stage79 ungated section BM25，会重复已失败路线。
+  - 原因：Stage79 的结论是 ungated max-section rollup 整体回退，只能作为少量 rescue 信号来源。
+  - 修正：Stage91 冻结的是 guarded expansion protocol：baseline 仍是 full-document BM25，只允许预声明 gate 做有限 promotion，并记录 top10 protection。
+  - 影响：Stage92 可以检验 section signal 是否在不大幅破坏 BM25 top10 的前提下改善召回。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_section_signal_protocol.py scripts\freeze_primeqa_hybrid_section_signal_protocol.py tests\test_primeqa_hybrid_section_signal_protocol.py
+pytest -q tests\test_primeqa_hybrid_section_signal_protocol.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+产物安全检查：
+
+```text
+Select-String raw question / answer / document / snippet / query-term / section-text field patterns over Stage91 JSON: no matches
+git check-ignore Stage91 JSON and SVG artifacts: ignored by .gitignore
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 238 passed
+git diff --check: passed
+```
+
+### 结论
+
+- Stage91 已冻结 `section_signal_guarded_expansion_train_dev_v1`。
+- Stage91 没有加载 train/dev/test split。
+- Stage91 没有运行 retrieval metrics。
+- Stage91 没有运行 final metrics。
+- Stage91 没有使用 source `DOC_IDS` 作为 runtime 检索证据。
+- Stage91 没有写出 raw question / raw answer / document text / section text。
+- Stage91 没有改变 runtime 默认策略。
+- Stage92 可以在用户确认后运行 frozen train/dev-only comparison。
+
+### 我学到了
+
+- section BM25 不能因为曾经 rescue 少量样本就直接进入 replacement；已知整体回退的路线只能作为 gated signal 来源重新设计。
+- protocol freeze 阶段也需要安全扫描，因为“禁用字段名”本身可能造成误报，最好用描述性禁用项避免和实际泄漏字段混淆。
+- 对 top10 召回问题，promotion budget 和 protected top ranks 必须写进协议，否则后续实验容易为了 rescue 深排样本而破坏已有 top10 命中。
+
+### 下一步
+
+Stage92：在用户确认后，运行 frozen train/dev-only section signal guarded expansion comparison。
+
+Stage92 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。

@@ -437,6 +437,12 @@ The current PrimeQA/TechQA hybrid structured query stop decision is recorded in:
 docs/primeqa_hybrid_structured_query_stop_decision.md
 ```
 
+The current PrimeQA/TechQA hybrid section signal protocol freeze is recorded in:
+
+```text
+docs/primeqa_hybrid_section_signal_protocol.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:
