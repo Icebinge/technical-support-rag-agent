@@ -410,6 +410,13 @@ comparison is recorded in:
 docs/primeqa_hybrid_lexical_cluster_diversity_comparison.md
 ```
 
+The current PrimeQA/TechQA hybrid lexical cluster diversity stop decision is
+recorded in:
+
+```text
+docs/primeqa_hybrid_lexical_cluster_diversity_stop_decision.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:

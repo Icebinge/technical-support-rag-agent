@@ -213,9 +213,11 @@ Stage86 then ran that frozen protocol after user confirmation. It selected
 requires dev hit@10 to improve over BM25 baseline, lexical cluster diversity
 does not advance to runtime.
 
-The current next step is Stage87: stop lexical cluster diversity as a
-retrieval-recall route unless a new train/dev-only protocol is explicitly
-confirmed, then move to the next confirmed second-wave candidate. The frozen
-test split remains locked, final metrics must not be run, source `DOC_IDS` must
-not be used as runtime retrieval evidence, and runtime defaults remain
-unchanged.
+Stage87 stopped lexical cluster diversity as a retrieval-recall route and
+blocked defaultization for that route. The next candidate in the Stage84 queue
+is `structured_query_keyphrase_compaction_design`.
+
+The current next step is Stage88: confirm and freeze the train/dev-only protocol
+for `structured_query_keyphrase_compaction_design`. The frozen test split
+remains locked, final metrics must not be run, source `DOC_IDS` must not be used
+as runtime retrieval evidence, and runtime defaults remain unchanged.

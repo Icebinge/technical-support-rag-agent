@@ -20861,3 +20861,265 @@ git diff --check: passed
 Stage87：停止 lexical cluster diversity 作为 retrieval-recall route，除非用户明确确认一个新的 train/dev-only protocol；推荐转向下一个 second-wave candidate protocol。
 
 Stage87 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。
+
+## Stage87：lexical cluster diversity stop decision
+
+### 目标
+
+Stage87 的目标是把 Stage86 的结论固化为 stop decision：
+
+- 停止 `lexical_cluster_diversity_rerank_design` 这条 retrieval-recall route。
+- 阻止这条 route defaultization。
+- 不打开 final-test gate。
+- 确认 Stage84 队列中的下一个候选是 `structured_query_keyphrase_compaction_design`。
+
+本阶段是 decision checkpoint，不运行新的 retrieval metrics。
+
+### 用户确认
+
+这次确认发生在当前回合，记录如下：
+
+```text
+route_id: lexical_cluster_diversity_stop_decision
+confirmed: true
+confirmation_note: user confirmed Stage87 stop decision in current turn
+```
+
+### 新增文件
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_lexical_cluster_diversity_stop_decision.py
+scripts/decide_primeqa_hybrid_lexical_cluster_diversity_stop.py
+tests/test_primeqa_hybrid_lexical_cluster_diversity_stop_decision.py
+docs/primeqa_hybrid_lexical_cluster_diversity_stop_decision.md
+```
+
+### 更新文件
+
+```text
+docs/primeqa_hybrid_lexical_cluster_diversity_comparison.md
+docs/primeqa_hybrid_second_wave_retrieval_candidate_design.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+docs/learning_journal.md
+```
+
+### 真实运行命令
+
+```text
+python scripts\decide_primeqa_hybrid_lexical_cluster_diversity_stop.py --user-confirmed-stop --confirmation-note "user confirmed Stage87 stop decision in current turn" --output artifacts\primeqa_hybrid_lexical_cluster_diversity_stop_decision_stage87.json --visualization-dir artifacts\primeqa_hybrid_lexical_cluster_diversity_stop_decision_stage87_visuals
+```
+
+运行耗时：
+
+```text
+total: 0.001s
+```
+
+### 输入证据
+
+Stage87 只读取 public-safe artifacts：
+
+```text
+artifacts\primeqa_hybrid_second_wave_retrieval_candidate_design_stage84.json
+artifacts\primeqa_hybrid_lexical_cluster_diversity_comparison_stage86.json
+```
+
+没有读取 train/dev/test split，没有读取原始文档库，没有运行新的检索指标。
+
+### Stage86 证据
+
+Stage86 train-selected config：
+
+```text
+lcdr_penalty_0_06_title_query_cluster
+```
+
+Train 证据：
+
+```text
+train hit@10 delta: +0.0054
+train top10 improvements: 4
+train top10 regressions: 2
+```
+
+Dev 证据：
+
+```text
+dev hit@10 delta: +0.0000
+dev top10 improvements: 0
+dev top10 regressions: 0
+dev rank-up within top10: 0
+dev rank-down within top10: 0
+dev not-found@50 delta: 0
+dev rank 11-50 delta: 0
+```
+
+Stage84 对 LCDR 的 target metric contract：
+
+```text
+primary: dev hit@10 must improve over BM25 baseline
+secondary: top1-overlap decoy misses should decrease
+guard: no title/body text should be written to reports
+```
+
+### Decision
+
+```text
+status: primeqa_hybrid_lexical_cluster_diversity_route_stopped
+stopped_candidate_id: lexical_cluster_diversity_rerank_design
+stopped_protocol_id: lexical_cluster_diversity_rerank_train_dev_v1
+current_route_defaultization: blocked
+next_candidate_id: structured_query_keyphrase_compaction_design
+can_continue_train_dev_development: true
+requires_user_confirmation_before_next_protocol: true
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+default_runtime_policy: unchanged
+```
+
+### Candidate queue
+
+Stage84 原始顺序：
+
+```text
+lexical_cluster_diversity_rerank_design
+structured_query_keyphrase_compaction_design
+section_signal_guarded_expansion_design
+score_margin_bm25_normalization_gate_design
+selective_dense_sparse_low_overlap_gate_design
+```
+
+Stage87 停止 LCDR 后的剩余顺序：
+
+```text
+structured_query_keyphrase_compaction_design
+section_signal_guarded_expansion_design
+score_margin_bm25_normalization_gate_design
+selective_dense_sparse_low_overlap_gate_design
+```
+
+下一个候选：
+
+```text
+structured_query_keyphrase_compaction_design
+```
+
+### Guard checks
+
+全部通过：
+
+```text
+source_stage84_report_is_stage84: passed
+source_stage86_report_is_stage86: passed
+user_confirmed_stage87_stop_decision: passed
+stage86_comparison_completed: passed
+stage86_candidate_matches_lcdr: passed
+stage86_protocol_matches_lcdr: passed
+stage84_candidate_metric_contract_requires_dev_hit10_gain: passed
+stage86_train_selected_config_has_no_dev_hit10_gain: passed
+stage86_dev_top10_net_not_positive: passed
+stage86_final_test_metrics_locked: passed
+stage86_final_test_gate_closed: passed
+stage86_forbids_test_tuning: passed
+stage86_default_runtime_policy_unchanged: passed
+stage84_execution_order_contains_stopped_candidate: passed
+stage84_next_candidate_available_after_lcdr_stop: passed
+source_doc_ids_not_selected_as_next_candidate: passed
+stage87_no_new_retrieval_metrics_run: passed
+stage87_final_test_metrics_not_run: passed
+stage87_default_runtime_policy_unchanged: passed
+```
+
+### 可视化产物
+
+```text
+artifacts\primeqa_hybrid_lexical_cluster_diversity_stop_decision_stage87_visuals\stage87_lcdr_train_dev_hit10_delta.svg
+artifacts\primeqa_hybrid_lexical_cluster_diversity_stop_decision_stage87_visuals\stage87_lcdr_dev_change_counts.svg
+artifacts\primeqa_hybrid_lexical_cluster_diversity_stop_decision_stage87_visuals\stage87_second_wave_remaining_candidate_priority.svg
+artifacts\primeqa_hybrid_lexical_cluster_diversity_stop_decision_stage87_visuals\stage87_lcdr_stop_decision_flags.svg
+artifacts\primeqa_hybrid_lexical_cluster_diversity_stop_decision_stage87_visuals\stage87_lcdr_stop_guard_check_status.svg
+```
+
+Stage87 JSON SHA256：
+
+```text
+F5C9BC614F8210B20DD6B099C36126D1078FE1262169BD874AE32136A7F9FD79
+```
+
+Visualization SHA256：
+
+```text
+stage87_lcdr_dev_change_counts.svg: C00034DD885257891031C95D2DFEC9FE6F7E10459CDB076377D56A7B8C6042F1
+stage87_lcdr_stop_decision_flags.svg: 4283DAA01223C72FBA86049B299BB89405781F6BFBEA798364D2A25BECFD9762
+stage87_lcdr_stop_guard_check_status.svg: B21CFCE72854F0AEF7EF46EF361CEBAB96C90FF25B4AC429ED2E1C09C1F5B1B0
+stage87_lcdr_train_dev_hit10_delta.svg: 46427B4BAE399D2084202B54DDB13BD1C91F7F82AF03AC17971B61F275E6187F
+stage87_second_wave_remaining_candidate_priority.svg: E0D20D4DB853F04AB4CCADC75D63BA3365079689F9825851BDCDCFB3F449CD78
+```
+
+### 问题、原因与修正
+
+- 问题 1：最初我按猜测去找 Stage74 的 Python stop-decision 文件，路径不存在。
+  - 原因：Stage74 实际是文档型 stop decision，没有独立 Python 模块。
+  - 修正：读取真实的 Stage74 文档作为模式参考，并为 Stage87 新增工程化 JSON + SVG decision report。
+  - 影响：没有修改文件；只是定位路径失败后改用真实文件。
+
+- 问题 2：Stage87 模块首次 lint 命中一行超过 100 字符。
+  - 原因：`recommended_execution_order` 的列表推导式写在一行。
+  - 修正：拆成多行后重新运行局部 lint。
+  - 影响：仅格式修正。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_lexical_cluster_diversity_stop_decision.py scripts\decide_primeqa_hybrid_lexical_cluster_diversity_stop.py tests\test_primeqa_hybrid_lexical_cluster_diversity_stop_decision.py
+pytest -q tests\test_primeqa_hybrid_lexical_cluster_diversity_stop_decision.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+产物安全检查：
+
+```text
+Select-String raw question / answer / document / snippet field patterns over Stage87 JSON: no matches
+git check-ignore Stage87 JSON and SVG artifacts: ignored by .gitignore
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 226 passed
+git diff --check: passed
+```
+
+### 结论
+
+- Stage87 已停止 lexical cluster diversity route。
+- 当前 LCDR route defaultization 是 blocked。
+- Stage87 没有运行新的 retrieval metrics。
+- Stage87 没有使用 test。
+- Stage87 没有跑 final metrics。
+- Stage87 没有使用 source `DOC_IDS` 作为 runtime 检索证据。
+- 默认 runtime policy 保持 unchanged。
+- 下一个候选是 `structured_query_keyphrase_compaction_design`。
+
+### 我学到了
+
+- stop decision 也值得结构化成 artifact：这样“为什么停”和“下一候选是谁”可以被 guard checks 和可视化共同验证。
+- train 上的小增益不能抵消 dev primary metric 没提升这一事实；停止路线比继续调同一路线更诚实。
+- decision checkpoint 不应顺手启动下一候选指标；下一候选仍需要先冻结 protocol。
+
+### 下一步
+
+Stage88：确认并冻结 `structured_query_keyphrase_compaction_design` 的 train/dev-only protocol。
+
+Stage88 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。

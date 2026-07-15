@@ -545,6 +545,8 @@ artifacts/primeqa_hybrid_lexical_cluster_diversity_protocol_stage85.json
 artifacts/primeqa_hybrid_lexical_cluster_diversity_protocol_stage85_visuals/
 artifacts/primeqa_hybrid_lexical_cluster_diversity_comparison_stage86.json
 artifacts/primeqa_hybrid_lexical_cluster_diversity_comparison_stage86_visuals/
+artifacts/primeqa_hybrid_lexical_cluster_diversity_stop_decision_stage87.json
+artifacts/primeqa_hybrid_lexical_cluster_diversity_stop_decision_stage87_visuals/
 ```
 
 The current Stage 67 protocol is recorded in:
@@ -665,4 +667,10 @@ The current Stage 86 lexical cluster diversity train/dev comparison is recorded 
 
 ```text
 docs/primeqa_hybrid_lexical_cluster_diversity_comparison.md
+```
+
+The current Stage 87 lexical cluster diversity stop decision is recorded in:
+
+```text
+docs/primeqa_hybrid_lexical_cluster_diversity_stop_decision.md
 ```

@@ -204,8 +204,11 @@ default_runtime_policy: unchanged
 
 ## Next Step
 
-Stage87 should stop lexical cluster diversity as a retrieval-recall route unless
-a new train/dev-only protocol is explicitly confirmed. The recommended next
-action is to move to the next confirmed second-wave candidate protocol, with
-the frozen test split still locked, no final metrics, no source `DOC_IDS` as
-runtime retrieval evidence, and runtime defaults unchanged.
+Stage87 has stopped lexical cluster diversity as a retrieval-recall route. The
+current route's defaultization is blocked, and the next candidate is
+`structured_query_keyphrase_compaction_design`.
+
+The current next step is Stage88: confirm and freeze the train/dev-only protocol
+for `structured_query_keyphrase_compaction_design`. The frozen test split
+remains locked, final metrics must not be run, source `DOC_IDS` must not be used
+as runtime retrieval evidence, and runtime defaults remain unchanged.
