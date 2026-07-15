@@ -510,6 +510,13 @@ freeze is recorded in:
 docs/primeqa_hybrid_answer_pipeline_error_decomposition_protocol.md
 ```
 
+The current PrimeQA/TechQA hybrid answer-pipeline error decomposition analysis
+is recorded in:
+
+```text
+docs/primeqa_hybrid_answer_pipeline_error_decomposition.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:

@@ -782,3 +782,10 @@ recorded in:
 ```text
 docs/primeqa_hybrid_answer_pipeline_error_decomposition_protocol.md
 ```
+
+The current Stage 102 answer-pipeline error decomposition analysis is recorded
+in:
+
+```text
+docs/primeqa_hybrid_answer_pipeline_error_decomposition.md
+```

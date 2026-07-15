@@ -24750,3 +24750,277 @@ Stage102：在用户确认后，运行 Stage101 冻结的 train/dev-only
 `answer_pipeline_error_decomposition` 分析。Stage102 仍然不能读取 test，不能运行
 final metrics，不能改变 runtime 默认策略；输出必须是 public-safe aggregate 和
 sanitized case fields。
+
+## Stage102：运行 train/dev-only answer-pipeline error decomposition
+
+### 学习时间
+
+2026-07-15
+
+### 本阶段目标
+
+按 Stage101 冻结的 protocol，运行真实 train/dev-only answer-pipeline error
+decomposition。这个阶段可以比之前更大：一次性完成分析实现、CLI、测试、真实运行、
+可视化、文档、学习记录和提交准备。但边界不变：不读取 test，不运行 final metrics，
+不改变 runtime 默认策略，不新增 fallback strategy，不把 raw question / answer /
+document id / token 字段写入报告。
+
+### 本阶段做了什么
+
+新增并验证了 Stage102 分析链路：
+
+```text
+src\ts_rag_agent\application\primeqa_hybrid_answer_pipeline_error_decomposition_analysis.py
+scripts\run_primeqa_hybrid_answer_pipeline_error_decomposition.py
+tests\test_primeqa_hybrid_answer_pipeline_error_decomposition_analysis.py
+docs\primeqa_hybrid_answer_pipeline_error_decomposition.md
+```
+
+同步更新：
+
+```text
+docs\evaluation_strategy.md
+docs\data_strategy.md
+docs\learning_journal.md
+```
+
+Stage102 读取：
+
+```text
+artifacts\primeqa_hybrid_answer_pipeline_error_decomposition_protocol_stage101.json
+artifacts\primeqa_hybrid_split_stage68_splits\primeqa_hybrid_split_stage68_train.jsonl
+artifacts\primeqa_hybrid_split_stage68_splits\primeqa_hybrid_split_stage68_dev.jsonl
+data\raw\primeqa_techqa\TechQA\training_and_dev\training_dev_technotes.sections.json
+```
+
+Stage102 没有读取：
+
+```text
+artifacts\primeqa_hybrid_split_stage68_splits\primeqa_hybrid_split_stage68_test.jsonl
+```
+
+### 真实运行过程
+
+第一次真实运行超过 120 秒工具超时；检查进程后发现 Python 子进程仍在继续运行，并最终写出了
+JSON，但 console 文件为空。因此这次不作为最终记录结果。
+
+随后用更长 timeout 重跑同一命令，真实返回：
+
+```text
+stage102_exit_code=0
+```
+
+最终命令：
+
+```text
+python scripts\run_primeqa_hybrid_answer_pipeline_error_decomposition.py --user-confirmed-analysis --confirmation-note "user confirmed Stage102 train-dev answer-pipeline error decomposition in current turn" --output artifacts\primeqa_hybrid_answer_pipeline_error_decomposition_stage102.json --visualization-dir artifacts\primeqa_hybrid_answer_pipeline_error_decomposition_stage102_visuals
+```
+
+运行耗时：
+
+```text
+total_seconds: 197.39
+```
+
+### 分析配置
+
+```text
+diagnostic_profile: stage102_bm25_top10_bm25_sentence_mcpd3_topk_verified_evidence7
+retriever: BM25
+bm25_k1: 1.5
+bm25_b: 0.75
+retrieval_top_k: 10
+answer_generator: extractive_sentence_baseline
+evidence_selector: bm25_sentence
+max_candidates_per_document: 3
+composition_policy: top_k
+max_sentences: 3
+min_sentence_score: 2.0
+answer_verifier: citation_and_evidence_gate
+min_evidence_score: 7.0
+max_citation_rank: 3
+min_citations: 1
+max_gold_window_sentences: 3
+gold_span_gap_margin: 0.05
+low_answer_f1_threshold: 0.2
+sample_limit_per_bucket: 5
+```
+
+### 数据规模
+
+```text
+documents: 28482
+train rows: 562
+train answerable: 370
+train unanswerable: 192
+dev rows: 121
+dev answerable: 76
+dev unanswerable: 45
+```
+
+### 真实分解结果
+
+Bucket counts：
+
+```text
+train:
+answerability_false_answer: 180 / 562 = 0.3203
+retrieval_context_miss: 125 / 562 = 0.2224
+evidence_selection_miss: 67 / 562 = 0.1192
+verification_over_refusal: 3 / 562 = 0.0053
+gold_span_beats_selected_answer: 174 / 562 = 0.3096
+low_overlap_gold_cited_answer: 0 / 562 = 0.0000
+answer_supported_and_cited: 13 / 562 = 0.0231
+
+dev:
+answerability_false_answer: 41 / 121 = 0.3388
+retrieval_context_miss: 23 / 121 = 0.1901
+evidence_selection_miss: 12 / 121 = 0.0992
+verification_over_refusal: 0 / 121 = 0.0000
+gold_span_beats_selected_answer: 41 / 121 = 0.3388
+low_overlap_gold_cited_answer: 0 / 121 = 0.0000
+answer_supported_and_cited: 4 / 121 = 0.0331
+```
+
+Verified metrics：
+
+```text
+train:
+gold_doc_citation_rate: 0.4958
+answerable_refusal_rate: 0.0459
+unanswerable_refusal_rate: 0.0625
+average_token_f1: 0.2017
+
+dev:
+gold_doc_citation_rate: 0.6029
+answerable_refusal_rate: 0.1053
+unanswerable_refusal_rate: 0.0889
+average_token_f1: 0.2040
+```
+
+Answerable gold context：
+
+```text
+train: 245 / 370 = 0.6622
+dev: 53 / 76 = 0.6974
+```
+
+Stage102 decision：
+
+```text
+status: primeqa_hybrid_answer_pipeline_error_decomposition_completed
+analysis_id: answer_pipeline_error_decomposition_train_dev_analysis_v1
+train_top_bucket: answerability_false_answer
+dev_top_bucket: answerability_false_answer
+train_evidence_selection_miss: 67
+dev_evidence_selection_miss: 12
+train_answerability_false_answer: 180
+dev_answerability_false_answer: 41
+train_verified_average_token_f1: 0.2017
+dev_verified_average_token_f1: 0.2040
+recommended_next_direction: evidence_selection_and_answerability_candidate_design
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+fallback_strategies_enabled: false
+default_runtime_policy: unchanged
+```
+
+### 可视化结果
+
+```text
+artifacts\primeqa_hybrid_answer_pipeline_error_decomposition_stage102_visuals\stage102_bucket_counts_by_split.svg
+artifacts\primeqa_hybrid_answer_pipeline_error_decomposition_stage102_visuals\stage102_pipeline_stage_counts.svg
+artifacts\primeqa_hybrid_answer_pipeline_error_decomposition_stage102_visuals\stage102_answerability_bucket_counts.svg
+artifacts\primeqa_hybrid_answer_pipeline_error_decomposition_stage102_visuals\stage102_verified_metric_rates.svg
+artifacts\primeqa_hybrid_answer_pipeline_error_decomposition_stage102_visuals\stage102_public_case_sample_counts.svg
+artifacts\primeqa_hybrid_answer_pipeline_error_decomposition_stage102_visuals\stage102_guard_check_status.svg
+```
+
+Stage102 JSON SHA256：
+
+```text
+08F2CA0F31F1B79AD78619AA33F8C53B3BFA7C6CB68DAEC3013987D43549B7C6
+```
+
+Visualization SHA256：
+
+```text
+stage102_answerability_bucket_counts.svg: 7D9651F9F91C528A4F18545968DC706529EFC76774412AE70FA20BC7FAAE4297
+stage102_bucket_counts_by_split.svg: 5507B0FF0612656D517550C7B7E0E168E0191B63E66A06304DDDBEDF3A0FCAFB
+stage102_guard_check_status.svg: 26F1B6DFBD4B648FFAFBF3DF316D4DF5E85C0816BBC950B8CF6EE5D1F7176AEF
+stage102_pipeline_stage_counts.svg: E444FB7F5E95191C3611E60FC9947028FFB44B75F2228D18ACD28795E025EB40
+stage102_public_case_sample_counts.svg: B17BA9B59D125D96310AE9AF9D46D88EFD4F559F0CF407B9E029EF1C7A03135E
+stage102_verified_metric_rates.svg: 0CE34354E426705B12166226EA619894769FBC1070B6CFD38C506C816DE7A3F6
+```
+
+### 问题、原因与修正
+
+- 问题 1：第一次真实运行被 120 秒工具 timeout 中断父 shell。
+  - 原因：Stage102 是真实 train/dev answer-pipeline 分析，需要对 683 条 train/dev
+    样本跑 BM25 检索、句子选择、验证和 gold span bucket 计算，耗时约 197 秒。
+  - 修正：检查 Python 进程，确认没有重复启动；等原进程完成后，因 console 为空，使用更长
+    timeout 重跑同一命令并拿到 `stage102_exit_code=0`。
+  - 影响：最终记录的是第二次明确 exit code 0 的运行结果。
+- 问题 2：Stage102 需要输出 case samples，但不能泄露 raw text 或 document id。
+  - 原因：错误分解内部必须用 gold answer 和 answer document id 评分，但这些 label 不能作为
+    runtime evidence，也不能写入 public-safe 报告。
+  - 修正：只写 Stage101 允许的 18 个 sanitized 字段，例如 bucket、rank bucket、status
+    bucket、route、selector、composition policy。
+  - 影响：可以做 case-level 抽样定位，同时保持报告 public-safe。
+- 问题 3：`answerability_false_answer` 和 `gold_span_beats_selected_answer` 同时在 train/dev
+  很高。
+  - 原因：当前 verifier 对 unanswerable 的拒答率仍低，且 extractive answer composition 经常
+    选不到更接近 gold span 的文本。
+  - 修正：Stage102 不直接改策略，只把下一阶段方向定为
+    `evidence_selection_and_answerability_candidate_design`。
+  - 影响：Stage103 应先设计候选 intervention，不应直接改 runtime 或跑 test。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_answer_pipeline_error_decomposition_analysis.py scripts\run_primeqa_hybrid_answer_pipeline_error_decomposition.py tests\test_primeqa_hybrid_answer_pipeline_error_decomposition_analysis.py
+pytest -q tests\test_primeqa_hybrid_answer_pipeline_error_decomposition_analysis.py
+python scripts\run_primeqa_hybrid_answer_pipeline_error_decomposition.py ...: stage102_exit_code=0
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 4 passed
+Stage102 run: passed
+guard checks: 20 / 20 passed
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 274 passed
+git diff --check: passed
+```
+
+产物安全检查：
+
+```text
+Select-String Stage102 JSON for raw question / answer / document id / token field patterns: no matches
+```
+
+### 我学到了
+
+- “大一点的 stage”可以一次性完成实现、真实运行、可视化和记录，但必须把中途异常如 timeout
+  如实记录，不能把第一次不完整 console 伪装成成功运行。
+- 当前瓶颈已经不是单纯 retrieval：train/dev 同时显示 answerability false answer 和 gold-span
+  composition gap 很大。
+- answerability 问题不能靠简单提高 verifier threshold 解决，因为 dev answerable refusal rate
+  已经达到 0.1053；下一步需要同时考虑 unanswerable false answer 和 answerable over-refusal。
+- sanitized samples 仍然能支持工程判断，只要把 doc id 和 raw text 全部替换成 bucket/status。
+
+### 下一步
+
+Stage103：基于 Stage102 的共同瓶颈，设计 train/dev-only candidate intervention protocol。
+优先方向是 `evidence_selection_and_answerability_candidate_design`，但仍不能读取 test、不能运行
+final metrics、不能改 runtime 默认策略、不能加入 fallback strategy。
