@@ -23757,3 +23757,336 @@ git diff --check: passed
 Stage97：确认并冻结 `selective_dense_sparse_low_overlap_gate_design` 的 train/dev-only protocol。
 
 Stage97 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。
+
+## Stage97：冻结 selective dense+sparse low-overlap gate protocol
+
+### 目标
+
+Stage97：确认并冻结 Stage84 队列最后一个候选 `selective_dense_sparse_low_overlap_gate_design` 的 train/dev-only protocol。
+
+这一步只读取 public-safe Stage84 / Stage96 / Stage80 / Stage81 reports，不读取 train/dev/test split 文件，不运行 retrieval metrics，不运行 final metrics，不下载模型，不刷新 dense cache，不使用 source `DOC_IDS` 作为 runtime 检索证据，不改变 runtime 默认策略。
+
+### 本次修改
+
+新增：
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_selective_dense_sparse_protocol.py
+scripts/freeze_primeqa_hybrid_selective_dense_sparse_protocol.py
+tests/test_primeqa_hybrid_selective_dense_sparse_protocol.py
+docs/primeqa_hybrid_selective_dense_sparse_protocol.md
+```
+
+更新：
+
+```text
+docs/learning_journal.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+docs/primeqa_hybrid_score_margin_bm25_comparison.md
+docs/primeqa_hybrid_score_margin_bm25_protocol.md
+docs/primeqa_hybrid_score_margin_bm25_stop_decision.md
+docs/primeqa_hybrid_second_wave_retrieval_candidate_design.md
+docs/primeqa_hybrid_section_signal_stop_decision.md
+docs/primeqa_hybrid_section_signal_protocol.md
+docs/primeqa_hybrid_section_signal_comparison.md
+docs/primeqa_hybrid_structured_query_comparison.md
+docs/primeqa_hybrid_structured_query_stop_decision.md
+```
+
+### 执行命令
+
+```text
+python scripts\freeze_primeqa_hybrid_selective_dense_sparse_protocol.py --user-confirmed-candidate --confirmed-candidate-id selective_dense_sparse_low_overlap_gate_design --confirmation-note "user confirmed Stage97 selective dense sparse protocol freeze in current turn" --output artifacts\primeqa_hybrid_selective_dense_sparse_protocol_stage97.json --visualization-dir artifacts\primeqa_hybrid_selective_dense_sparse_protocol_stage97_visuals *> artifacts\primeqa_hybrid_selective_dense_sparse_protocol_stage97.console.txt
+```
+
+### Stage97 使用的数据
+
+Stage97 只读取：
+
+```text
+artifacts\primeqa_hybrid_second_wave_retrieval_candidate_design_stage84.json
+artifacts\primeqa_hybrid_score_margin_bm25_stop_decision_stage96.json
+artifacts\primeqa_hybrid_dense_sparse_rrf_feasibility_stage80.json
+artifacts\primeqa_hybrid_dense_sparse_rrf_comparison_stage81.json
+```
+
+Stage97 没有读取：
+
+```text
+data/processed/primeqa_hybrid_stage68_v1/train.jsonl
+data/processed/primeqa_hybrid_stage68_v1/dev.jsonl
+data/processed/primeqa_hybrid_stage68_v1/test.jsonl
+```
+
+Stage97 没有运行新的 train/dev retrieval comparison，也没有运行 final-test metrics。
+
+### 冻结协议
+
+```text
+protocol_id: selective_dense_sparse_low_overlap_gate_train_dev_v1
+candidate_id: selective_dense_sparse_low_overlap_gate_design
+protocol_status: frozen_requires_user_confirmation_before_metric_run
+source_stages: Stage84, Stage96, Stage80, Stage81
+development_splits: train, dev
+forbidden_final_splits: test
+```
+
+Baseline：
+
+```text
+full_document_bm25_baseline
+bm25_k1: 1.5
+bm25_b: 0.75
+candidate_depth: 50
+primary_top_k: 10
+```
+
+Dense cache contract：
+
+```text
+allowed_cache_source: stage80_compatible_local_dense_caches_only
+download_required: false
+document_reencoding_allowed: false
+query_encoding_mode: local_snapshot_path_with_local_files_only
+model_selection_mode: predeclared_grid_then_train_selection_only
+```
+
+允许的 dense configs：
+
+```text
+dense_sparse_rrf__intfloat_e5_small_v2__512_passage
+dense_sparse_rrf__sentence_transformers_all_MiniLM_L6_v2__1600_noprefix
+```
+
+### Candidate Policy Grid
+
+```text
+sdsl_e5_low_overlap_balanced_v1:
+  dense_config_id: dense_sparse_rrf__intfloat_e5_small_v2__512_passage
+  max BM25 top1 query-overlap ratio: 0.25
+  max BM25 top10 mean query-overlap ratio: 0.22
+  dense_weight: 1.00
+  max dense top10 promotions per query: 2
+  protected BM25 top ranks: 5
+
+sdsl_minilm_low_overlap_balanced_v1:
+  dense_config_id: dense_sparse_rrf__sentence_transformers_all_MiniLM_L6_v2__1600_noprefix
+  max BM25 top1 query-overlap ratio: 0.25
+  max BM25 top10 mean query-overlap ratio: 0.22
+  dense_weight: 1.00
+  max dense top10 promotions per query: 2
+  protected BM25 top ranks: 5
+
+sdsl_e5_low_overlap_dense_bias_v1:
+  dense_config_id: dense_sparse_rrf__intfloat_e5_small_v2__512_passage
+  max BM25 top1 query-overlap ratio: 0.20
+  max BM25 top10 mean query-overlap ratio: 0.18
+  dense_weight: 1.25
+  max dense top10 promotions per query: 2
+  protected BM25 top ranks: 5
+
+sdsl_minilm_low_overlap_conservative_v1:
+  dense_config_id: dense_sparse_rrf__sentence_transformers_all_MiniLM_L6_v2__1600_noprefix
+  max BM25 top1 query-overlap ratio: 0.30
+  max BM25 top10 mean query-overlap ratio: 0.25
+  dense_weight: 0.85
+  max dense top10 promotions per query: 1
+  protected BM25 top ranks: 7
+```
+
+所有 policy 都要求 dense promotion candidate 必须在 BM25 top10 之外，避免无条件替换 BM25 已有强结果。
+
+### Feature Contract
+
+允许 runtime 使用的特征组：
+
+```text
+query_aggregate_features
+bm25_lexical_features
+sparse_rank_score_features
+dense_rank_score_features
+rrf_gate_features
+action_budget_features
+```
+
+明确禁止 runtime 使用：
+
+```text
+source_DOC_IDS
+answer document IDs
+gold_document_rank
+gold_label
+dev_selected_gate_threshold
+dev_selected_dense_model
+stage81_dev_selected_config
+frozen_test_split_membership
+raw_question_text
+raw_answer_text
+raw_document_text
+raw_document_title
+query_terms
+matched_token_strings
+```
+
+### Train Selection Rule
+
+```text
+Select the gated dense+sparse policy on train only by hit@10, then larger not-found@50 reduction, fewer top10 regressions, hit@1 non-collapse, MRR@10, lower dense promotion budget, then policy_id. Dev is validation only.
+```
+
+Stage98 才能在用户确认后运行 comparison；Stage97 只冻结 protocol。
+
+### Stage97 决策
+
+```text
+status: primeqa_hybrid_selective_dense_sparse_protocol_frozen
+protocol_id: selective_dense_sparse_low_overlap_gate_train_dev_v1
+candidate_id: selective_dense_sparse_low_overlap_gate_design
+can_continue_train_dev_development: true
+requires_user_confirmation_before_train_dev_run: true
+can_run_train_dev_metrics_after_user_confirmation: true
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+default_runtime_policy: unchanged
+```
+
+### Guard Checks
+
+Stage97 guard：
+
+```text
+46 / 46 passed
+```
+
+关键 guard：
+
+```text
+source_stage84_report_is_stage84: passed
+source_stage96_report_is_stage96: passed
+source_stage80_report_is_stage80: passed
+source_stage81_report_is_stage81: passed
+user_confirmed_selective_dense_sparse_protocol: passed
+stage96_stopped_score_margin_bm25_route: passed
+confirmed_candidate_matches_stage96_next_candidate: passed
+stage80_can_run_without_download: passed
+stage80_compatible_cache_count_at_least_two: passed
+stage81_dense_sparse_comparison_completed: passed
+stage84_candidate_contract_requires_train_selected_dev_hit10_gain: passed
+stage84_candidate_contract_requires_not_found_decrease: passed
+stage84_candidate_guard_blocks_downloads_and_dev_thresholds: passed
+dense_cache_contract_uses_stage80_and_stage81_only: passed
+stage80_stage81_dense_cache_identities_match: passed
+candidate_policy_grid_is_predeclared: passed
+candidate_policy_grid_reuses_existing_dense_configs: passed
+candidate_policy_grid_has_low_overlap_gates: passed
+train_selection_rule_forbids_dev_and_test_selection: passed
+source_doc_ids_forbidden_in_runtime_features: passed
+answer_doc_ids_forbidden_in_runtime_features: passed
+downloads_and_cache_refresh_forbidden: passed
+stage97_freezes_protocol_without_metrics: passed
+stage97_final_test_metrics_not_run: passed
+stage97_default_runtime_policy_unchanged: passed
+```
+
+### 可视化
+
+```text
+artifacts\primeqa_hybrid_selective_dense_sparse_protocol_stage97_visuals\stage97_selective_dense_sparse_cache_readiness.svg
+artifacts\primeqa_hybrid_selective_dense_sparse_protocol_stage97_visuals\stage97_selective_dense_sparse_gate_thresholds.svg
+artifacts\primeqa_hybrid_selective_dense_sparse_protocol_stage97_visuals\stage97_selective_dense_sparse_rrf_weights.svg
+artifacts\primeqa_hybrid_selective_dense_sparse_protocol_stage97_visuals\stage97_selective_dense_sparse_feature_group_counts.svg
+artifacts\primeqa_hybrid_selective_dense_sparse_protocol_stage97_visuals\stage97_selective_dense_sparse_protocol_decision_flags.svg
+artifacts\primeqa_hybrid_selective_dense_sparse_protocol_stage97_visuals\stage97_selective_dense_sparse_guard_check_status.svg
+```
+
+Stage97 JSON SHA256：
+
+```text
+61041D5C3CC2E862F71041D40106845BC3F468E9C2BC0C6E8EF6B7BB659640E4
+```
+
+Visualization SHA256：
+
+```text
+stage97_selective_dense_sparse_cache_readiness.svg: 189E1C73FB9C8F8DAC88EE9A2650D15E849B0F815B6C56AE4E39A2290D0417E9
+stage97_selective_dense_sparse_feature_group_counts.svg: A760D77B693B4C6970A07FA1C157143EBC144D7FC5DF12FBB323B5D4EB4A5A54
+stage97_selective_dense_sparse_gate_thresholds.svg: 501DECAA5DF00D9C341ECF6D0C0E316EEA8F8E1F5F9D610F0128906C46055AB2
+stage97_selective_dense_sparse_guard_check_status.svg: 7F9F286DDC7B3EB9E1A19D850932EF3BBCE929E7B8199CA5AD14B6A15D1E920F
+stage97_selective_dense_sparse_protocol_decision_flags.svg: 1E71BB23C2F8BB2BC167793EDFFD691CB2A2922617E5A33839A98A7BB8B6A253
+stage97_selective_dense_sparse_rrf_weights.svg: 2AB4F308DF793121490FE969D1368EB30CFFDB4464E636626E717A2F0E9F1D78
+```
+
+### 问题、原因与修正
+
+- 问题 1：Stage97 不能简单复用 Stage81 dense+sparse 全量 RRF。
+  - 原因：Stage81 已经证明无 gate 的 dense+sparse 在 dev hit@10 上回退；Stage84 候选要求的是 low-overlap gate。
+  - 修正：冻结 selective low-overlap gate policy grid，所有 dense promotion 都必须满足 BM25 低 lexical-overlap 条件，且 dense candidate 必须在 BM25 top10 之外。
+  - 影响：Stage98 比较的是一个新 protocol，不是重复 Stage81。
+
+- 问题 2：dense cache / model 不能静默选择。
+  - 原因：dense route 涉及本地模型、cache、query prefix、snapshot path；如果不冻结，后续指标无法复现。
+  - 修正：Stage97 将 Stage80 compatible cache 和 Stage81 dense config identity 写入 protocol，并禁止 download / cache refresh。
+  - 影响：Stage98 只能使用已确认的两个本地 dense configs。
+
+- 问题 3：宽泛 raw-field scan 会命中禁止特征列表。
+  - 原因：Stage97 JSON 合法包含 `raw_question_text`、`query_terms` 等作为 prohibited runtime features。
+  - 修正：补充实际私有样例字符串扫描和 raw text value field 扫描。
+  - 影响：确认 report 没有写出真实题目、答案、文档正文或样例文本。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_selective_dense_sparse_protocol.py scripts\freeze_primeqa_hybrid_selective_dense_sparse_protocol.py tests\test_primeqa_hybrid_selective_dense_sparse_protocol.py
+pytest -q tests\test_primeqa_hybrid_selective_dense_sparse_protocol.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 4 passed
+```
+
+产物安全检查：
+
+```text
+Select-String actual private snippets over Stage97 JSON: no matches
+Select-String raw text value fields over Stage97 JSON: no matches
+git check-ignore Stage97 JSON, console, and SVG artifacts: ignored by .gitignore
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 257 passed
+git diff --check: passed
+```
+
+### 结论
+
+- Stage97 已冻结 `selective_dense_sparse_low_overlap_gate_train_dev_v1`。
+- Stage97 没有读取 train/dev/test split 文件。
+- Stage97 没有运行 retrieval metrics。
+- Stage97 没有运行 final metrics。
+- Stage97 没有下载模型。
+- Stage97 没有刷新 dense cache。
+- Stage97 没有使用 source `DOC_IDS` 作为 runtime 检索证据。
+- Stage97 没有改变 runtime 默认策略。
+- Stage98 可以在用户确认后运行 frozen train/dev-only comparison。
+
+### 我学到了
+
+- dense+sparse route 如果不加 gate，会同时救回 not-found@50 和制造 top10 regressions；新的 protocol 必须把 gate 写进协议，而不是只调 RRF 权重。
+- 对 dense route 来说，模型、cache、query prefix、document prefix 和 snapshot path 都属于协议的一部分，必须冻结。
+- 低 lexical-overlap gate 只能使用 runtime 可观测 aggregate/bucket 特征；不能写出 query terms 或 raw document text。
+
+### 下一步
+
+Stage98：在用户确认后运行 frozen train/dev-only `selective_dense_sparse_low_overlap_gate_train_dev_v1` comparison。
+
+Stage98 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能下载模型或刷新 dense cache，不能改变 runtime 默认策略。

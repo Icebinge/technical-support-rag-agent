@@ -219,8 +219,13 @@ git diff --check: passed
 
 ## Next Step
 
-Stage97 should confirm and freeze the train/dev-only protocol for
-`selective_dense_sparse_low_overlap_gate_design`. The frozen test split remains
-locked, final metrics must not be run, source `DOC_IDS` must not be used as
-runtime retrieval evidence, dev-only observations must not select runtime
-rules, and runtime defaults remain unchanged.
+Stage97 confirmed and froze the train/dev-only protocol for
+`selective_dense_sparse_low_overlap_gate_design` as
+`selective_dense_sparse_low_overlap_gate_train_dev_v1`. Stage97 did not run
+retrieval metrics, did not download models, and did not change runtime defaults.
+
+The current next step is Stage98: after user confirmation, run the frozen
+train/dev-only selective dense+sparse low-overlap gate comparison. The frozen
+test split remains locked, final metrics must not be run, source `DOC_IDS` must
+not be used as runtime retrieval evidence, no model downloads or cache
+refreshes are allowed, and runtime defaults remain unchanged.

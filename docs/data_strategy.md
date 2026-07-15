@@ -475,6 +475,13 @@ The current PrimeQA/TechQA hybrid score-margin BM25 stop decision is recorded in
 docs/primeqa_hybrid_score_margin_bm25_stop_decision.md
 ```
 
+The current PrimeQA/TechQA hybrid selective dense+sparse protocol freeze is
+recorded in:
+
+```text
+docs/primeqa_hybrid_selective_dense_sparse_protocol.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:
