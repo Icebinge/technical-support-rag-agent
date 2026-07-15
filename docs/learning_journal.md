@@ -25868,3 +25868,227 @@ no dev-only selection
 runtime defaults unchanged
 no fallback strategies
 ```
+
+## Stage107：冻结并运行 validation failure pattern analysis
+
+### 目标
+
+按用户要求先“冻结一下”，再查找当前验证集失败规律。本阶段把 Stage107 定义为 public-safe diagnostic：
+
+```text
+只读 Stage102 / Stage105 / Stage106 已保存 JSON 报告
+不读取 train/dev/test split 文件
+不读取 corpus documents
+不重新运行 retrieval metrics
+不重新运行 answer metrics
+不运行 final test metrics
+不从 dev-only observations 反选 config
+不改 runtime default
+不加入 fallback strategy
+```
+
+### 新增内容
+
+代码：
+
+```text
+src\ts_rag_agent\application\primeqa_hybrid_validation_failure_pattern_analysis.py
+scripts\analyze_primeqa_hybrid_validation_failure_patterns.py
+tests\test_primeqa_hybrid_validation_failure_pattern_analysis.py
+```
+
+文档：
+
+```text
+docs\primeqa_hybrid_validation_failure_pattern_analysis.md
+docs\learning_journal.md
+```
+
+本地产物：
+
+```text
+artifacts\primeqa_hybrid_validation_failure_pattern_analysis_stage107.json
+artifacts\primeqa_hybrid_validation_failure_pattern_analysis_stage107.console.txt
+artifacts\primeqa_hybrid_validation_failure_pattern_analysis_stage107_visuals\stage107_dev_failure_bucket_counts.svg
+artifacts\primeqa_hybrid_validation_failure_pattern_analysis_stage107_visuals\stage107_train_dev_bucket_rate_drift.svg
+artifacts\primeqa_hybrid_validation_failure_pattern_analysis_stage107_visuals\stage107_dev_route_failure_counts.svg
+artifacts\primeqa_hybrid_validation_failure_pattern_analysis_stage107_visuals\stage107_dev_answerable_failure_flow.svg
+artifacts\primeqa_hybrid_validation_failure_pattern_analysis_stage107_visuals\stage107_stage105_candidate_behavior.svg
+artifacts\primeqa_hybrid_validation_failure_pattern_analysis_stage107_visuals\stage107_decision_flags.svg
+artifacts\primeqa_hybrid_validation_failure_pattern_analysis_stage107_visuals\stage107_guard_check_status.svg
+```
+
+### 冻结协议
+
+```text
+protocol_id: primeqa_hybrid_validation_failure_pattern_analysis_v1
+validation_split: dev
+source reports only: Stage102, Stage105, Stage106
+case-level rows written: false
+aggregate counts only: true
+select config from dev: false
+retune thresholds on dev: false
+open runtime gate: false
+open final test gate: false
+```
+
+### 真实运行命令
+
+```text
+python scripts\analyze_primeqa_hybrid_validation_failure_patterns.py --user-confirmed-analysis --confirmation-note "user confirmed Stage107 frozen validation-failure pattern analysis on 2026-07-16; read saved Stage102/105/106 public-safe reports only; test locked; runtime defaults unchanged; no fallback strategies"
+```
+
+真实运行结果：
+
+```text
+exit_code: 0
+guard_checks: 19 / 19 passed
+```
+
+### 验证集失败规律
+
+整体：
+
+```text
+dev rows: 121
+dev failure rows: 117 / 121 = 0.9669
+answerable dev failure rows: 76 / 76 = 1.0000
+unanswerable false-answer rows: 41 / 45 = 0.9111
+```
+
+主要 failure buckets：
+
+```text
+answerability_false_answer: 41, overall 0.3388, unanswerable conditional 0.9111
+gold_span_beats_selected_answer: 41, overall 0.3388, answerable conditional 0.5395
+retrieval_context_miss: 23, overall 0.1901, answerable conditional 0.3026
+evidence_selection_miss: 12, overall 0.0992, answerable conditional 0.1579
+```
+
+answerable dev flow：
+
+```text
+answerable rows: 76
+gold context absent from top10: 23 / 76 = 0.3026
+gold context present in top10: 53 / 76 = 0.6974
+context-present evidence selection miss: 12 / 53 = 0.2264
+context-present gold span beats selected answer: 41 / 53 = 0.7736
+answerable supported-and-cited rows: 0
+```
+
+这说明召回仍然是问题，但即使 gold context 已经进入 top10，当前 answer pipeline 也没有把它稳定转成正确 supported answer。
+
+Train/dev 相似性：
+
+```text
+answerability_false_answer: train 0.3203, dev 0.3388, dev-train +1.85 pp
+gold_span_beats_selected_answer: train 0.3096, dev 0.3388, dev-train +2.92 pp
+retrieval_context_miss: train 0.2224, dev 0.1901, dev-train -3.23 pp
+evidence_selection_miss: train 0.1192, dev 0.0992, dev-train -2.00 pp
+```
+
+这说明当前 dev 失败结构不是明显的 dev-only anomaly。
+
+Route 集中度：
+
+```text
+other: 45 / 46 failures, dominant gold_span_beats_selected_answer
+error_or_log: 25 / 25 failures, dominant answerability_false_answer
+install_upgrade_config: 16 / 17 failures, dominant answerability_false_answer
+how_to_or_lookup: 14 / 15 failures, dominant gold_span_beats_selected_answer
+security_bulletin_vulnerability_detail: 13 / 14 failures, dominant gold_span_beats_selected_answer
+```
+
+### Stage105 candidate 失败规律
+
+Stage105 的 train-selected config：
+
+```text
+selected_config_id: amg_bm25_evidence8_rank3_v1
+selected_train_weighted_target_delta: 0.0
+dev_weighted_target_delta: 0.0
+dev_changed_answer_count: 0
+```
+
+候选族分成三类：
+
+```text
+train_selectable_noop_or_near_noop: 2 configs, dev changed answers 0, best dev delta 0.00
+train_nonselectable_low_change: 1 config, dev changed answers 4, best dev delta -3.10
+train_nonselectable_high_change: 6 configs, dev changed answers 695 total, best dev delta -29.15
+```
+
+所有 7 个 dev-better non-selectable configs 都失败于 train answerable-refusal guard，其中 4 个还失败于 train gold-citation guard。
+
+### 决策
+
+```text
+status: primeqa_hybrid_validation_failure_pattern_analysis_completed
+protocol_id: primeqa_hybrid_validation_failure_pattern_analysis_v1
+validation_split: dev
+dev_failure_count: 117
+dev_failure_rate: 0.9669
+answerable_failure_rate: 1.0
+unanswerable_false_answer_rate: 0.9111
+stage105_selected_config_was_dev_noop: true
+recommended_next_direction: failure_pattern_driven_train_dev_redesign_protocol
+can_continue_train_dev_development: true
+requires_user_confirmation_before_next_protocol: true
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+fallback_strategies_enabled: false
+default_runtime_policy: unchanged
+```
+
+结论：Stage107 只是诊断阶段，不支持 runtime defaultization，也不能打开 final-test gate。
+
+### 问题、原因与修正
+
+- 问题 1：用户要“冻结”和“找规律”，这可能被误解成先做 protocol freeze、下阶段再分析。
+  - 原因：前面很多阶段把 freeze 和 metric run 分成两个 stage。
+  - 修正：本阶段冻结的是 diagnostic protocol，并立即对已保存 public-safe reports 做只读聚合分析；没有新增 candidate comparison，也没有运行新指标。
+- 问题 2：如果输出 case-level rows，可能泄露验证集样本内容或诱导人工反选。
+  - 原因：Stage102 有 public-safe case samples，但 Stage107 的目标是看整体规律，不需要逐题样本。
+  - 修正：Stage107 协议明确 `case-level rows written: false`，只输出 aggregate counts。
+- 问题 3：dev 上 high-change configs 看起来有收益，容易再次诱导 dev selection。
+  - 原因：Stage105 的 aggressive window/joint configs 在 dev target 上更好，但 train guards 已经证明风险不可接受。
+  - 修正：Stage107 只把它们归类为失败规律证据，仍不允许反选，也不改变 runtime default。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_validation_failure_pattern_analysis.py scripts\analyze_primeqa_hybrid_validation_failure_patterns.py tests\test_primeqa_hybrid_validation_failure_pattern_analysis.py
+pytest -q tests\test_primeqa_hybrid_validation_failure_pattern_analysis.py
+python scripts\analyze_primeqa_hybrid_validation_failure_patterns.py --user-confirmed-analysis ...
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+Stage107 run: passed
+guard checks: 19 / 19 passed
+```
+
+### 我学到了
+
+- 当前验证集失败不是小修小补能解释的：answerable dev 侧 76/76 都进了 failure bucket，unanswerable 侧 41/45 被误答。
+- 召回没完全解决，但 answer pipeline 本身也很关键：53 个 gold context 已在 top10 的 answerable dev 样本，仍全部在 evidence selection 或 answer composition 阶段失败。
+- Stage105 的失败不是“没有任何方向”，而是“可改变 dev 的候选在 train guard 下不可选”；下一步应该先围绕失败机制设计新协议，而不是调现有阈值。
+- 可视化能帮助把问题从“某个 config 没过”转成“失败结构是什么”：bucket counts、train-dev drift、route concentration、answerable flow、candidate behavior 都要一起看。
+
+### 下一步
+
+Stage108：在用户确认后，冻结 train/dev-only failure-pattern-driven redesign protocol。它应围绕 Stage107 暴露的失败机制设计，而不是从 dev 反选现有 config；继续保持：
+
+```text
+test locked
+no final metrics
+no dev-only selection
+runtime defaults unchanged
+no fallback strategies
+```
