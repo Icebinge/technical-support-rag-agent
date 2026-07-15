@@ -18760,3 +18760,289 @@ git diff --check: passed
 Stage78：运行 `fielded_title_text_bm25_score_fusion` 的 train/dev-only retrieval-recall 实验。
 
 Stage78 仍然不能使用 test 做评估或 tuning，也不能运行 final test metrics。
+
+## Stage78：fielded title/text BM25 score fusion 召回实验
+
+时间：2026-07-15
+
+### 目标
+
+继续解决 Stage75 暴露出来的 BM25 top10 召回不足问题。本阶段按照 Stage76 的第二个候选方向，评估 `fielded_title_text_bm25_score_fusion`：
+
+- 仍然只使用 Stage68 冻结后的 train/dev split；
+- 不读取 test split 做评估或调参；
+- 不运行 final test metrics；
+- 不使用 source `DOC_IDS` 作为 runtime 检索证据；
+- 不改变默认 runtime policy；
+- 输出可视化结果，方便对比每个 fielded BM25 配置。
+
+### 我做了什么
+
+新增 Stage78 train/dev-only 实验实现：
+
+```text
+src\ts_rag_agent\application\primeqa_hybrid_fielded_bm25_fusion.py
+scripts\run_primeqa_hybrid_fielded_bm25_fusion.py
+tests\test_primeqa_hybrid_fielded_bm25_fusion.py
+docs\primeqa_hybrid_fielded_bm25_fusion.md
+```
+
+实验同时建立三个 BM25 index：
+
+```text
+full_document_bm25_baseline:
+  title + text
+
+title_retriever:
+  title-only field
+
+text_retriever:
+  text-only field
+```
+
+fielded fusion 的固定候选网格：
+
+```text
+fielded_title_0_25_text_1_00
+fielded_title_0_50_text_1_00
+fielded_title_1_00_text_1_00
+fielded_title_1_50_text_1_00
+fielded_title_2_00_text_1_00
+```
+
+打分方式：
+
+```text
+normalized_title_score * title_weight + normalized_text_score * text_weight
+```
+
+选择规则：
+
+```text
+只在 train 上按 hit@10、hit@5、hit@1、MRR、config_id 选择 challenger；
+dev 只用于验证 train-selected challenger；
+test 不参与。
+```
+
+真实运行命令：
+
+```text
+python scripts\run_primeqa_hybrid_fielded_bm25_fusion.py `
+  --output artifacts\primeqa_hybrid_fielded_bm25_fusion_stage78.json `
+  --visualization-dir artifacts\primeqa_hybrid_fielded_bm25_fusion_stage78_visuals `
+  --candidate-depth 100
+```
+
+运行耗时：
+
+```text
+load_splits: 0.026s
+load_documents_and_reports: 0.854s
+bm25_indexes: 9.690s
+fielded_fusion_evaluate: 233.145s
+guard_checks: 0.001s
+total: 243.716s
+```
+
+### 真实结果
+
+Train baseline：
+
+```text
+hit@1: 0.4243
+hit@5: 0.6054
+hit@10: 0.6622
+MRR: 0.5023
+miss_count_at_10: 125
+```
+
+Train challengers：
+
+```text
+fielded_title_0_25_text_1_00:
+  hit@10: 0.6378
+  hit@10 delta: -0.0244
+  top10 improvements/regressions: 4 / 13
+
+fielded_title_0_50_text_1_00:
+  hit@10: 0.6135
+  hit@10 delta: -0.0487
+  top10 improvements/regressions: 9 / 27
+
+fielded_title_1_00_text_1_00:
+  hit@10: 0.5730
+  hit@10 delta: -0.0892
+
+fielded_title_1_50_text_1_00:
+  hit@10: 0.5432
+  hit@10 delta: -0.1190
+
+fielded_title_2_00_text_1_00:
+  hit@10: 0.5405
+  hit@10 delta: -0.1217
+```
+
+Dev baseline：
+
+```text
+hit@1: 0.4342
+hit@5: 0.6579
+hit@10: 0.6974
+MRR: 0.5331
+miss_count_at_10: 23
+```
+
+Dev challengers：
+
+```text
+fielded_title_0_25_text_1_00:
+  hit@1: 0.4737
+  hit@5: 0.6579
+  hit@10: 0.6974
+  MRR: 0.5550
+  hit@10 delta: +0.0000
+  hit@1 delta: +0.0395
+  MRR delta: +0.0219
+  top10 improvements/regressions: 1 / 1
+
+fielded_title_0_50_text_1_00:
+  hit@10: 0.6842
+  hit@10 delta: -0.0132
+  top10 improvements/regressions: 2 / 3
+
+fielded_title_1_00_text_1_00:
+  hit@10: 0.6316
+  hit@10 delta: -0.0658
+  top10 improvements/regressions: 2 / 7
+
+fielded_title_1_50_text_1_00:
+  hit@10: 0.6053
+  hit@10 delta: -0.0921
+  top10 improvements/regressions: 2 / 9
+
+fielded_title_2_00_text_1_00:
+  hit@10: 0.6053
+  hit@10 delta: -0.0921
+  top10 improvements/regressions: 3 / 10
+```
+
+Train-selected challenger：
+
+```text
+selected_config_id: fielded_title_0_25_text_1_00
+selected_dev_hit@10_delta: +0.0000
+selected_dev_top10_improvements: 1
+selected_dev_top10_regressions: 1
+```
+
+### 可视化产物
+
+```text
+artifacts\primeqa_hybrid_fielded_bm25_fusion_stage78_visuals\stage78_fielded_bm25_train_hit_at_10.svg
+artifacts\primeqa_hybrid_fielded_bm25_fusion_stage78_visuals\stage78_fielded_bm25_dev_hit_at_10.svg
+artifacts\primeqa_hybrid_fielded_bm25_fusion_stage78_visuals\stage78_fielded_bm25_dev_delta_hit_at_10.svg
+artifacts\primeqa_hybrid_fielded_bm25_fusion_stage78_visuals\stage78_fielded_bm25_dev_top10_changes.svg
+```
+
+Stage78 JSON SHA256：
+
+```text
+6EE3DAE47AA3927AA4CF613A0DDC1C0CD5CDA6D4C62FE21C615AC38883CF6FAD
+```
+
+### Guard checks
+
+```text
+analysis_splits_are_train_dev_only: passed
+top_k_values_include_primary_top10: passed
+candidate_depth_covers_primary_top10: passed
+stage75_source_report_is_stage75: passed
+stage77_source_report_is_stage77: passed
+baseline_train_hit10_matches_stage75: passed
+baseline_dev_hit10_matches_stage75: passed
+stage77_did_not_open_final_test_gate: passed
+source_doc_ids_not_used_as_runtime_evidence: passed
+final_test_metrics_not_run: passed
+default_runtime_policy_unchanged: passed
+```
+
+额外 raw-text 检查：
+
+```text
+Select-String over Stage78 JSON for question_title, question_text, gold_answer,
+candidate_sentence, document_title, document_text, and known raw-text snippets:
+no matches
+```
+
+artifact 忽略状态：
+
+```text
+.gitignore:19:artifacts/* artifacts\primeqa_hybrid_fielded_bm25_fusion_stage78.json
+.gitignore:19:artifacts/* artifacts\primeqa_hybrid_fielded_bm25_fusion_stage78_visuals\stage78_fielded_bm25_dev_hit_at_10.svg
+```
+
+### 问题、原因与修正
+
+- 问题 1：fielded BM25 fusion 没有提升 top10 召回。
+  - 原因：轻 title 权重在 dev 上提升了 top1/MRR，但没有增加 hit@10；更高 title 权重反而明显拉低 train/dev hit@10。
+  - 修正：不推进 fielded BM25 fusion route，不进入 final-test gate，不改变 runtime 默认策略。
+- 问题 2：train-selected challenger 虽然是 challenger 中最优，但低于 baseline。
+  - 原因：选择规则只在 challenger 之间做排序，`fielded_title_0_25_text_1_00` 只是 challenger 里损失最小，不代表超过 baseline。
+  - 修正：报告和文档同时记录 baseline 对比 delta，防止把“候选最优”误读成“优于当前系统”。
+- 问题 3：title/text field 拆分容易强化标题短词信号。
+  - 原因：标题字段短且高密度，归一化后轻微权重就会改变排序；当标题词不足以定位答案文档时，会带来 top10 regression。
+  - 修正：下一步不继续加大 title 权重，而转向 section-level BM25 doc rollup，测试更细粒度文本片段能否让答案文档进入候选窗口。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_fielded_bm25_fusion.py scripts\run_primeqa_hybrid_fielded_bm25_fusion.py tests\test_primeqa_hybrid_fielded_bm25_fusion.py
+pytest -q tests\test_primeqa_hybrid_fielded_bm25_fusion.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+提交前完整验证：
+
+```text
+ruff check .
+pytest -q
+git diff --check
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 205 passed
+git diff --check: passed
+```
+
+### 结论
+
+- Stage78 已完成 fielded title/text BM25 score fusion 实验。
+- Stage78 没有使用测试集。
+- Stage78 没有运行 final test metrics。
+- Stage78 没有使用 source `DOC_IDS` 作为 runtime 检索证据。
+- 默认 runtime policy 保持 unchanged。
+- fielded BM25 fusion route 不推进：train-selected challenger 在 dev 上 hit@10 delta 为 `+0.0000`，top10 improvements/regressions 为 `1 / 1`。
+- 当前最合适下一步是进入 Stage76 第三候选 `section_bm25_doc_rollup_train_dev_probe`。
+
+### 我学到的
+
+- 对召回问题，top1/MRR 的提升不能替代 hit@10 的提升；当前瓶颈是 gold document 是否进入候选窗口。
+- fielded score fusion 必须与 baseline 做显式 delta 对比；否则 challenger 内部的“最优配置”容易被误解。
+- title 信号有价值，但直接加权 title-only BM25 并不稳定；更合理的下一步是看 section-level 检索能不能把长文档里的相关片段召回出来。
+
+### 下一步
+
+Stage79：运行 `section_bm25_doc_rollup_train_dev_probe` 的 train/dev-only retrieval-recall 实验。
+
+Stage79 仍然不能使用 test 做评估或 tuning，不能运行 final test metrics，也不能使用 source `DOC_IDS` 作为 runtime 检索证据。

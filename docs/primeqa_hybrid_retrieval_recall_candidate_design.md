@@ -129,8 +129,13 @@ highest-priority allowed candidate, `query_view_ablation_full_title_dedup`, and
 did not advance the route because the challenger query views underperformed the
 full-question BM25 baseline.
 
-The current next step is Stage 78:
-`fielded_title_text_bm25_score_fusion`.
+Stage 78 ran the second allowed candidate,
+`fielded_title_text_bm25_score_fusion`, and did not advance the route because
+the train-selected challenger produced no dev hit@10 gain.
 
-Stage 78 must keep the frozen test split locked, must not run final test
-metrics, and must not change the default runtime policy.
+The current next step is Stage 79:
+`section_bm25_doc_rollup_train_dev_probe`.
+
+Stage 79 must keep the frozen test split locked, must not run final test
+metrics, must not use source `DOC_IDS` as runtime retrieval evidence, and must
+not change the default runtime policy.

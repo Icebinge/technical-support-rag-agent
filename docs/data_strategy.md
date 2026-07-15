@@ -52,6 +52,8 @@ oracle union because those IDs are dataset metadata rather than runtime
 user-query evidence. Stage 77 ran the first retrieval-recall candidate,
 query-view ablation, and found that title-only and deduplicated full-question
 queries underperform the full-question BM25 baseline on train/dev.
+Stage 78 ran the second retrieval-recall candidate, fielded title/text BM25
+score fusion, and found no dev hit@10 gain from the train-selected challenger.
 The frozen test split remains locked and must not be used for tuning.
 
 ### nvidia/TechQA-RAG-Eval
@@ -339,6 +341,12 @@ The current PrimeQA/TechQA hybrid query-view ablation is recorded in:
 
 ```text
 docs/primeqa_hybrid_query_view_ablation.md
+```
+
+The current PrimeQA/TechQA hybrid fielded BM25 fusion experiment is recorded in:
+
+```text
+docs/primeqa_hybrid_fielded_bm25_fusion.md
 ```
 
 ## Leakage Checks

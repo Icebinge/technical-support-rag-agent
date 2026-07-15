@@ -1,6 +1,6 @@
 # Evaluation Strategy
 
-This document records the current evaluation strategy after Stage 77.
+This document records the current evaluation strategy after Stage 78.
 
 The active route is now the project-owned PrimeQA/TechQA hybrid split
 `primeqa_hybrid_stage68_v1`. Stage 68 froze local split artifacts, and Stage 69
@@ -14,8 +14,9 @@ development route as non-actionable for now. Stage 75 analyzed BM25 top10
 misses and showed that retrieval recall is now the blocking issue. Stage 76
 designed train/dev-only retrieval-recall candidate experiments from those miss
 drivers. Stage 77 ran the first candidate, query-view ablation, and found that
-it underperforms the full-question BM25 baseline. The frozen test split remains
-locked for future final evaluation.
+it underperforms the full-question BM25 baseline. Stage 78 ran the second
+candidate, fielded title/text BM25 score fusion, and found no dev hit@10 gain.
+The frozen test split remains locked for future final evaluation.
 
 ## Current Facts
 
@@ -211,6 +212,26 @@ final test metrics: not run
 default runtime policy: unchanged
 ```
 
+- Stage 78 ran fielded title/text BM25 score fusion on train/dev only:
+
+```text
+train full_document_bm25_baseline hit@10: 0.6622
+train fielded_title_0_25_text_1_00 hit@10: 0.6378
+train fielded_title_0_25_text_1_00 hit@10 delta: -0.0244
+
+dev full_document_bm25_baseline hit@10: 0.6974
+dev fielded_title_0_25_text_1_00 hit@10: 0.6974
+dev fielded_title_0_25_text_1_00 hit@10 delta: +0.0000
+dev fielded_title_0_25_text_1_00 hit@1 delta: +0.0395
+dev fielded_title_0_25_text_1_00 MRR delta: +0.0219
+dev top10 improvements/regressions: 1 / 1
+
+train-selected challenger: fielded_title_0_25_text_1_00
+decision: fielded_bm25_fusion_does_not_advance
+final test metrics: not run
+default runtime policy: unchanged
+```
+
 - Stage 71 ran train-only candidate-reranker grouped CV and train-to-dev guarded
   policy validation for both `logistic_best_candidate` and
   `ridge_candidate_token_f1`:
@@ -245,8 +266,8 @@ train/dev, so any quality metric reported as held-out would be misleading.
 
 ### Project-Owned PrimeQA/TechQA Hybrid Split
 
-Status: Stage 77 completed query-view ablation and did not advance the query
-view route; final metrics not run.
+Status: Stage 78 completed fielded title/text BM25 score fusion and did not
+advance that route; final metrics not run.
 
 This route preserves the final target: document-style RAG over TechQA technotes.
 It accepts that old Stage 31-66 model-selection evidence cannot be treated as
@@ -317,8 +338,8 @@ default_runtime_policy: unchanged
 
 Required next step:
 
-Stage 78 should run a train/dev-only retrieval-recall experiment for
-`fielded_title_text_bm25_score_fusion`, the next allowed Stage76 candidate.
+Stage 79 should run a train/dev-only retrieval-recall experiment for
+`section_bm25_doc_rollup_train_dev_probe`, the next allowed Stage76 candidate.
 Do not use test for evaluation or tuning.
 
 ## Parked Paths
@@ -362,14 +383,16 @@ analysis and identified retrieval recall as the next blocking issue. Stage 76
 designed allowed train/dev retrieval-recall candidates and blocked source
 `DOC_IDS` oracle union as non-deployable. Stage 77 completed query-view ablation
 and did not advance that route because both challenger views underperformed the
-baseline. Until a future stage explicitly opens final evaluation:
+baseline. Stage 78 completed fielded title/text BM25 score fusion and did not
+advance that route because the train-selected challenger produced no dev hit@10
+gain. Until a future stage explicitly opens final evaluation:
 
 - do not run final metrics;
 - do not change the default runtime;
 - do not defaultize the current candidate-reranker policy;
 - do not continue the current reranker-policy route without a new user-confirmed
   train/dev-only plan;
-- do not use the frozen test split while running Stage 78 retrieval-recall
+- do not use the frozen test split while running Stage 79 retrieval-recall
   experiments;
 - do not use source `DOC_IDS` as runtime retrieval evidence;
 - do not tune Stage 51 against the frozen test split;
@@ -441,6 +464,8 @@ artifacts/primeqa_hybrid_retrieval_recall_candidate_design_stage76.json
 artifacts/primeqa_hybrid_retrieval_recall_candidate_design_stage76_visuals/
 artifacts/primeqa_hybrid_query_view_ablation_stage77.json
 artifacts/primeqa_hybrid_query_view_ablation_stage77_visuals/
+artifacts/primeqa_hybrid_fielded_bm25_fusion_stage78.json
+artifacts/primeqa_hybrid_fielded_bm25_fusion_stage78_visuals/
 ```
 
 The current Stage 67 protocol is recorded in:
@@ -507,4 +532,10 @@ The current Stage 77 query-view ablation is recorded in:
 
 ```text
 docs/primeqa_hybrid_query_view_ablation.md
+```
+
+The current Stage 78 fielded BM25 fusion experiment is recorded in:
+
+```text
+docs/primeqa_hybrid_fielded_bm25_fusion.md
 ```
