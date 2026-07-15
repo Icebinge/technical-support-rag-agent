@@ -27372,3 +27372,257 @@ no fallback strategies
 ```text
 Stage113: 用户确认后，冻结 train/dev-only retrieval/index redesign protocol。
 ```
+
+## Stage113：冻结 retrieval/index redesign protocol
+
+### 目标
+
+根据 Stage112 的 `retrieval_context_miss` 根因审计结果，冻结下一轮
+train/dev-only retrieval/index redesign protocol。本阶段只定义候选族、候选
+config、train-CV 选择规则和 dev validation 边界，不运行候选实验。
+
+### 新增内容
+
+新增协议实现：
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_retrieval_index_redesign_protocol.py
+```
+
+新增运行脚本：
+
+```text
+scripts/freeze_primeqa_hybrid_retrieval_index_redesign_protocol.py
+```
+
+新增测试：
+
+```text
+tests/test_primeqa_hybrid_retrieval_index_redesign_protocol.py
+```
+
+新增正式记录：
+
+```text
+docs/primeqa_hybrid_retrieval_index_redesign_protocol.md
+```
+
+同时更新索引：
+
+```text
+docs/data_strategy.md
+docs/evaluation_strategy.md
+```
+
+### 真实运行结果
+
+命令：
+
+```text
+python scripts\freeze_primeqa_hybrid_retrieval_index_redesign_protocol.py --user-confirmed-protocol --confirmation-note "user confirmed Stage113 train-dev retrieval/index redesign protocol freeze on 2026-07-16 after Stage112 root-cause audit; protocol freeze only; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+输出：
+
+```text
+artifacts\primeqa_hybrid_retrieval_index_redesign_protocol_stage113.json
+```
+
+结果：
+
+```text
+stage: Stage 113
+protocol_id: primeqa_hybrid_retrieval_index_redesign_protocol_v1
+status: primeqa_hybrid_retrieval_index_redesign_protocol_frozen
+recommended_next_direction: run_retrieval_index_redesign_train_cv_dev_validation
+candidate families: 3
+candidate configs: 8
+guard checks: 20 / 20 passed
+timing total: 0.002s
+```
+
+本阶段只读取 Stage112 public-safe report，没有读取 train/dev/test split，没有读取 corpus，
+没有运行 retrieval 或 answer metrics，也没有打开 final-test gate。
+
+### Stage112 依据
+
+Stage112 审计集合：
+
+```text
+train: 125
+dev: 23
+total: 148
+```
+
+Primary root cause：
+
+```text
+title_heading_mismatch: 74
+query_expression_gap: 65
+long_document_score_dilution: 4
+entity_version_error_code_mismatch: 3
+bm25_field_weighting_or_index_structure: 2
+```
+
+High-signal dimension：
+
+```text
+title_heading_mismatch: 137
+bm25_field_weighting_or_index_structure: 121
+entity_version_error_code_mismatch: 80
+query_expression_gap: 65
+long_document_score_dilution: 37
+section_boundary_or_span_locality: 10
+```
+
+### 冻结的候选族
+
+```text
+title_heading_weighted_bm25_candidate_v1: priority 0.95, configs 3
+section_level_index_rollup_candidate_v1: priority 0.90, configs 3
+entity_version_error_code_handling_candidate_v1: priority 0.80, configs 2
+```
+
+候选 config：
+
+```text
+thw_title2_heading2_body1_doc_bm25_v1
+thw_title3_heading2_body1_doc_bm25_v1
+thw_title_heading_query_view_rrf_v1
+slr_section_top1_doc_rollup_v1
+slr_section_top3_rrf_doc_rollup_v1
+slr_heading_section_title_rollup_v1
+evc_special_token_exact_boost_v1
+evc_special_token_title_heading_boost_v1
+```
+
+这些都是 Stage114 的候选协议项，本阶段没有实现或评估它们。
+
+### 选择规则
+
+Stage114 如果执行，必须使用：
+
+```text
+selection_split: train
+selection_mode: train_grouped_cross_validation_then_full_train_refit
+train_group_key: normalized_question_plus_answer_document_or_technote
+minimum_train_folds: 5
+validation_split: dev
+dev_validation_mode: single_pass_no_retuning
+```
+
+主要目标：
+
+```text
+reduce_retrieval_context_miss
+required_train_cv_delta: negative
+weight: 2.0
+```
+
+关键 guard：
+
+```text
+max_train_cv_average_token_f1_drop: 0.005
+max_train_cv_gold_doc_citation_rate_drop: 0.015
+max_train_cv_answerable_refusal_rate_delta: 0.02
+max_train_cv_answerability_false_answer_delta: 0
+max_train_cv_evidence_selection_miss_delta: 0
+max_train_cv_gold_span_beats_selected_delta: 0
+max_train_cv_changed_answer_rate: 0.25
+```
+
+继续禁止：
+
+```text
+dev_selection_allowed: false
+dev_retuning_allowed: false
+dev_threshold_tuning_allowed: false
+test_access_allowed: false
+final_test_metrics_allowed: false
+test_tuning_allowed: false
+default_runtime_policy: unchanged
+fallback_strategies_enabled: false
+```
+
+### 可视化结果
+
+已生成：
+
+```text
+artifacts\primeqa_hybrid_retrieval_index_redesign_protocol_stage113_visuals\stage113_stage112_primary_root_causes.svg
+artifacts\primeqa_hybrid_retrieval_index_redesign_protocol_stage113_visuals\stage113_stage112_high_signal_dimensions.svg
+artifacts\primeqa_hybrid_retrieval_index_redesign_protocol_stage113_visuals\stage113_candidate_family_priorities.svg
+artifacts\primeqa_hybrid_retrieval_index_redesign_protocol_stage113_visuals\stage113_candidate_config_counts.svg
+artifacts\primeqa_hybrid_retrieval_index_redesign_protocol_stage113_visuals\stage113_selection_guard_thresholds.svg
+artifacts\primeqa_hybrid_retrieval_index_redesign_protocol_stage113_visuals\stage113_protocol_decision_flags.svg
+artifacts\primeqa_hybrid_retrieval_index_redesign_protocol_stage113_visuals\stage113_guard_check_status.svg
+```
+
+### 问题、原因与修正
+
+- 问题 1：一开始有几处候选 config 描述字符串超过 ruff 行宽。
+  - 原因：协议文本写得太直接。
+  - 修正：只做字符串折行，不改变协议内容。
+- 问题 2：Stage113 容易被误解成已经开始 retrieval/index 实验。
+  - 原因：本阶段已经列出了 8 个 config。
+  - 修正：文档和 decision 中明确它们只是 frozen protocol candidates，真正运行要等 Stage114 用户确认。
+- 问题 3：Stage113 不能直接使用 Stage112 的 gold doc id 诊断信号进入 runtime。
+  - 原因：gold doc id 只允许离线标注，不允许做 runtime feature。
+  - 修正：候选族的 forbidden runtime features 明确包含 gold document identifier、gold answer span、test labels。
+
+### 验证
+
+目标验证：
+
+```text
+python -m ruff check src\ts_rag_agent\application\primeqa_hybrid_retrieval_index_redesign_protocol.py scripts\freeze_primeqa_hybrid_retrieval_index_redesign_protocol.py tests\test_primeqa_hybrid_retrieval_index_redesign_protocol.py
+python -m pytest tests\test_primeqa_hybrid_retrieval_index_redesign_protocol.py -q
+python scripts\freeze_primeqa_hybrid_retrieval_index_redesign_protocol.py --user-confirmed-protocol ...
+```
+
+结果：
+
+```text
+targeted ruff: passed
+targeted pytest: 3 passed
+Stage113 run: passed
+guard checks: 20 / 20 passed
+```
+
+全仓验证：
+
+```text
+python -m ruff check .
+python -m pytest -q
+git diff --check
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 309 passed
+git diff --check: passed
+```
+
+### 我学到了
+
+- Stage112 的强信号可以转化为候选族，但不能直接转化为默认策略。
+- 这次 protocol 的核心是 train grouped-CV 先筛选，dev 只做 single-pass validation。
+- `title_heading_mismatch` 和 `query_expression_gap` 是主目标，`bm25_field_weighting_or_index_structure`
+  是重要结构信号，适合和 section rollup 放在同一协议里比较。
+- 当前仍然没有使用 test；test 继续锁住。
+
+### 下一步
+
+Stage114：只有用户确认后，运行 frozen train grouped-CV retrieval/index redesign
+comparison，再做一次 dev validation。继续保持：
+
+```text
+test locked
+no final metrics
+no dev-only selection
+no threshold tuning
+runtime defaults unchanged
+no fallback strategies
+```

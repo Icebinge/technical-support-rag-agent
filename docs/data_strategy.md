@@ -587,6 +587,13 @@ recorded in:
 docs/primeqa_hybrid_retrieval_context_miss_root_cause_audit.md
 ```
 
+The current PrimeQA/TechQA hybrid retrieval/index redesign protocol freeze is
+recorded in:
+
+```text
+docs/primeqa_hybrid_retrieval_index_redesign_protocol.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:

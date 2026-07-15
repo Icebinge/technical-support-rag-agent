@@ -854,3 +854,9 @@ The current Stage 112 retrieval-context-miss root-cause audit is recorded in:
 ```text
 docs/primeqa_hybrid_retrieval_context_miss_root_cause_audit.md
 ```
+
+The current Stage 113 retrieval/index redesign protocol freeze is recorded in:
+
+```text
+docs/primeqa_hybrid_retrieval_index_redesign_protocol.md
+```
