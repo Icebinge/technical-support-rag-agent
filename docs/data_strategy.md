@@ -462,6 +462,13 @@ The current PrimeQA/TechQA hybrid score-margin BM25 protocol freeze is recorded 
 docs/primeqa_hybrid_score_margin_bm25_protocol.md
 ```
 
+The current PrimeQA/TechQA hybrid score-margin BM25 train/dev comparison is
+recorded in:
+
+```text
+docs/primeqa_hybrid_score_margin_bm25_comparison.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:

@@ -23123,3 +23123,364 @@ git diff --check: passed
 Stage95：在用户确认后，运行 frozen train/dev-only `score_margin_bm25_normalization_gate_train_dev_v1` comparison。
 
 Stage95 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能用 dev-only 观察选择 runtime rule，不能改变 runtime 默认策略。
+
+## Stage95：运行 score-margin BM25 normalization gate train/dev comparison
+
+### 目标
+
+完成 Stage94 frozen protocol 的 train/dev-only 指标比较：
+
+- 使用 `score_margin_bm25_normalization_gate_train_dev_v1`。
+- 在 train 上按 frozen selection rule 选择 config。
+- 在 dev 上只做 validation，不用 dev 选择 config。
+- 验证 train-selected config 是否提升 dev hit@10。
+- 验证 train-selected config 是否减少 dev rank 11-50 near misses。
+- 确认 Stage82 dev-only `b=0.95` 观察没有被用作 runtime rule selection。
+- 不读取 test，不运行 final metrics，不使用 source `DOC_IDS`，不改变 runtime 默认策略。
+- 生成可视化并完整记录。
+
+### 新增文件
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_score_margin_bm25_comparison.py
+scripts/run_primeqa_hybrid_score_margin_bm25_comparison.py
+tests/test_primeqa_hybrid_score_margin_bm25_comparison.py
+docs/primeqa_hybrid_score_margin_bm25_comparison.md
+```
+
+### 更新文件
+
+```text
+docs/learning_journal.md
+docs/primeqa_hybrid_score_margin_bm25_protocol.md
+docs/primeqa_hybrid_section_signal_stop_decision.md
+docs/primeqa_hybrid_second_wave_retrieval_candidate_design.md
+docs/primeqa_hybrid_section_signal_comparison.md
+docs/primeqa_hybrid_section_signal_protocol.md
+docs/primeqa_hybrid_structured_query_comparison.md
+docs/primeqa_hybrid_structured_query_stop_decision.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+```
+
+### 执行命令
+
+```text
+python scripts\run_primeqa_hybrid_score_margin_bm25_comparison.py --user-confirmed-protocol --confirmed-protocol-id score_margin_bm25_normalization_gate_train_dev_v1 --confirmation-note "user confirmed Stage95 train/dev metric run in current turn" --output artifacts\primeqa_hybrid_score_margin_bm25_comparison_stage95.json --visualization-dir artifacts\primeqa_hybrid_score_margin_bm25_comparison_stage95_visuals *> artifacts\primeqa_hybrid_score_margin_bm25_comparison_stage95.console.txt
+```
+
+结果：
+
+```text
+stage: Stage 95
+confirmed_protocol_id: score_margin_bm25_normalization_gate_train_dev_v1
+shell timing: 87.7s
+```
+
+### 输入数据
+
+```text
+document_count: 28482
+average_document_token_count: 475.7771
+train rows: 562
+train answerable rows: 370
+dev rows: 121
+dev answerable rows: 76
+test_split_loaded: false
+```
+
+Stage95 只读取：
+
+```text
+artifacts\primeqa_hybrid_split_stage68_splits\primeqa_hybrid_split_stage68_train.jsonl
+artifacts\primeqa_hybrid_split_stage68_splits\primeqa_hybrid_split_stage68_dev.jsonl
+data\raw\primeqa\TechQA\training_and_dev\training_dev_technotes.sections.json
+artifacts\primeqa_hybrid_bm25_top10_miss_analysis_stage75.json
+artifacts\primeqa_hybrid_score_margin_bm25_protocol_stage94.json
+```
+
+没有读取 frozen test split。
+
+### Frozen configs
+
+```text
+smbn_rank11_20_long_doc_b095_margin_v1
+smbn_rank21_50_long_doc_b095_high_confidence_v1
+smbn_rank11_20_short_doc_b055_margin_v1
+smbn_rank11_50_dual_length_band_margin_v1
+```
+
+实现说明：
+
+- Numeric configs 先计算全 corpus challenger BM25 view，再按 frozen length gate 和 score-margin gate 判断 promotion eligibility。
+- Dual length-band config 使用 frozen branch rule：`<= 0.75` 用 `b=0.55`，`>= 1.35` 用 `b=0.95`。
+- 中间 length band 不作为 promotion eligible branch；未满足 frozen gate 的候选保持 baseline BM25 顺序。
+- 每个 config 每个 query 最多 promotion 1 个 rank 11-50 候选到 rank10。
+
+### Train metrics
+
+Baseline：
+
+```text
+full_document_bm25_baseline:
+  hit@1: 0.4243
+  hit@5: 0.6054
+  hit@10: 0.6622
+  MRR@10: 0.5023
+  MRR@50: 0.5061
+  not_found@50: 93
+  rank_11_to_50_count: 32
+```
+
+所有 frozen configs 的 train hit@10 和 rank 11-50 count 都与 baseline 相同：
+
+```text
+smbn_rank11_20_long_doc_b095_margin_v1:
+  hit@10_delta: +0.0000
+  rank_11_to_50_count_delta: 0
+  top10 improvements/regressions: 0 / 0
+  gate actions: 1
+
+smbn_rank21_50_long_doc_b095_high_confidence_v1:
+  hit@10_delta: +0.0000
+  rank_11_to_50_count_delta: 0
+  top10 improvements/regressions: 0 / 0
+  gate actions: 0
+
+smbn_rank11_20_short_doc_b055_margin_v1:
+  hit@10_delta: +0.0000
+  rank_11_to_50_count_delta: 0
+  top10 improvements/regressions: 0 / 0
+  gate actions: 4
+
+smbn_rank11_50_dual_length_band_margin_v1:
+  hit@10_delta: +0.0000
+  rank_11_to_50_count_delta: 0
+  top10 improvements/regressions: 0 / 0
+  gate actions: 4
+```
+
+Train-selected config：
+
+```text
+smbn_rank11_20_long_doc_b095_margin_v1
+```
+
+Train-selected comparison：
+
+```text
+hit@10_delta: +0.0000
+rank_11_to_50_count_delta: 0
+top10_improvement_count: 0
+top10_regression_count: 0
+search_depth_net_improvement_count: 0
+not_found_count_at_50_delta: 0
+score_margin_gate_promotion_count: 1
+```
+
+### Dev metrics
+
+Baseline：
+
+```text
+full_document_bm25_baseline:
+  hit@1: 0.4342
+  hit@5: 0.6579
+  hit@10: 0.6974
+  MRR@10: 0.5331
+  MRR@50: 0.5365
+  not_found@50: 17
+  rank_11_to_50_count: 6
+```
+
+所有 frozen configs 的 dev hit@10 和 rank 11-50 count 都与 baseline 相同：
+
+```text
+smbn_rank11_20_long_doc_b095_margin_v1:
+  hit@10_delta: +0.0000
+  rank_11_to_50_count_delta: 0
+  top10 improvements/regressions: 0 / 0
+  gate actions: 0
+
+smbn_rank21_50_long_doc_b095_high_confidence_v1:
+  hit@10_delta: +0.0000
+  rank_11_to_50_count_delta: 0
+  top10 improvements/regressions: 0 / 0
+  gate actions: 0
+
+smbn_rank11_20_short_doc_b055_margin_v1:
+  hit@10_delta: +0.0000
+  rank_11_to_50_count_delta: 0
+  top10 improvements/regressions: 0 / 0
+  gate actions: 2
+
+smbn_rank11_50_dual_length_band_margin_v1:
+  hit@10_delta: +0.0000
+  rank_11_to_50_count_delta: 0
+  top10 improvements/regressions: 0 / 0
+  gate actions: 1
+```
+
+Train-selected dev comparison：
+
+```text
+selected_config_id: smbn_rank11_20_long_doc_b095_margin_v1
+hit@10_delta: +0.0000
+rank_11_to_50_count_delta: 0
+top10_improvement_count: 0
+top10_regression_count: 0
+search_depth_net_improvement_count: 0
+not_found_count_at_50_delta: 0
+score_margin_gate_promotion_count: 0
+length_band_gate_count: 0
+```
+
+### Stage95 决策
+
+```text
+status: primeqa_hybrid_score_margin_bm25_comparison_completed
+selected_config_id: smbn_rank11_20_long_doc_b095_margin_v1
+selected_dev_hit10_delta: 0.0000
+selected_dev_rank_11_to_50_count_delta: 0
+selected_dev_top10_improvements: 0
+selected_dev_top10_regressions: 0
+selected_dev_score_margin_gate_promotion_count: 0
+primary_contract_passed: false
+secondary_contract_passed: false
+guard_contract_passed: true
+can_continue_train_dev_development: true
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+default_runtime_policy: unchanged
+```
+
+### Guard checks
+
+全部通过：
+
+```text
+23 / 23 passed
+```
+
+关键 guard：
+
+- analysis splits 只有 train/dev。
+- top_k values 包含 primary top10。
+- search_depth 覆盖 primary top10。
+- Stage94 report 确认为 Stage94。
+- Stage94 protocol id 和 candidate id 匹配。
+- 用户已确认 frozen protocol。
+- confirmed protocol id 匹配。
+- Stage94 允许用户确认后运行 train/dev metrics。
+- Stage94 final-test metrics locked。
+- Stage94 forbid test tuning。
+- Stage94 runtime default unchanged。
+- candidate config grid 匹配 frozen protocol。
+- Stage94 train selection rule 禁止 dev selection。
+- Stage94 train selection rule 禁止 Stage82 dev-only observation selection。
+- Stage82 historical signal 仅作为 motivation。
+- baseline train/dev hit@10 与 Stage75 一致。
+- source `DOC_IDS` 没有作为 runtime evidence 使用。
+- answer doc IDs 只作为 evaluation label 使用，不作为 runtime evidence。
+- changed-case fields public-safe。
+- final metrics not run。
+- runtime default unchanged。
+
+### 可视化产物
+
+```text
+artifacts\primeqa_hybrid_score_margin_bm25_comparison_stage95_visuals\stage95_score_margin_bm25_train_hit_at_10.svg
+artifacts\primeqa_hybrid_score_margin_bm25_comparison_stage95_visuals\stage95_score_margin_bm25_dev_hit_at_10.svg
+artifacts\primeqa_hybrid_score_margin_bm25_comparison_stage95_visuals\stage95_score_margin_bm25_dev_delta_hit_at_10.svg
+artifacts\primeqa_hybrid_score_margin_bm25_comparison_stage95_visuals\stage95_score_margin_bm25_dev_rank_11_to_50_delta.svg
+artifacts\primeqa_hybrid_score_margin_bm25_comparison_stage95_visuals\stage95_score_margin_bm25_dev_top10_changes.svg
+artifacts\primeqa_hybrid_score_margin_bm25_comparison_stage95_visuals\stage95_score_margin_bm25_dev_gate_actions.svg
+artifacts\primeqa_hybrid_score_margin_bm25_comparison_stage95_visuals\stage95_score_margin_bm25_guard_check_status.svg
+```
+
+Stage95 JSON SHA256：
+
+```text
+B712AFC1197DECD5EB50BB3471A58F0D0902AE35641B3C720AED855BC0CB3237
+```
+
+Visualization SHA256：
+
+```text
+stage95_score_margin_bm25_dev_delta_hit_at_10.svg: 78522CED909FF4E61C3A44847E204D061F8F218C6A3E586168C859FBBA4F43AF
+stage95_score_margin_bm25_dev_gate_actions.svg: D728CA8A8C70D571CD8BE14198B9347D4D1BCCEC1C1B18259116BE096566CC9F
+stage95_score_margin_bm25_dev_hit_at_10.svg: F98C235BF5040A7885EE9BDC276745E88064AC20D0E0670215B9B358583C68FD
+stage95_score_margin_bm25_dev_rank_11_to_50_delta.svg: 62EB74B362A245EC44E151F95602AA470CA1CB9A048BDC8AEEA0E44C51B471E4
+stage95_score_margin_bm25_dev_top10_changes.svg: 6FF10AD6FD8A0C30756DF8164F61AF450D7F84F65BED5FA7CD87ABF1F0C59A56
+stage95_score_margin_bm25_guard_check_status.svg: A6010A3B3B3FA954ECB94EC561AE583000C6CF4AD131B24666CCF4A86DEF5DD3
+stage95_score_margin_bm25_train_hit_at_10.svg: 646BEF677C7E8C3D023CC876DEC76A84E27CB43BE625D45A56C31AC506263F0C
+```
+
+### 问题、原因与修正
+
+- 问题 1：Stage95 需要实现 dual length-band challenger view。
+  - 原因：Stage94 frozen protocol 中 dual config 同时包含 short-doc 和 long-doc branch。
+  - 修正：实现 `mixed_length_band_view`，短文档分支使用 `b=0.55`，长文档分支使用 `b=0.95`，中间段候选不满足 frozen length gate，保持 baseline order。
+  - 影响：没有引入新的 threshold 或 dev-only 选择。
+
+- 问题 2：正式运行 console 输出较大。
+  - 原因：CLI 会输出 metrics、comparisons、guards 和 decision。
+  - 修正：将 console 输出保存到 `.console.txt` artifact，并用结构化 JSON 读取关键结果。
+  - 影响：artifact 被 `.gitignore` 忽略，不进入 git。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_score_margin_bm25_comparison.py scripts\run_primeqa_hybrid_score_margin_bm25_comparison.py tests\test_primeqa_hybrid_score_margin_bm25_comparison.py
+pytest -q tests\test_primeqa_hybrid_score_margin_bm25_comparison.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+产物安全检查：
+
+```text
+Select-String raw question / answer / document / snippet / query-term / section-text field patterns over Stage95 JSON: no matches
+git check-ignore Stage95 JSON, console, and SVG artifacts: ignored by .gitignore
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 250 passed
+git diff --check: passed
+```
+
+### 结论
+
+- Stage95 已运行 frozen score-margin BM25 normalization gate train/dev comparison。
+- Stage95 没有读取 test。
+- Stage95 没有运行 final metrics。
+- Stage95 没有使用 source `DOC_IDS` 作为 runtime 检索证据。
+- Stage95 没有使用 Stage82 dev-only `b=0.95` observation 选择 runtime rule。
+- Stage95 没有写出 raw question / answer / document / query terms。
+- Stage95 没有改变 runtime 默认策略。
+- train-selected config 在 dev 上没有任何 hit@10 或 rank 11-50 改善。
+- primary contract 和 secondary contract 都没有通过。
+- 该路线不能进入 runtime，也不能打开 final-test gate。
+
+### 我学到了
+
+- Stage82 的 length-normalization 信号在严格 train-selected gate 下几乎没有转化成可见收益。
+- 少量 promotion action 如果没有改变 answer doc 的 top10/search-depth rank，就不能视为有效召回改进。
+- 当前 second-wave 中多条“精细 gate”都无法突破 PrimeQA top10 blocker，下一步应该显式停止该路线，而不是继续加阈值。
+
+### 下一步
+
+Stage96：停止 score-margin BM25 normalization 作为 retrieval-recall route，除非用户明确确认一个新的 train/dev-only protocol；推荐转向 Stage84 队列中剩余的 `selective_dense_sparse_low_overlap_gate_design`。
+
+Stage96 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。
