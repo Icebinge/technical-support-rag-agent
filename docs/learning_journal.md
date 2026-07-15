@@ -26604,3 +26604,206 @@ test remains locked
 runtime defaults remain unchanged
 fallback strategies remain disabled
 ```
+
+## Stage110：记录 failure-pattern redesign family stop decision
+
+### 目标
+
+Stage110 不再跑新指标，而是把 Stage109 的真实结果正式转成 stop decision：
+
+```text
+all 7 configs failed train-CV selectability
+dev cannot rescue train-CV nonselectable configs
+test remains locked
+runtime defaults remain unchanged
+fallback strategies remain disabled
+```
+
+本阶段只读 Stage109 public-safe report，不读取 split 文件，不读取 corpus documents，不运行 retrieval / answer metrics。
+
+### 本阶段新增内容
+
+新增：
+
+```text
+src\ts_rag_agent\application\primeqa_hybrid_failure_pattern_redesign_stop_decision.py
+scripts\decide_primeqa_hybrid_failure_pattern_redesign_stop.py
+tests\test_primeqa_hybrid_failure_pattern_redesign_stop_decision.py
+docs\primeqa_hybrid_failure_pattern_redesign_stop_decision.md
+```
+
+更新：
+
+```text
+docs\data_strategy.md
+docs\evaluation_strategy.md
+docs\learning_journal.md
+```
+
+真实运行输出：
+
+```text
+artifacts\primeqa_hybrid_failure_pattern_redesign_stop_decision_stage110.json
+artifacts\primeqa_hybrid_failure_pattern_redesign_stop_decision_stage110_visuals\
+```
+
+### 真实 stop 证据
+
+Stage109 已确认：
+
+```text
+status: primeqa_hybrid_failure_pattern_redesign_completed_no_train_cv_selectable_config
+selected_config_id: null
+selectable_config_count: 0 / 7
+dev_validation_status: no_train_cv_selectable_config
+dev_validation_passed: false
+guard checks: 20 / 20 passed
+```
+
+Stage110 重新读取 Stage109 JSON 后记录：
+
+```text
+status: primeqa_hybrid_failure_pattern_redesign_family_stopped
+stopped_family_id: failure_pattern_redesign_candidate_family
+stopped_protocol_id: primeqa_hybrid_failure_pattern_redesign_protocol_v1
+stopped_analysis_id: primeqa_hybrid_failure_pattern_redesign_train_cv_dev_validation_v1
+current_route_defaultization: blocked
+redesign_required_before_any_runtime_or_test_gate: true
+recommended_next_direction: user_confirmed_next_research_direction_required
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+fallback_strategies_enabled: false
+default_runtime_policy: unchanged
+```
+
+### Family summary
+
+```text
+joint_support_gate_span_composer_candidate_v1:
+  configs: 2
+  train-CV selectable: 0
+  best train-CV delta: -199.65
+  best dev delta: -48.25
+  max answerable refusal delta: +0.3784
+
+context_present_span_composer_candidate_v1:
+  configs: 3
+  train-CV selectable: 0
+  best train-CV delta: -123.05
+  best dev delta: -47.15
+  max answerable refusal delta: +0.3027
+
+support_aware_answerability_gate_candidate_v1:
+  configs: 2
+  train-CV selectable: 0
+  best train-CV delta: -111.15
+  best dev delta: -24.75
+  max answerable refusal delta: +0.1919
+```
+
+解释：target-score improvement 是真实存在的，但它主要来自更强拒答；在 frozen guard 下不能推进。
+
+### Dev-improved but nonselectable
+
+以下 config 在 dev 上有 weighted target delta 改善，但都 train-CV nonselectable，不能从 dev 反选：
+
+| Config | Dev delta | Train-CV delta | Failed train-CV guards |
+| --- | ---: | ---: | --- |
+| jsgc_support2_evidence7_anchor_top2_v1 | -48.25 | -199.65 | answerable_refusal_rate_delta |
+| cpsc_title_query_anchor_top2_mcpd3_rank3_v1 | -47.15 | -123.05 | answerable_refusal_rate_delta |
+| jsgc_support2_evidence6_title_anchor_top2_v1 | -34.95 | -115.90 | answerable_refusal_rate_delta |
+| saag_support2_evidence7_rank3_v1 | -24.75 | -111.15 | answerable_refusal_rate_delta |
+| saag_support2_evidence6_rank5_v1 | -1.75 | -31.65 | answerable_refusal_rate_delta |
+| cpsc_anchor_top2_mcpd3_rank3_v1 | -0.30 | -28.50 | answerable_refusal_rate_delta, average_token_f1_drop, gold_doc_citation_rate_drop |
+
+No-op block：
+
+```text
+config_id: cpsc_anchor_top3_mcpd3_rank3_v1
+train_cv_weighted_target_delta: 0.0
+train_cv_changed_answer_count: 0
+failed_train_cv_guard: train_cv_weighted_target_delta_negative
+```
+
+### 可视化结果
+
+已生成：
+
+```text
+artifacts\primeqa_hybrid_failure_pattern_redesign_stop_decision_stage110_visuals\stage110_train_cv_weighted_target_deltas.svg
+artifacts\primeqa_hybrid_failure_pattern_redesign_stop_decision_stage110_visuals\stage110_dev_weighted_target_deltas.svg
+artifacts\primeqa_hybrid_failure_pattern_redesign_stop_decision_stage110_visuals\stage110_answerable_refusal_deltas.svg
+artifacts\primeqa_hybrid_failure_pattern_redesign_stop_decision_stage110_visuals\stage110_selectability_by_family.svg
+artifacts\primeqa_hybrid_failure_pattern_redesign_stop_decision_stage110_visuals\stage110_train_cv_guard_failure_reasons.svg
+artifacts\primeqa_hybrid_failure_pattern_redesign_stop_decision_stage110_visuals\stage110_stop_decision_flags.svg
+artifacts\primeqa_hybrid_failure_pattern_redesign_stop_decision_stage110_visuals\stage110_stop_guard_check_status.svg
+```
+
+### 问题、原因与修正
+
+- 问题 1：dev 上看起来仍有强改善 config。
+  - 原因：这些 config 全部 train-CV nonselectable，主要违反 answerable-refusal guard。
+  - 修正：Stage110 明确把它们记录为 `dev_improved_train_cv_nonselectable_configs`，只能作为失败证据，不能作为选择依据。
+- 问题 2：最强 train-CV target delta 容易被误读为“可推进”。
+  - 原因：`jsgc_support2_evidence7_anchor_top2_v1` 的 `-199.65` target delta 同时带来 `+0.3784` answerable refusal delta。
+  - 修正：Stage110 把 answerable refusal deltas 单独可视化，并在 stop reason 中明确该 family 停止。
+- 问题 3：stop decision 容易偷偷决定下一条实验路线。
+  - 原因：停止一个 family 后自然会想马上切到另一个策略。
+  - 修正：Stage110 只记录 `user_confirmed_next_research_direction_required`，不擅自选择 Stage111 路线。
+
+### 验证
+
+局部验证：
+
+```text
+python -m ruff check src\ts_rag_agent\application\primeqa_hybrid_failure_pattern_redesign_stop_decision.py scripts\decide_primeqa_hybrid_failure_pattern_redesign_stop.py tests\test_primeqa_hybrid_failure_pattern_redesign_stop_decision.py
+python -m pytest tests\test_primeqa_hybrid_failure_pattern_redesign_stop_decision.py -q
+python scripts\decide_primeqa_hybrid_failure_pattern_redesign_stop.py --user-confirmed-stop ...
+git diff --check
+```
+
+结果：
+
+```text
+targeted ruff: passed
+targeted pytest: 3 passed
+Stage110 run: passed
+guard checks: 27 / 27 passed
+git diff --check: passed
+```
+
+全仓验证：
+
+```text
+python -m ruff check .
+python -m pytest -q
+git diff --check
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 300 passed
+git diff --check: passed
+```
+
+### 我学到了
+
+- Stop decision 的职责不是“找一个还能救的 config”，而是把不能推进的事实边界固定下来。
+- dev-improved config 必须和 train-CV selectable config 分开看；否则很容易违反 train-first 规则。
+- 这轮失败不是没有 signal，而是 signal 的代价太高：它把 answerable 问题拒答得太多。
+- 下一步必须先让用户确认研究方向；Stage110 不能偷偷选择新路线。
+
+### 下一步
+
+Stage111：只有用户确认后，选择下一条 train/dev-only research direction。继续保持：
+
+```text
+test locked
+no final metrics
+no dev-only selection
+runtime defaults unchanged
+no fallback strategies
+```

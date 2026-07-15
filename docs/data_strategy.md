@@ -531,6 +531,48 @@ protocol freeze is recorded in:
 docs/primeqa_hybrid_evidence_answerability_comparison_protocol.md
 ```
 
+The current PrimeQA/TechQA hybrid evidence/answerability train/dev comparison
+is recorded in:
+
+```text
+docs/primeqa_hybrid_evidence_answerability_comparison.md
+```
+
+The current PrimeQA/TechQA hybrid evidence/answerability stop decision is
+recorded in:
+
+```text
+docs/primeqa_hybrid_evidence_answerability_stop_decision.md
+```
+
+The current PrimeQA/TechQA hybrid validation-failure pattern analysis is
+recorded in:
+
+```text
+docs/primeqa_hybrid_validation_failure_pattern_analysis.md
+```
+
+The current PrimeQA/TechQA hybrid failure-pattern redesign protocol freeze is
+recorded in:
+
+```text
+docs/primeqa_hybrid_failure_pattern_redesign_protocol.md
+```
+
+The current PrimeQA/TechQA hybrid failure-pattern redesign train-CV/dev
+comparison is recorded in:
+
+```text
+docs/primeqa_hybrid_failure_pattern_redesign_comparison.md
+```
+
+The current PrimeQA/TechQA hybrid failure-pattern redesign stop decision is
+recorded in:
+
+```text
+docs/primeqa_hybrid_failure_pattern_redesign_stop_decision.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:

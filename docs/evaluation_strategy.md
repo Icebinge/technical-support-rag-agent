@@ -803,3 +803,41 @@ recorded in:
 ```text
 docs/primeqa_hybrid_evidence_answerability_comparison_protocol.md
 ```
+
+The current Stage 105 evidence/answerability train/dev comparison is recorded
+in:
+
+```text
+docs/primeqa_hybrid_evidence_answerability_comparison.md
+```
+
+The current Stage 106 evidence/answerability stop decision is recorded in:
+
+```text
+docs/primeqa_hybrid_evidence_answerability_stop_decision.md
+```
+
+The current Stage 107 validation-failure pattern analysis is recorded in:
+
+```text
+docs/primeqa_hybrid_validation_failure_pattern_analysis.md
+```
+
+The current Stage 108 failure-pattern redesign protocol freeze is recorded in:
+
+```text
+docs/primeqa_hybrid_failure_pattern_redesign_protocol.md
+```
+
+The current Stage 109 failure-pattern redesign train-CV/dev comparison is
+recorded in:
+
+```text
+docs/primeqa_hybrid_failure_pattern_redesign_comparison.md
+```
+
+The current Stage 110 failure-pattern redesign stop decision is recorded in:
+
+```text
+docs/primeqa_hybrid_failure_pattern_redesign_stop_decision.md
+```
