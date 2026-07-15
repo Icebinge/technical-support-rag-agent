@@ -21652,3 +21652,297 @@ git diff --check: passed
 Stage90：停止 structured query keyphrase compaction 作为 retrieval-recall route，除非用户明确确认一个新的 train/dev-only protocol；推荐转向下一个 second-wave candidate protocol。
 
 Stage90 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。
+
+## 2026-07-15 - Stage90 structured query stop decision
+
+### 目标
+
+本阶段不是训练、不是调参、也不是 final-test 评估，而是一个明确的路线决策检查点：
+
+- 读取 Stage84 second-wave candidate design 和 Stage89 structured query train/dev comparison 的 public-safe 报告。
+- 在用户本轮确认后，停止 `structured_query_keyphrase_compaction_design` 作为当前 retrieval-recall 路线。
+- 从 Stage84 队列中剔除已经停止的 `lexical_cluster_diversity_rerank_design` 和本阶段停止的 structured query 路线。
+- 确认下一候选路线为 `section_signal_guarded_expansion_design`。
+- 继续锁定 test split，不跑 final metrics，不使用 source `DOC_IDS`，不改变 runtime 默认策略。
+
+### 新增和更新文件
+
+新增：
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_structured_query_stop_decision.py
+scripts/decide_primeqa_hybrid_structured_query_stop.py
+tests/test_primeqa_hybrid_structured_query_stop_decision.py
+docs/primeqa_hybrid_structured_query_stop_decision.md
+```
+
+更新：
+
+```text
+docs/primeqa_hybrid_structured_query_comparison.md
+docs/primeqa_hybrid_second_wave_retrieval_candidate_design.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+docs/learning_journal.md
+```
+
+### 真实运行命令
+
+```text
+python scripts\decide_primeqa_hybrid_structured_query_stop.py --user-confirmed-stop --confirmation-note "user confirmed Stage90 stop decision in current turn" --output artifacts\primeqa_hybrid_structured_query_stop_decision_stage90.json --visualization-dir artifacts\primeqa_hybrid_structured_query_stop_decision_stage90_visuals
+```
+
+运行耗时：
+
+```text
+total: 0.002s
+```
+
+### 输入证据
+
+Stage90 只读取 public-safe 报告：
+
+```text
+artifacts\primeqa_hybrid_second_wave_retrieval_candidate_design_stage84.json
+artifacts\primeqa_hybrid_structured_query_comparison_stage89.json
+```
+
+本阶段没有加载 train/dev/test split 文件，没有跑 retrieval metrics，也没有重新读取原始问题、答案或文档正文。
+
+### Stage89 依据
+
+Stage89 train-selected config：
+
+```text
+sqkc_title_guarded_action_error_v1
+```
+
+Stage89 selected query view：
+
+```text
+title_guarded_action_error_product_terms
+```
+
+Train 结果：
+
+```text
+hit@10_delta: -0.0027
+top10_improvement_count: 14
+top10_regression_count: 15
+```
+
+Dev 结果：
+
+```text
+hit@10_delta: -0.0527
+top10_improvement_count: 1
+top10_regression_count: 5
+rank_up_within_top10_count: 5
+rank_down_within_top10_count: 5
+not_found_count_at_50_delta: -1
+rank_11_to_50_count_delta: +5
+average_compacted_query_token_count_delta: -36.0921
+```
+
+Stage84 / Stage88 对这条路线的 metric contract：
+
+```text
+primary: train-selected dev hit@10 must improve over BM25 baseline
+secondary: top10 regression count must be lower than improvement count
+guard: no query view may be selected by dev-only performance
+```
+
+Stage89 实际结果：
+
+```text
+primary_contract_passed: false
+secondary_contract_passed: false
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+default_runtime_policy: unchanged
+```
+
+### Stage90 决策
+
+```text
+status: primeqa_hybrid_structured_query_route_stopped
+stopped_candidate_id: structured_query_keyphrase_compaction_design
+stopped_protocol_id: structured_query_keyphrase_compaction_train_dev_v1
+current_route_defaultization: blocked
+next_candidate_id: section_signal_guarded_expansion_design
+can_continue_train_dev_development: true
+requires_user_confirmation_before_next_protocol: true
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+default_runtime_policy: unchanged
+```
+
+停止原因：
+
+- train-selected structured-query config 明显压缩了 query。
+- 但它在 dev 上 `hit@10_delta = -0.0527`。
+- dev top10 regression `5` 多于 improvement `1`。
+- 这同时违反 primary contract 和 secondary contract。
+- 因此 structured query compaction 不能 runtime defaultization，也不能打开 final-test gate。
+
+### Stage84 队列状态
+
+原始 Stage84 执行顺序：
+
+```text
+lexical_cluster_diversity_rerank_design
+structured_query_keyphrase_compaction_design
+section_signal_guarded_expansion_design
+score_margin_bm25_normalization_gate_design
+selective_dense_sparse_low_overlap_gate_design
+```
+
+Stage87 已停止：
+
+```text
+lexical_cluster_diversity_rerank_design
+```
+
+Stage90 已停止：
+
+```text
+structured_query_keyphrase_compaction_design
+```
+
+Stage90 后剩余队列：
+
+```text
+section_signal_guarded_expansion_design
+score_margin_bm25_normalization_gate_design
+selective_dense_sparse_low_overlap_gate_design
+```
+
+下一候选：
+
+```text
+section_signal_guarded_expansion_design
+```
+
+### Guard checks
+
+全部通过：
+
+```text
+22 / 22 passed
+```
+
+关键 guard：
+
+- Stage84 报告确认为 Stage84。
+- Stage89 报告确认为 Stage89。
+- 用户已确认本轮 Stage90 stop decision。
+- Stage89 candidate id 和 protocol id 都匹配 structured query route。
+- Stage84 metric contract 确实要求 train-selected dev hit@10 improvement。
+- Stage89 primary contract failed。
+- Stage89 secondary contract failed。
+- Stage89 train-selected config 在 dev 上 hit@10 下降。
+- Stage89 dev top10 net 为负。
+- Stage89 final-test locked。
+- Stage89 forbid test tuning。
+- Stage89 runtime default unchanged。
+- Stage84 队列包含当前停止路线。
+- Stage90 后下一候选存在。
+- 已停止的 LCDR 没有重新进入 remaining queue。
+- `source_doc_ids_oracle_union_blocked` 没有被选为下一候选。
+- Stage90 没有跑新 retrieval metrics。
+- Stage90 没有跑 final-test metrics。
+- Stage90 没有改变 runtime default。
+
+### 可视化产物
+
+```text
+artifacts\primeqa_hybrid_structured_query_stop_decision_stage90_visuals\stage90_structured_query_train_dev_hit10_delta.svg
+artifacts\primeqa_hybrid_structured_query_stop_decision_stage90_visuals\stage90_structured_query_dev_change_counts.svg
+artifacts\primeqa_hybrid_structured_query_stop_decision_stage90_visuals\stage90_second_wave_remaining_candidate_priority.svg
+artifacts\primeqa_hybrid_structured_query_stop_decision_stage90_visuals\stage90_structured_query_stop_decision_flags.svg
+artifacts\primeqa_hybrid_structured_query_stop_decision_stage90_visuals\stage90_structured_query_stop_guard_check_status.svg
+```
+
+Stage90 JSON SHA256：
+
+```text
+E7A5B120B709E0802B352773ECE3561442943CAF6357C2F2075101A1765997B6
+```
+
+Visualization SHA256：
+
+```text
+stage90_second_wave_remaining_candidate_priority.svg: 246DC08BC22076751014FEC62C5A14DC1EBE3241C85C998CE0EC5B1CCF13AC35
+stage90_structured_query_dev_change_counts.svg: B45AF0F1E99202563CDCF085217A592AE55A93222B7F04AC3EF6706546F851B6
+stage90_structured_query_stop_decision_flags.svg: 15F5CC5415B8327F8B814441B9040BA13A0440D9C46744E7079E3B2BF6D18E22
+stage90_structured_query_stop_guard_check_status.svg: 7B39D1C0E041374C99F8467170CE0AC21BA45A042C2BD69DA4D6CBA31F9111BA
+stage90_structured_query_train_dev_hit10_delta.svg: D6A2093E2353AF37EEE5B3B4F228375136CBA7AAD5AB604E22BD6F2C1C98D012
+```
+
+### 问题、原因与修正
+
+- 问题：这一步容易被误解成又做了一次实验。
+  - 原因：Stage90 也会生成 JSON 和 SVG，但它们来自 Stage84 / Stage89 public-safe summary，不是新 retrieval run。
+  - 修正：在代码、文档和 guard check 中都明确 `stage90_no_new_retrieval_metrics_run = not_run`，并且命令只读取 Stage84 / Stage89 报告。
+  - 影响：路线决策可复现，但不会污染 train/dev/test 评估边界。
+
+- 问题：停止 structured query 后，需要避免把 Stage87 已停止的 LCDR 又放回队列。
+  - 原因：Stage84 原始队列仍包含 LCDR，如果只删除当前路线，会得到错误的 remaining queue。
+  - 修正：Stage90 显式维护 prior stopped candidate set，remaining queue 同时排除 LCDR 和 structured query。
+  - 影响：下一候选稳定为 `section_signal_guarded_expansion_design`。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_structured_query_stop_decision.py scripts\decide_primeqa_hybrid_structured_query_stop.py tests\test_primeqa_hybrid_structured_query_stop_decision.py
+pytest -q tests\test_primeqa_hybrid_structured_query_stop_decision.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+产物安全检查：
+
+```text
+Select-String raw question / answer / document / snippet / query-term field patterns over Stage90 JSON: no matches
+git check-ignore Stage90 JSON and SVG artifacts: ignored by .gitignore
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 235 passed
+git diff --check: passed
+```
+
+### 结论
+
+- Stage90 已停止 structured query keyphrase compaction route。
+- Stage90 没有加载 train/dev/test split。
+- Stage90 没有跑新 retrieval metrics。
+- Stage90 没有跑 final metrics。
+- Stage90 没有使用 source `DOC_IDS` 作为 runtime 检索证据。
+- Stage90 没有写出 raw question / raw answer / document text / query terms。
+- Stage90 没有改变 runtime 默认策略。
+- 下一候选是 `section_signal_guarded_expansion_design`。
+
+### 我学到了
+
+- 对失败路线的停止也应该是可复现工件，而不是口头结论；否则队列推进和 gate 状态容易在后续阶段丢失。
+- stop-decision 阶段不应补跑任何 retrieval 指标，只能使用已完成阶段的 public-safe summary。
+- 当候选队列跨多个阶段推进时，需要显式记录 prior stopped candidates，否则可能把已停止路线重新纳入下一步。
+
+### 下一步
+
+Stage91：确认并冻结 `section_signal_guarded_expansion_design` 的 train/dev-only protocol。
+
+Stage91 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。

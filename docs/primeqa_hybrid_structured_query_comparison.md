@@ -232,8 +232,11 @@ default_runtime_policy: unchanged
 
 ## Next Step
 
-Stage90 should stop structured query keyphrase compaction as a retrieval-recall
-route unless a new train/dev-only protocol is explicitly confirmed. The frozen
-test split remains locked, final metrics must not be run, source `DOC_IDS` must
-not be used as runtime retrieval evidence, and runtime defaults remain
-unchanged.
+Stage90 stopped structured query keyphrase compaction as a retrieval-recall
+route. The next candidate in the Stage84 queue is
+`section_signal_guarded_expansion_design`.
+
+The current next step is Stage91: confirm and freeze the train/dev-only
+protocol for `section_signal_guarded_expansion_design`. The frozen test split
+remains locked, final metrics must not be run, source `DOC_IDS` must not be used
+as runtime retrieval evidence, and runtime defaults remain unchanged.

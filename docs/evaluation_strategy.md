@@ -551,6 +551,8 @@ artifacts/primeqa_hybrid_structured_query_protocol_stage88.json
 artifacts/primeqa_hybrid_structured_query_protocol_stage88_visuals/
 artifacts/primeqa_hybrid_structured_query_comparison_stage89.json
 artifacts/primeqa_hybrid_structured_query_comparison_stage89_visuals/
+artifacts/primeqa_hybrid_structured_query_stop_decision_stage90.json
+artifacts/primeqa_hybrid_structured_query_stop_decision_stage90_visuals/
 ```
 
 The current Stage 67 protocol is recorded in:
@@ -689,4 +691,10 @@ The current Stage 89 structured query train/dev comparison is recorded in:
 
 ```text
 docs/primeqa_hybrid_structured_query_comparison.md
+```
+
+The current Stage 90 structured query stop decision is recorded in:
+
+```text
+docs/primeqa_hybrid_structured_query_stop_decision.md
 ```

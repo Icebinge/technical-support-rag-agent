@@ -229,8 +229,16 @@ regressions. Because the Stage88 target metric contract requires train-selected
 dev hit@10 to improve over BM25 baseline, structured query compaction does not
 advance to runtime.
 
-The current next step is Stage90: stop structured query keyphrase compaction as
-a retrieval-recall route unless a new train/dev-only protocol is explicitly
-confirmed. The frozen test split remains locked, final metrics must not be run,
-source `DOC_IDS` must not be used as runtime retrieval evidence, and runtime
-defaults remain unchanged.
+Stage90 stopped structured query keyphrase compaction as a retrieval-recall
+route and left runtime defaults unchanged. The remaining Stage84 queue is:
+
+```text
+section_signal_guarded_expansion_design
+score_margin_bm25_normalization_gate_design
+selective_dense_sparse_low_overlap_gate_design
+```
+
+The current next step is Stage91: confirm and freeze the train/dev-only
+protocol for `section_signal_guarded_expansion_design`. The frozen test split
+remains locked, final metrics must not be run, source `DOC_IDS` must not be used
+as runtime retrieval evidence, and runtime defaults remain unchanged.
