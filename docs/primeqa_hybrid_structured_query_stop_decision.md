@@ -227,8 +227,13 @@ score_margin_bm25_normalization_gate_design
 selective_dense_sparse_low_overlap_gate_design
 ```
 
-The current next step is Stage94: confirm and freeze the train/dev-only
-protocol for `score_margin_bm25_normalization_gate_design`. The frozen test
+Stage94 confirmed and froze the train/dev-only protocol for
+`score_margin_bm25_normalization_gate_design` as
+`score_margin_bm25_normalization_gate_train_dev_v1`. Stage94 did not run
+retrieval metrics and did not change runtime defaults.
+
+The current next step is Stage95: run the frozen train/dev-only score-margin
+BM25 normalization gate comparison after user confirmation. The frozen test
 split remains locked, final metrics must not be run, source `DOC_IDS` must not
-be used as runtime retrieval evidence, dev-only observations must not select
-runtime thresholds, and runtime defaults remain unchanged.
+be used as runtime retrieval evidence, Stage82 dev-only `b=0.95` observations
+must not select the runtime rule, and runtime defaults remain unchanged.

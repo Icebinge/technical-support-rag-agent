@@ -22814,3 +22814,312 @@ git diff --check: passed
 Stage94：确认并冻结 `score_margin_bm25_normalization_gate_design` 的 train/dev-only protocol。
 
 Stage94 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能用 dev-only 观察选择 runtime threshold，不能改变 runtime 默认策略。
+
+## Stage94：冻结 score-margin BM25 normalization gate protocol
+
+### 目标
+
+完成 Stage93 之后的下一候选 protocol-freeze：
+
+- 确认 `score_margin_bm25_normalization_gate_design` 是当前 Stage84 队列的下一候选。
+- 冻结一个 train/dev-only protocol，用于后续 Stage95 指标比较。
+- 明确 Stage82 的 dev-only `b=0.95` 观察只能作为设计动机，不能选择 runtime rule。
+- 明确 allowed runtime evidence 只能来自 BM25 score、rank、document length、gate state 等 runtime 特征。
+- 禁止 source `DOC_IDS`、answer document IDs、gold rank、dev-selected config、test membership 进入 runtime features。
+- 不加载 test，不运行 retrieval metrics，不运行 final metrics，不改变 runtime 默认策略。
+- 生成可视化并完整记录。
+
+### 新增文件
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_score_margin_bm25_protocol.py
+scripts/freeze_primeqa_hybrid_score_margin_bm25_protocol.py
+tests/test_primeqa_hybrid_score_margin_bm25_protocol.py
+docs/primeqa_hybrid_score_margin_bm25_protocol.md
+```
+
+### 更新文件
+
+```text
+docs/learning_journal.md
+docs/primeqa_hybrid_section_signal_stop_decision.md
+docs/primeqa_hybrid_second_wave_retrieval_candidate_design.md
+docs/primeqa_hybrid_section_signal_comparison.md
+docs/primeqa_hybrid_section_signal_protocol.md
+docs/primeqa_hybrid_structured_query_comparison.md
+docs/primeqa_hybrid_structured_query_stop_decision.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+```
+
+### 执行命令
+
+```text
+python scripts\freeze_primeqa_hybrid_score_margin_bm25_protocol.py --user-confirmed-candidate --confirmed-candidate-id score_margin_bm25_normalization_gate_design --confirmation-note "user confirmed Stage94 score-margin BM25 protocol freeze in current turn" --output artifacts\primeqa_hybrid_score_margin_bm25_protocol_stage94.json --visualization-dir artifacts\primeqa_hybrid_score_margin_bm25_protocol_stage94_visuals
+```
+
+结果：
+
+```text
+stage: Stage 94
+confirmed_candidate_id: score_margin_bm25_normalization_gate_design
+protocol_id: score_margin_bm25_normalization_gate_train_dev_v1
+timing total: 0.000s
+```
+
+### 输入证据
+
+Stage94 只读取公开安全报告：
+
+```text
+artifacts\primeqa_hybrid_second_wave_retrieval_candidate_design_stage84.json
+artifacts\primeqa_hybrid_section_signal_stop_decision_stage93.json
+```
+
+本阶段没有读取 frozen train/dev/test split 明细，没有运行 retrieval metrics，也没有运行 final metrics。
+
+### Stage84 候选契约
+
+```text
+candidate_id: score_margin_bm25_normalization_gate_design
+category: lexical_parameter_gate
+risk_level: medium
+implementation_readiness: 0.70
+priority_score: 171
+target_miss_count: 111
+target_miss_count_by_split:
+  train: 93
+  dev: 18
+```
+
+目标 rank bucket：
+
+```text
+not_found_top50: 73
+rank_11_to_20: 14
+rank_21_to_50: 24
+```
+
+Stage84 target metric contract：
+
+```text
+primary: train-selected rule must improve dev hit@10
+secondary: rank 11-50 near misses should decrease
+guard: dev-only b=0.95 observations cannot select a runtime rule
+```
+
+### Frozen protocol
+
+```text
+status: primeqa_hybrid_score_margin_bm25_protocol_frozen
+protocol_id: score_margin_bm25_normalization_gate_train_dev_v1
+candidate_id: score_margin_bm25_normalization_gate_design
+can_continue_train_dev_development: true
+requires_user_confirmation_before_train_dev_run: true
+can_run_train_dev_metrics_after_user_confirmation: true
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+default_runtime_policy: unchanged
+```
+
+### Candidate config grid
+
+```text
+smbn_rank11_20_long_doc_b095_margin_v1:
+  challenger BM25: k1=1.5, b=0.95
+  eligible baseline rank: 11-20
+  challenger rank max: 10
+  max score margin to rank10: 0.05
+  length gate: long_document_only, min length ratio 1.20
+  max top10 promotions per query: 1
+
+smbn_rank21_50_long_doc_b095_high_confidence_v1:
+  challenger BM25: k1=1.5, b=0.95
+  eligible baseline rank: 21-50
+  challenger rank max: 15
+  max score margin to rank10: 0.03
+  length gate: long_document_only, min length ratio 1.50
+  max top10 promotions per query: 1
+
+smbn_rank11_20_short_doc_b055_margin_v1:
+  challenger BM25: k1=1.5, b=0.55
+  eligible baseline rank: 11-20
+  challenger rank max: 10
+  max score margin to rank10: 0.04
+  length gate: short_document_only, max length ratio 0.85
+  max top10 promotions per query: 1
+
+smbn_rank11_50_dual_length_band_margin_v1:
+  challenger BM25: k1=1.5, b=0.55 for short docs and b=0.95 for long docs
+  eligible baseline rank: 11-50
+  challenger rank max: 12
+  max score margin to rank10: 0.02
+  length gate: outside_length_band_short_or_long
+  branch rule: use b=0.55 when length ratio <= 0.75; use b=0.95 when length ratio >= 1.35
+  max top10 promotions per query: 1
+```
+
+Train selection rule：
+
+```text
+Select the candidate config on train only by hit@10, then fewer rank 11-50 near misses,
+fewer top10 regressions, hit@5, hit@1, MRR@10, lower top10 promotion budget,
+then config_id. Dev is validation only.
+```
+
+### Runtime evidence contract
+
+允许特征：
+
+- baseline BM25 rank / score / score margin。
+- challenger BM25 rank / score / score margin。
+- document token count / average document token count / length ratio / length bucket。
+- gate eligibility bucket / challenger rank bucket / promotion budget / reason code。
+
+禁止特征：
+
+- source `DOC_IDS`。
+- answer document IDs。
+- gold rank / gold label。
+- dev-selected config。
+- Stage82 dev-selected b value。
+- frozen test split membership。
+- raw question / answer / document text。
+- raw document title。
+- query terms。
+- matched token strings。
+
+### Guard checks
+
+全部通过：
+
+```text
+31 / 31 passed
+```
+
+关键 guard：
+
+- Stage84 report 确认为 Stage84。
+- Stage93 report 确认为 Stage93。
+- 用户已确认 score-margin protocol。
+- Stage93 已停止 section-signal route。
+- confirmed candidate 匹配 Stage93 next candidate。
+- Stage93 要求 next protocol 前用户确认。
+- Stage93 final-test locked / gate closed / forbid test tuning。
+- Stage84 final-test locked / forbid test tuning / runtime unchanged。
+- Stage84 candidate status 为 recommended_for_train_dev_protocol_design。
+- Stage84 contract 要求 train-selected dev hit@10 gain。
+- Stage84 contract 要求 rank 11-50 near misses decrease。
+- Stage84 guard 明确禁止 dev-only b=0.95 选择 runtime rule。
+- protocol id 固定。
+- candidate config grid 固定且包含 4 个 predeclared configs。
+- 每个 config 都包含 rank、score-margin、length、promotion gate。
+- train selection rule 禁止 dev/test selection。
+- Stage82 historical signal 只作为 motivation。
+- score-margin feature contract 只允许 runtime score/rank/length features。
+- source `DOC_IDS` 和 answer document IDs 禁止进入 runtime features。
+- changed-case fields public-safe。
+- `source_doc_ids_oracle_union_blocked` 没有被选择。
+- Stage94 不运行 metrics。
+- Stage94 不运行 final-test metrics。
+- Stage94 runtime default unchanged。
+
+### 可视化产物
+
+```text
+artifacts\primeqa_hybrid_score_margin_bm25_protocol_stage94_visuals\stage94_score_margin_bm25_config_b_values.svg
+artifacts\primeqa_hybrid_score_margin_bm25_protocol_stage94_visuals\stage94_score_margin_bm25_margin_thresholds.svg
+artifacts\primeqa_hybrid_score_margin_bm25_protocol_stage94_visuals\stage94_score_margin_bm25_length_thresholds.svg
+artifacts\primeqa_hybrid_score_margin_bm25_protocol_stage94_visuals\stage94_score_margin_bm25_feature_group_counts.svg
+artifacts\primeqa_hybrid_score_margin_bm25_protocol_stage94_visuals\stage94_score_margin_bm25_protocol_decision_flags.svg
+artifacts\primeqa_hybrid_score_margin_bm25_protocol_stage94_visuals\stage94_score_margin_bm25_guard_check_status.svg
+```
+
+Stage94 JSON SHA256：
+
+```text
+FB6E8B0E8EDBA4BBB8C9DD6E684F4D807AE26CD91A658D3B0AA1F694B202F2E8
+```
+
+Visualization SHA256：
+
+```text
+stage94_score_margin_bm25_config_b_values.svg: 26849CE3714FD3FF04401D0127546E9D476244E80D8FBD1C537045724A0570FD
+stage94_score_margin_bm25_feature_group_counts.svg: B655D1A429489F430647550168428BB8B2D27551B72613C9F1AB2DE13F1B5187
+stage94_score_margin_bm25_guard_check_status.svg: 724AF26B2A06F6AB26E93C1CAA839CD058CE5CAB962528028355EB80CB56E6E5
+stage94_score_margin_bm25_length_thresholds.svg: 8F32B109D1BC082A314AE2EA76AB58B6139CB94F0BC9B77D0A160E743B1DC09C
+stage94_score_margin_bm25_margin_thresholds.svg: 660DEFEF47832B9768CC37212C4E5950E9FA95384CCCED601F7BFE4CADE18A2F
+stage94_score_margin_bm25_protocol_decision_flags.svg: 2F6DE073A1F41B240BF4890EFDD5713A103A011088F581920B4385BBE3093B72
+```
+
+### 问题、原因与修正
+
+- 问题 1：初版代码有 3 行 guard 表达式超过 ruff 行长限制。
+  - 原因：`any(...)` 表达式直接写在一行。
+  - 修正：拆成多行生成器表达式。
+  - 影响：逻辑不变，定向 ruff 随后通过。
+
+- 问题 2：dual-length config 的短文档/长文档分支一开始只写了 min/max length ratio，容易被误读成两个条件必须同时满足。
+  - 原因：字段缺少 `length_gate_mode` 和 branch rule。
+  - 修正：为所有 configs 增加 `length_gate_mode`；为 dual config 增加 `normalization_branch_rule`，明确 `<= 0.75` 用 `b=0.55`，`>= 1.35` 用 `b=0.95`。
+  - 影响：重新运行 Stage94，重新生成 JSON 和 SVG hashes。
+
+- 问题 3：dual config 的 b-value 可视化初版用 `0.75` 作为字符串型 b value 的数值条长度。
+  - 原因：为了能渲染 mixed label 做了临时 numeric value。
+  - 修正：如果字符串中包含 `0.95`，可视化条长使用 `0.95`，label 仍保留完整 branch rule。
+  - 影响：重新运行 Stage94 后，可视化语义更清楚。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_score_margin_bm25_protocol.py scripts\freeze_primeqa_hybrid_score_margin_bm25_protocol.py tests\test_primeqa_hybrid_score_margin_bm25_protocol.py
+pytest -q tests\test_primeqa_hybrid_score_margin_bm25_protocol.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+产物安全检查：
+
+```text
+Select-String raw question / answer / document / snippet / query-term / section-text field patterns over Stage94 JSON: no matches
+git check-ignore Stage94 JSON and SVG artifacts: ignored by .gitignore
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 247 passed
+git diff --check: passed
+```
+
+### 结论
+
+- Stage94 已冻结 `score_margin_bm25_normalization_gate_train_dev_v1`。
+- Stage94 没有读取 test。
+- Stage94 没有运行 retrieval metrics。
+- Stage94 没有运行 final metrics。
+- Stage94 没有使用 source `DOC_IDS` 作为 runtime 检索证据。
+- Stage94 没有使用 Stage82 dev-only `b=0.95` observation 选择 runtime rule。
+- Stage94 没有写出 raw question / answer / document / query terms。
+- Stage94 没有改变 runtime 默认策略。
+
+### 我学到了
+
+- Stage82 的 dev-only 信号不能直接转成参数选择，但可以转成 train-only protocol 的设计动机。
+- score-margin BM25 gate 必须把 rank gate、score-margin gate、length gate 和 promotion budget 一起冻结，否则下一阶段容易出现隐性调参。
+- mixed length-band rule 必须明确是 short/long 分支的 OR，而不是 min/max threshold 的 AND。
+
+### 下一步
+
+Stage95：在用户确认后，运行 frozen train/dev-only `score_margin_bm25_normalization_gate_train_dev_v1` comparison。
+
+Stage95 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能用 dev-only 观察选择 runtime rule，不能改变 runtime 默认策略。
