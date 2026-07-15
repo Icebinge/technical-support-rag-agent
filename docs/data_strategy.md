@@ -368,6 +368,13 @@ in:
 docs/primeqa_hybrid_dense_sparse_rrf_feasibility.md
 ```
 
+The current PrimeQA/TechQA hybrid dense+sparse RRF train/dev comparison is
+recorded in:
+
+```text
+docs/primeqa_hybrid_dense_sparse_rrf_comparison.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:

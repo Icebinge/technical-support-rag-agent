@@ -141,11 +141,14 @@ Stage 80 checked `dense_sparse_rrf_train_dev_probe` feasibility and found two
 compatible local dense caches. It did not run train/dev metrics and did not
 download models.
 
-The current next step is Stage 81, but it requires confirming the dense
-model/cache protocol first. The recommended option is
-`compare_existing_cached_dense_models`.
+Stage 81 ran the user-confirmed
+`compare_existing_cached_dense_models` protocol. It selected
+`dense_sparse_rrf__sentence_transformers_all_MiniLM_L6_v2__1600_noprefix` on
+train, but that challenger regressed dev hit@10 by `-0.0132`. The dense+sparse
+RRF route should not advance to a runtime/default policy change.
 
-Stage 81 must keep the frozen test split locked, must not run final test
-metrics, must not use source `DOC_IDS` as runtime retrieval evidence, must not
-download or choose dense retrieval dependencies silently, and must not change the
-default runtime policy.
+The current next step is Stage 82: run the remaining
+`bm25_k1_b_grid_train_to_dev` candidate on train/dev only. Stage82 must keep the
+frozen test split locked, must not run final test metrics, must not use source
+`DOC_IDS` as runtime retrieval evidence, and must not change the default runtime
+policy.

@@ -533,6 +533,8 @@ artifacts/primeqa_hybrid_section_bm25_doc_rollup_stage79.json
 artifacts/primeqa_hybrid_section_bm25_doc_rollup_stage79_visuals/
 artifacts/primeqa_hybrid_dense_sparse_rrf_feasibility_stage80.json
 artifacts/primeqa_hybrid_dense_sparse_rrf_feasibility_stage80_visuals/
+artifacts/primeqa_hybrid_dense_sparse_rrf_comparison_stage81.json
+artifacts/primeqa_hybrid_dense_sparse_rrf_comparison_stage81_visuals/
 ```
 
 The current Stage 67 protocol is recorded in:
@@ -617,4 +619,10 @@ The current Stage 80 dense+sparse RRF feasibility check is recorded in:
 
 ```text
 docs/primeqa_hybrid_dense_sparse_rrf_feasibility.md
+```
+
+The current Stage 81 dense+sparse RRF train/dev comparison is recorded in:
+
+```text
+docs/primeqa_hybrid_dense_sparse_rrf_comparison.md
 ```

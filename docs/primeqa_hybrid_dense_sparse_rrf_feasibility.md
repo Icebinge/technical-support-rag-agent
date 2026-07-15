@@ -193,17 +193,18 @@ can_use_test_for_tuning: false
 default_runtime_policy: unchanged
 ```
 
-## Next Step
+## Next Step Status
 
-Stage 81 should run only after the dense model/cache protocol is confirmed.
+Stage81 was run after the user confirmed the recommended Stage80 option:
+`compare_existing_cached_dense_models`.
 
-Recommended Stage81 option:
+Stage81 compared both compatible local dense caches on train/dev only, selected
+on train, and validated on dev. It kept the frozen test split locked, avoided
+source `DOC_IDS` as runtime retrieval evidence, did not run final test metrics,
+did not download models, and did not change runtime defaults.
+
+The Stage81 record is:
 
 ```text
-compare_existing_cached_dense_models
+docs\primeqa_hybrid_dense_sparse_rrf_comparison.md
 ```
-
-This would run a train/dev-only dense+sparse RRF comparison across the two
-existing local dense caches, select by train, and validate on dev. It must keep
-the frozen test split locked, avoid source `DOC_IDS` as runtime retrieval
-evidence, not run final test metrics, and not download models silently.

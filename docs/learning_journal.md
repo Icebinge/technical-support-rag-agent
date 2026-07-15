@@ -19543,3 +19543,176 @@ Stage81 需要先确认 dense model/cache protocol。
 推荐选项：`compare_existing_cached_dense_models`。
 
 该路线会在 Stage81 用两个已存在本地 cache 跑 train/dev-only dense+sparse RRF，对比后按 train 选择、dev 验证；仍然不碰 test、不跑 final metrics、不使用 source `DOC_IDS`、不下载模型。
+
+## Stage81：dense+sparse RRF train/dev 对比
+时间：2026-07-15
+
+### 目标
+
+按用户确认的 Stage80 A 路线运行：`compare_existing_cached_dense_models`。
+
+本阶段只比较 Stage80 已确认的两个本地 dense cache：
+- `intfloat/e5-small-v2`
+- `sentence-transformers/all-MiniLM-L6-v2`
+
+边界：
+- 只跑 train/dev；
+- 不读取 test split；
+- 不运行 final test metrics；
+- 不使用 source `DOC_IDS` 作为 runtime 检索证据；
+- 不下载模型；
+- 不改变 runtime 默认策略。
+
+### 我做了什么
+
+新增实现：
+
+```text
+src\ts_rag_agent\application\primeqa_hybrid_dense_sparse_rrf_comparison.py
+scripts\run_primeqa_hybrid_dense_sparse_rrf_comparison.py
+tests\test_primeqa_hybrid_dense_sparse_rrf_comparison.py
+docs\primeqa_hybrid_dense_sparse_rrf_comparison.md
+```
+
+真实运行命令：
+
+```text
+$env:HF_HUB_OFFLINE='1'
+python scripts\run_primeqa_hybrid_dense_sparse_rrf_comparison.py `
+  --output artifacts\primeqa_hybrid_dense_sparse_rrf_comparison_stage81.json `
+  --visualization-dir artifacts\primeqa_hybrid_dense_sparse_rrf_comparison_stage81_visuals
+```
+
+运行耗时：
+
+```text
+total: 385.456s
+```
+
+### 真实结果
+
+train：
+
+```text
+baseline hit@10: 0.6622
+e5-small-v2 RRF hit@10: 0.6703, delta +0.0081
+all-MiniLM-L6-v2 RRF hit@10: 0.6973, delta +0.0351
+```
+
+dev：
+
+```text
+baseline hit@10: 0.6974
+e5-small-v2 RRF hit@10: 0.6711, delta -0.0263
+all-MiniLM-L6-v2 RRF hit@10: 0.6842, delta -0.0132
+```
+
+按 train-only 选择规则，Stage81 选中：
+
+```text
+dense_sparse_rrf__sentence_transformers_all_MiniLM_L6_v2__1600_noprefix
+```
+
+但该 train-selected challenger 在 dev 上没有通过：
+
+```text
+selected dev hit@10 delta: -0.0132
+selected dev top10 improvements/regressions: 3 / 4
+selected dev not_found@50 delta: -6
+```
+
+补充观察：
+- dense+sparse RRF 明显降低 top50 not-found 数量；
+- e5-small-v2 在 dev hit@1 和 MRR@10 上变好；
+- 但主指标 hit@10 在 dev 上回退，所以不能推进 runtime/default 策略。
+
+### Guard checks
+
+全部通过：
+
+```text
+analysis_splits_are_train_dev_only
+top_k_values_include_primary_top10
+search_depth_covers_primary_top10
+stage75_source_report_is_stage75
+stage80_source_report_is_stage80
+stage80_can_run_dense_sparse_rrf_without_download
+stage80_requires_user_confirmation_before_train_dev_run
+user_confirmed_protocol_matches_stage80_option
+selected_cache_count_matches_compare_protocol
+dense_cache_files_exist
+dense_cache_metadata_matches_stage80
+dense_cache_document_ids_match_current_corpus
+dense_cache_embedding_rows_match_current_corpus
+query_prefix_protocol_resolved_from_stage80
+local_model_snapshots_exist
+baseline_train_hit10_matches_stage75
+baseline_dev_hit10_matches_stage75
+no_model_download_attempted
+source_doc_ids_not_used_as_runtime_evidence
+final_test_metrics_not_run
+default_runtime_policy_unchanged
+```
+
+### 可视化产物
+
+```text
+artifacts\primeqa_hybrid_dense_sparse_rrf_comparison_stage81_visuals\stage81_dense_sparse_rrf_train_hit_at_10.svg
+artifacts\primeqa_hybrid_dense_sparse_rrf_comparison_stage81_visuals\stage81_dense_sparse_rrf_dev_hit_at_10.svg
+artifacts\primeqa_hybrid_dense_sparse_rrf_comparison_stage81_visuals\stage81_dense_sparse_rrf_dev_delta_hit_at_10.svg
+artifacts\primeqa_hybrid_dense_sparse_rrf_comparison_stage81_visuals\stage81_dense_sparse_rrf_dev_not_found_at_50.svg
+artifacts\primeqa_hybrid_dense_sparse_rrf_comparison_stage81_visuals\stage81_dense_sparse_rrf_dev_top10_changes.svg
+```
+
+Stage81 JSON SHA256：
+
+```text
+56AFBE70545C05780631750EE39B9DBC2B41B26BFD310D5997F60448FB3B4C03
+```
+
+### 问题、原因与修正
+
+- 问题 1：不能静默决定 dense query prefix。
+  - 原因：E5 模型通常需要 `query: ` 前缀，all-MiniLM 不需要；如果随意选择，会污染实验结论。
+  - 修正：Stage81 从 Stage80 legacy dense metric 中解析 query prefix；解析不到就阻断，不兜底。
+- 问题 2：dense+sparse RRF 在 train 上更好，但 dev 主指标回退。
+  - 原因：dense 信号能补回一些 top50 召回，但 RRF 同时会把部分 BM25 已命中的 top10 文档推出 top10。
+  - 修正：保留 train/dev 分离判断，不因 train 提升或 top50 not-found 下降而推进 runtime/default。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_dense_sparse_rrf_comparison.py scripts\run_primeqa_hybrid_dense_sparse_rrf_comparison.py tests\test_primeqa_hybrid_dense_sparse_rrf_comparison.py
+pytest -q tests\test_primeqa_hybrid_dense_sparse_rrf_comparison.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 2 passed
+```
+
+### 结论
+
+- Stage81 已完成 dense+sparse RRF train/dev 对比。
+- Stage81 没有使用 test。
+- Stage81 没有运行 final test metrics。
+- Stage81 没有使用 source `DOC_IDS` 作为 runtime 检索证据。
+- Stage81 没有下载模型。
+- 默认 runtime policy 保持 unchanged。
+- dense+sparse RRF route 不能推进：train-selected challenger 的 dev hit@10 delta 为 `-0.0132`。
+
+### 我学到了
+
+- top50 not-found 下降不等于 top10 主指标变好；召回更深的位置有改善，但排序融合仍可能损失可交付的 top10 命中。
+- train-only selection 必须严格执行；即使 train hit@10 提升明显，只要 dev 未验证，就不能进入 runtime/default 策略。
+- query-prefix 协议本身就是实验条件，必须记录来源，不能作为隐形实现细节。
+
+### 下一步
+
+Stage82：进入 Stage76 剩余候选 `bm25_k1_b_grid_train_to_dev`。
+
+Stage82 仍然只能使用 train/dev，不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。
