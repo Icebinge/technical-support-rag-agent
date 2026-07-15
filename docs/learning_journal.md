@@ -26092,3 +26092,237 @@ no dev-only selection
 runtime defaults unchanged
 no fallback strategies
 ```
+
+## Stage108：冻结 failure-pattern-driven redesign protocol
+
+### 目标
+
+按 Stage107 的结论继续下一步，但本阶段只做 protocol freeze，不跑指标、不实现 runtime、不打开 test gate。Stage108 的边界：
+
+```text
+只读 Stage107 public-safe report
+不读取 train/dev/test split 文件
+不读取 corpus documents
+不重新运行 retrieval metrics
+不重新运行 answer metrics
+不运行 final test metrics
+不从 dev-only observations 反选 config
+不改 runtime default
+不加入 fallback strategy
+```
+
+### 新增内容
+
+代码：
+
+```text
+src\ts_rag_agent\application\primeqa_hybrid_failure_pattern_redesign_protocol.py
+scripts\freeze_primeqa_hybrid_failure_pattern_redesign_protocol.py
+tests\test_primeqa_hybrid_failure_pattern_redesign_protocol.py
+```
+
+文档：
+
+```text
+docs\primeqa_hybrid_failure_pattern_redesign_protocol.md
+docs\learning_journal.md
+```
+
+本地产物：
+
+```text
+artifacts\primeqa_hybrid_failure_pattern_redesign_protocol_stage108.json
+artifacts\primeqa_hybrid_failure_pattern_redesign_protocol_stage108.console.txt
+artifacts\primeqa_hybrid_failure_pattern_redesign_protocol_stage108_visuals\stage108_candidate_family_priorities.svg
+artifacts\primeqa_hybrid_failure_pattern_redesign_protocol_stage108_visuals\stage108_candidate_config_counts.svg
+artifacts\primeqa_hybrid_failure_pattern_redesign_protocol_stage108_visuals\stage108_target_bucket_weights.svg
+artifacts\primeqa_hybrid_failure_pattern_redesign_protocol_stage108_visuals\stage108_train_cv_guard_thresholds.svg
+artifacts\primeqa_hybrid_failure_pattern_redesign_protocol_stage108_visuals\stage108_protocol_decision_flags.svg
+artifacts\primeqa_hybrid_failure_pattern_redesign_protocol_stage108_visuals\stage108_guard_check_status.svg
+```
+
+### 真实运行命令
+
+```text
+python scripts\freeze_primeqa_hybrid_failure_pattern_redesign_protocol.py --user-confirmed-protocol --confirmation-note "user confirmed Stage108 failure-pattern redesign protocol freeze on 2026-07-16 after Stage107 validation-failure analysis; test locked; runtime defaults unchanged; no fallback strategies"
+```
+
+真实运行结果：
+
+```text
+exit_code: 0
+guard_checks: 23 / 23 passed
+```
+
+### Stage107 依据
+
+Stage108 只使用 Stage107 的 public-safe aggregate findings：
+
+```text
+dev_failure_count: 117
+dev_failure_rate: 0.9669
+answerable_failure_rate: 1.0
+unanswerable_false_answer_rate: 0.9111
+answerable_gold_context_absent_rate: 0.3026
+context_present_gold_span_beats_selected_rate: 0.7736
+context_present_evidence_selection_miss_rate: 0.2264
+stage105_selected_config_was_dev_noop: true
+stage105_dev_better_nonselectable_config_count: 7
+```
+
+核心设计判断：
+
+```text
+retrieval miss 仍存在，但 53 个 answerable dev rows 的 gold context 已经在 top10 中，
+仍全部在 evidence selection 或 answer composition 阶段失败。
+所以 Stage109 先比较 answer-pipeline redesign，同时把 retrieval_context_miss 作为监控边界。
+```
+
+### 冻结候选族
+
+Stage108 冻结 3 个 candidate families，合计 7 个 configs：
+
+```text
+support_aware_answerability_gate_candidate_v1: 2 configs
+context_present_span_composer_candidate_v1: 3 configs
+joint_support_gate_span_composer_candidate_v1: 2 configs
+```
+
+具体 config：
+
+```text
+saag_support2_evidence7_rank3_v1
+saag_support2_evidence6_rank5_v1
+cpsc_anchor_top2_mcpd3_rank3_v1
+cpsc_anchor_top3_mcpd3_rank3_v1
+cpsc_title_query_anchor_top2_mcpd3_rank3_v1
+jsgc_support2_evidence7_anchor_top2_v1
+jsgc_support2_evidence6_title_anchor_top2_v1
+```
+
+这些 config 不复用已经停止的 Stage104 config IDs（`amg_*`, `ewr_*`, `jgw_*`），也不是 runtime default，只是 Stage109 的 comparison grid。
+
+### Train selection 规则
+
+Stage109 必须使用 train grouped CV 选择：
+
+```text
+selection_split: train
+selection_mode: train_grouped_cross_validation_then_full_train_refit
+train_cv_fold_count: 5
+dev_config_selection_allowed: false
+dev_threshold_tuning_allowed: false
+test_access_allowed: false
+```
+
+Train-CV objective：
+
+```text
+1.75 * answerability_false_answer
+1.80 * gold_span_beats_selected_answer
+1.50 * evidence_selection_miss
+```
+
+No-op candidate 不可选：
+
+```text
+requires_negative_train_cv_weighted_delta: true
+no_op_candidate_selectable: false
+```
+
+### Guard
+
+Stage109 train-CV selectability guards：
+
+```text
+max_train_cv_answerable_refusal_rate_delta: 0.02
+max_train_cv_average_token_f1_drop: 0.005
+max_train_cv_gold_doc_citation_rate_drop: 0.015
+max_train_cv_retrieval_context_miss_delta: 0
+```
+
+Dev validation 规则：
+
+```text
+validation_split: dev
+validated_item: single train-CV-selected config
+dev_selection_allowed: false
+dev_retuning_allowed: false
+dev_threshold_tuning_allowed: false
+test_access_allowed: false
+```
+
+### 决策
+
+```text
+status: primeqa_hybrid_failure_pattern_redesign_protocol_frozen
+protocol_id: primeqa_hybrid_failure_pattern_redesign_protocol_v1
+recommended_next_direction: run_failure_pattern_redesign_train_cv_dev_validation
+candidate_family_count: 3
+candidate_config_count: 7
+train_selection_mode: train_grouped_cross_validation_then_full_train_refit
+can_run_train_dev_comparison_after_user_confirmation: true
+can_continue_train_dev_development: true
+requires_user_confirmation_before_train_dev_run: true
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+fallback_strategies_enabled: false
+default_runtime_policy: unchanged
+```
+
+结论：Stage108 是协议冻结，不支持 runtime defaultization，也不能打开 final-test gate。
+
+### 问题、原因与修正
+
+- 问题 1：Stage107 显示 dev 失败很强，但不能直接把 dev 观察转成 config 选择。
+  - 原因：dev 仍然只能做 validation；直接按 dev 现象挑阈值会变成 dev selection。
+  - 修正：Stage108 把 Stage109 选择规则改为 train grouped CV，只允许 dev 做一次 validation。
+- 问题 2：Stage105 的 train-selectable config 是 no-op。
+  - 原因：原协议允许“通过 guard 但 target delta 为 0”的 config 进入 dev validation。
+  - 修正：Stage108 明确 `requires_negative_train_cv_weighted_delta: true` 和 `no_op_candidate_selectable: false`。
+- 问题 3：Stage105 aggressive configs 在 dev 上更好，但 train guard 风险明显。
+  - 原因：它们主要违反 answerable-refusal guard，部分还违反 gold-citation guard。
+  - 修正：Stage108 把 train-CV answerable refusal 和 citation guard 收紧，并要求 Stage109 报告这些风险。
+- 问题 4：retrieval_context_miss 仍存在，但本阶段不是重启 retrieval 路线。
+  - 原因：Stage84 第二波 retrieval candidate queue 已经耗尽；Stage107 同时说明 context-present answer pipeline failure 更突出。
+  - 修正：Stage108 把 retrieval_context_miss 定为 monitored boundary，不把它作为当前 answer-pipeline redesign 的直接 target。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_failure_pattern_redesign_protocol.py scripts\freeze_primeqa_hybrid_failure_pattern_redesign_protocol.py tests\test_primeqa_hybrid_failure_pattern_redesign_protocol.py
+pytest -q tests\test_primeqa_hybrid_failure_pattern_redesign_protocol.py
+python scripts\freeze_primeqa_hybrid_failure_pattern_redesign_protocol.py --user-confirmed-protocol ...
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 4 passed
+Stage108 run: passed
+guard checks: 23 / 23 passed
+```
+
+### 我学到了
+
+- “找出失败规律”之后不能马上实现一个看起来合理的策略；必须先冻结选择口径，尤其要防止 dev 反选。
+- 这一次必须把 train grouped CV 写进协议，因为 Stage105 已经证明单次 train selection 容易选到 no-op。
+- No-op 不应再被视为可推进候选：没有负向 train-CV target delta 的 config 不能进入 dev validation。
+- 当前设计应优先处理 context-present 的 answer pipeline failure，同时继续监控 retrieval_context_miss，避免把 retrieval 和 answer pipeline 两条问题线混在一起。
+
+### 下一步
+
+Stage109：在用户确认后，实现 Stage108 冻结的 candidate components，并运行 train grouped-CV + dev validation comparison。Stage109 必须继续保持：
+
+```text
+test locked
+no final metrics
+train-CV selection only
+dev validation only
+runtime defaults unchanged
+no fallback strategies
+```
