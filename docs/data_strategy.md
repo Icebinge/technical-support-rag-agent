@@ -450,6 +450,12 @@ recorded in:
 docs/primeqa_hybrid_section_signal_comparison.md
 ```
 
+The current PrimeQA/TechQA hybrid section signal stop decision is recorded in:
+
+```text
+docs/primeqa_hybrid_section_signal_stop_decision.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:

@@ -248,8 +248,16 @@ comparison. The train-selected config was
 `ssgx_section_top50_injection_guard_v1`, but it had dev hit@10 delta `0.0000`
 and dev search-depth net improvement `0`, so the route does not advance.
 
-The current next step is Stage93: stop section signal guarded expansion as a
-retrieval-recall route unless a new train/dev-only protocol is explicitly
-confirmed. The frozen test split remains locked, final metrics must not be run,
-source `DOC_IDS` must not be used as runtime retrieval evidence, and runtime
-defaults remain unchanged.
+Stage93 stopped section signal guarded expansion as a retrieval-recall route
+and left runtime defaults unchanged. The remaining Stage84 queue is:
+
+```text
+score_margin_bm25_normalization_gate_design
+selective_dense_sparse_low_overlap_gate_design
+```
+
+The current next step is Stage94: confirm and freeze the train/dev-only
+protocol for `score_margin_bm25_normalization_gate_design`. The frozen test
+split remains locked, final metrics must not be run, source `DOC_IDS` must not
+be used as runtime retrieval evidence, dev-only observations must not select
+runtime thresholds, and runtime defaults remain unchanged.

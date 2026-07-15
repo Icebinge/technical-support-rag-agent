@@ -557,6 +557,8 @@ artifacts/primeqa_hybrid_section_signal_protocol_stage91.json
 artifacts/primeqa_hybrid_section_signal_protocol_stage91_visuals/
 artifacts/primeqa_hybrid_section_signal_comparison_stage92.json
 artifacts/primeqa_hybrid_section_signal_comparison_stage92_visuals/
+artifacts/primeqa_hybrid_section_signal_stop_decision_stage93.json
+artifacts/primeqa_hybrid_section_signal_stop_decision_stage93_visuals/
 ```
 
 The current Stage 67 protocol is recorded in:
@@ -713,4 +715,10 @@ The current Stage 92 section signal train/dev comparison is recorded in:
 
 ```text
 docs/primeqa_hybrid_section_signal_comparison.md
+```
+
+The current Stage 93 section signal stop decision is recorded in:
+
+```text
+docs/primeqa_hybrid_section_signal_stop_decision.md
 ```

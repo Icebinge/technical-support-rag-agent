@@ -22521,3 +22521,296 @@ git diff --check: passed
 Stage93：停止 section signal guarded expansion 作为 retrieval-recall route，除非用户明确确认一个新的 train/dev-only protocol；推荐转向下一个 second-wave candidate protocol。
 
 Stage93 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能改变 runtime 默认策略。
+
+## Stage93：停止 section signal guarded expansion 路线，并确认下一候选
+
+### 目标
+
+完成 Stage92 之后的路线停止决策：
+
+- 不再继续把 `section_signal_guarded_expansion_design` 作为 retrieval-recall runtime 候选推进。
+- 明确该路线不能 defaultize，不能打开 final-test gate。
+- 从 Stage84 second-wave 队列中移除已经停止的路线。
+- 确认下一条可推进候选为 `score_margin_bm25_normalization_gate_design`。
+- 继续保持 test split 锁定，不运行 final metrics。
+- 不使用 source `DOC_IDS` 作为 runtime 检索证据。
+- 不改变 runtime 默认策略。
+- 为停止决策生成可视化和完整记录。
+
+### 新增文件
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_section_signal_stop_decision.py
+scripts/decide_primeqa_hybrid_section_signal_stop.py
+tests/test_primeqa_hybrid_section_signal_stop_decision.py
+docs/primeqa_hybrid_section_signal_stop_decision.md
+```
+
+### 更新文件
+
+```text
+docs/learning_journal.md
+docs/primeqa_hybrid_section_signal_comparison.md
+docs/primeqa_hybrid_section_signal_protocol.md
+docs/primeqa_hybrid_second_wave_retrieval_candidate_design.md
+docs/primeqa_hybrid_structured_query_comparison.md
+docs/primeqa_hybrid_structured_query_stop_decision.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+```
+
+### 执行命令
+
+```text
+python scripts\decide_primeqa_hybrid_section_signal_stop.py --user-confirmed-stop --confirmation-note "user confirmed Stage93 stop decision in current turn" --output artifacts\primeqa_hybrid_section_signal_stop_decision_stage93.json --visualization-dir artifacts\primeqa_hybrid_section_signal_stop_decision_stage93_visuals
+```
+
+结果：
+
+```text
+stage: Stage 93
+route_id: section_signal_stop_decision
+confirmed: true
+timing total: 0.007s
+```
+
+### 输入证据
+
+Stage93 只读取公开安全报告：
+
+```text
+artifacts\primeqa_hybrid_second_wave_retrieval_candidate_design_stage84.json
+artifacts\primeqa_hybrid_section_signal_comparison_stage92.json
+```
+
+本阶段没有读取 frozen test split，没有读取 train/dev split 明细，没有运行新 retrieval metrics，也没有运行 final metrics。
+
+### Stage92 依据
+
+Stage92 train-selected config：
+
+```text
+ssgx_section_top50_injection_guard_v1
+```
+
+Train evidence：
+
+```text
+train hit@10 delta: +0.0000
+train search-depth net improvement: +1
+train top10 improvements: 1
+train top10 regressions: 1
+train section-signal promotions: 92
+```
+
+Dev evidence：
+
+```text
+dev hit@10 delta: +0.0000
+dev search-depth net improvement: 0
+dev top10 improvements: 0
+dev top10 regressions: 0
+dev not-found@50 delta: 0
+dev rank 11-50 delta: 0
+dev section-signal promotions: 22
+dev protected top10 demotion actions: 22
+```
+
+Stage84/Stage91 目标契约：
+
+```text
+primary: dev hit@10 must improve over BM25 baseline
+secondary: search-depth improvements must exceed regressions
+guard: section signal must not demote existing BM25 top10 hits by default
+```
+
+### 决策
+
+```text
+status: primeqa_hybrid_section_signal_route_stopped
+stopped_candidate_id: section_signal_guarded_expansion_design
+stopped_protocol_id: section_signal_guarded_expansion_train_dev_v1
+current_route_defaultization: blocked
+next_candidate_id: score_margin_bm25_normalization_gate_design
+can_continue_train_dev_development: true
+requires_user_confirmation_before_next_protocol: true
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+default_runtime_policy: unchanged
+```
+
+停止原因：
+
+- section-signal route 在 train 上确实有 92 次 promotion action，但 train hit@10 没有提升。
+- train search-depth net 只有 `+1`，同时有 `1` 个 top10 improvement 和 `1` 个 top10 regression。
+- dev 上虽然有 22 次 promotion action，但 hit@10、search-depth、not-found@50、rank 11-50 都没有改善。
+- primary contract 和 secondary contract 均未通过。
+- guard contract 通过只说明风险边界可控，不说明召回效果足够推进。
+
+### 候选队列
+
+Stage84 原始执行顺序：
+
+```text
+lexical_cluster_diversity_rerank_design
+structured_query_keyphrase_compaction_design
+section_signal_guarded_expansion_design
+score_margin_bm25_normalization_gate_design
+selective_dense_sparse_low_overlap_gate_design
+```
+
+已停止路线：
+
+```text
+lexical_cluster_diversity_rerank_design
+structured_query_keyphrase_compaction_design
+section_signal_guarded_expansion_design
+```
+
+Stage93 后剩余队列：
+
+```text
+score_margin_bm25_normalization_gate_design
+selective_dense_sparse_low_overlap_gate_design
+```
+
+下一候选：
+
+```text
+score_margin_bm25_normalization_gate_design
+```
+
+注意：这只是 Stage94 的 protocol-freeze 候选，不是 runtime 策略，也不是 final-test gate。
+
+### Guard checks
+
+全部通过：
+
+```text
+26 / 26 passed
+```
+
+关键 guard：
+
+- source Stage84 report 确认为 Stage84。
+- source Stage92 report 确认为 Stage92。
+- 用户已确认 Stage93 stop decision。
+- Stage92 comparison 已完成。
+- Stage92 candidate/protocol 与 section signal route 匹配。
+- Stage84 target metric contract 要求 dev hit@10 gain。
+- Stage84 target metric contract 要求 search-depth gain。
+- Stage92 primary contract failed。
+- Stage92 secondary contract failed。
+- Stage92 guard contract passed。
+- Stage92 train-selected config 没有 dev hit@10 gain。
+- Stage92 dev search-depth net 不为正。
+- Stage92 dev top10 net 不为正。
+- Stage92 final-test metrics locked。
+- Stage92 final-test gate closed。
+- Stage92 forbids test tuning。
+- Stage92 runtime default unchanged。
+- Stage84 execution order 包含 stopped candidate。
+- Stage84 next candidate 在停止 section-signal 后可用。
+- 已停止的 LCDR 和 structured-query route 已从 remaining queue 中移除。
+- `source_doc_ids_oracle_union_blocked` 没有被选为 next candidate。
+- Stage93 没有运行新 retrieval metrics。
+- Stage93 没有运行 final-test metrics。
+- Stage93 runtime default unchanged。
+
+### 可视化产物
+
+```text
+artifacts\primeqa_hybrid_section_signal_stop_decision_stage93_visuals\stage93_section_signal_train_dev_hit10_delta.svg
+artifacts\primeqa_hybrid_section_signal_stop_decision_stage93_visuals\stage93_section_signal_dev_change_counts.svg
+artifacts\primeqa_hybrid_section_signal_stop_decision_stage93_visuals\stage93_second_wave_remaining_candidate_priority.svg
+artifacts\primeqa_hybrid_section_signal_stop_decision_stage93_visuals\stage93_section_signal_stop_decision_flags.svg
+artifacts\primeqa_hybrid_section_signal_stop_decision_stage93_visuals\stage93_section_signal_stop_guard_check_status.svg
+```
+
+Stage93 JSON SHA256：
+
+```text
+F409A99EA7DCF0823C140EFA6C69AED512A9B7BAE23FE63442602C21B59BF90A
+```
+
+Visualization SHA256：
+
+```text
+stage93_second_wave_remaining_candidate_priority.svg: E29F4679863809EEC1969A0D079BCABF0169A16F44AC1B6F93BDCE655C0A3332
+stage93_section_signal_dev_change_counts.svg: 883D57F772EDFA60FFFE1E4C1471ACA946D6490C695EE2DCCD47DDD67EBBA481
+stage93_section_signal_stop_decision_flags.svg: 4CE969467572C3EC9A63C8F607C8E25D736E93F6AE1DFA13447BD010C1E67E23
+stage93_section_signal_stop_guard_check_status.svg: 2A3FCCEDE15EB338F6C0289451644A07D02C397ADAE8B64141DF08A0B9F338F3
+stage93_section_signal_train_dev_hit10_delta.svg: DA5152C754A0246D8C0316440574A97EFFACEC17FF3C7AD0B38050AA7C6FA120
+```
+
+### 问题、原因与修正
+
+- 问题 1：第一版补丁输出过长，终端显示被截断。
+  - 原因：新增模块、脚本、测试一次性 patch 内容较多。
+  - 修正：先用 `Test-Path` 和定向 ruff/pytest 确认三个新增文件完整落盘，再继续运行 Stage93。
+  - 影响：没有发现文件缺失或语法问题。
+
+- 问题 2：读取文档局部区间时，PowerShell 的 `Select-Object -Index 540..570` 写法报错。
+  - 原因：`-Index` 需要整数数组，范围表达式要加括号。
+  - 修正：改为 `Select-Object -Index (540..570)`。
+  - 影响：只影响读取上下文，不影响代码或数据产物。
+
+- 问题 3：`docs/primeqa_hybrid_structured_query_comparison.md` 仍残留 “Stage93 是下一步”。
+  - 原因：这是更早阶段文档的历史 next-step 指针。
+  - 修正：同步更新为 Stage93 已停止 section signal，当前下一步为 Stage94。
+  - 影响：跨阶段文档指针保持一致。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_section_signal_stop_decision.py scripts\decide_primeqa_hybrid_section_signal_stop.py tests\test_primeqa_hybrid_section_signal_stop_decision.py
+pytest -q tests\test_primeqa_hybrid_section_signal_stop_decision.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+产物安全检查：
+
+```text
+Select-String raw question / answer / document / snippet / query-term / section-text field patterns over Stage93 JSON: no matches
+git check-ignore Stage93 JSON and SVG artifacts: ignored by .gitignore
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 244 passed
+git diff --check: passed
+```
+
+### 结论
+
+- Stage93 已停止 `section_signal_guarded_expansion_design`。
+- Stage93 没有读取 test。
+- Stage93 没有运行 retrieval metrics。
+- Stage93 没有运行 final metrics。
+- Stage93 没有使用 source `DOC_IDS` 作为 runtime 检索证据。
+- Stage93 没有写出 raw question / answer / document / section text。
+- Stage93 没有改变 runtime 默认策略。
+- 当前可推进候选是 `score_margin_bm25_normalization_gate_design`。
+
+### 我学到了
+
+- gated promotion action 很多不代表能改善 gold-doc recall；Stage92 dev 上 22 次 action 没有换来任何 hit@10 或 search-depth 改善。
+- 一个 route 的 guard 通过只能说明“没有越界推进”，不能替代 primary/secondary metric contract。
+- second-wave 队列推进需要显式 stop decision，否则旧路线会反复占据下一步。
+
+### 下一步
+
+Stage94：确认并冻结 `score_margin_bm25_normalization_gate_design` 的 train/dev-only protocol。
+
+Stage94 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能用 dev-only 观察选择 runtime threshold，不能改变 runtime 默认策略。
