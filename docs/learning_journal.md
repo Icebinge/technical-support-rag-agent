@@ -25456,3 +25456,229 @@ Stage104 JSON 扫描没有命中 private fixture、split path 或 corpus path pa
 Stage105：在用户确认后，运行 frozen train/dev-only evidence-answerability candidate comparison，对比 Stage102
 verified baseline。Stage105 必须只用 train 选择 config，只用 dev 做一次验证；仍不能读取 test、不能运行 final metrics、
 不能改 runtime 默认策略、不能加入 fallback strategy。
+
+## Stage105：运行 evidence-answerability train/dev 候选比较
+
+### 目标
+
+本阶段执行 Stage104 冻结的 9 个 evidence/answerability candidate config，对比 Stage102 verified BM25 top10
+answer pipeline baseline。Stage105 的边界仍然是：
+
+```text
+只读 train/dev split
+不读取 test split
+不运行 final test metrics
+只用 train 做 config selection
+dev 只做一次 validation
+不改 runtime default
+不加入 fallback strategy
+不把 source DOC_IDS 当作 runtime evidence
+```
+
+### 新增和修改
+
+代码：
+
+```text
+src\ts_rag_agent\application\primeqa_hybrid_evidence_answerability_comparison.py
+scripts\run_primeqa_hybrid_evidence_answerability_comparison.py
+tests\test_primeqa_hybrid_evidence_answerability_comparison.py
+```
+
+文档：
+
+```text
+docs\primeqa_hybrid_evidence_answerability_comparison.md
+docs\learning_journal.md
+```
+
+本地产物：
+
+```text
+artifacts\primeqa_hybrid_evidence_answerability_comparison_stage105.json
+artifacts\primeqa_hybrid_evidence_answerability_comparison_stage105.console.txt
+artifacts\primeqa_hybrid_evidence_answerability_comparison_stage105_visuals\stage105_train_weighted_target_scores.svg
+artifacts\primeqa_hybrid_evidence_answerability_comparison_stage105_visuals\stage105_dev_weighted_target_scores.svg
+artifacts\primeqa_hybrid_evidence_answerability_comparison_stage105_visuals\stage105_train_target_score_deltas.svg
+artifacts\primeqa_hybrid_evidence_answerability_comparison_stage105_visuals\stage105_dev_target_score_deltas.svg
+artifacts\primeqa_hybrid_evidence_answerability_comparison_stage105_visuals\stage105_train_selectability_guards.svg
+artifacts\primeqa_hybrid_evidence_answerability_comparison_stage105_visuals\stage105_changed_answer_counts.svg
+artifacts\primeqa_hybrid_evidence_answerability_comparison_stage105_visuals\stage105_guard_check_status.svg
+```
+
+### 真实运行命令
+
+```text
+python scripts\run_primeqa_hybrid_evidence_answerability_comparison.py --user-confirmed-comparison --confirmation-note "user confirmed Stage105 train/dev candidate comparison on 2026-07-15; test locked; runtime defaults unchanged; no fallback strategies"
+```
+
+真实运行结果：
+
+```text
+exit_code: 0
+timing_seconds.total: 368.557
+guard_checks: 29 / 29 passed
+```
+
+### 数据和 baseline
+
+```text
+documents: 28482
+train rows: 562
+train answerable rows: 370
+train unanswerable rows: 192
+dev rows: 121
+dev answerable rows: 76
+dev unanswerable rows: 45
+test_split_loaded: false
+```
+
+Baseline：
+
+```text
+baseline_config_id: stage102_verified_bm25_top10_answer_pipeline
+train weighted target score: 645.2
+dev weighted target score: 143.4
+```
+
+Stage105 重新计算的 baseline bucket counts 和 verified metrics 与 Stage102 saved report 完全匹配，说明本阶段比较仍然接在
+Stage102 verified baseline 上，而不是换了隐式 baseline。
+
+### Train selection 结果
+
+Train objective：
+
+```text
+1.55 * answerability_false_answer
++ 1.45 * gold_span_beats_selected_answer
++ 1.70 * evidence_selection_miss
+```
+
+Train-selected config：
+
+```text
+selected_config_id: amg_bm25_evidence8_rank3_v1
+selected_candidate_id: answerability_margin_gate_candidate_v1
+selected_train_weighted_target_delta: 0.0
+selectable_config_count: 2 / 9
+```
+
+Train ranking 摘要：
+
+```text
+amg_bm25_evidence8_rank3_v1: train delta 0.00, selectable true, changed 1
+amg_bm25_evidence9_rank3_v1: train delta 0.00, selectable true, changed 1
+jgw_answer_window_mcpd5_evidence8_rank2_v1: train delta -133.90, selectable false, changed 542
+ewr_answer_window_mcpd3_evidence7_rank3_v1: train delta -89.25, selectable false, changed 546
+ewr_answer_window_mcpd5_evidence7_rank3_v1: train delta -89.25, selectable false, changed 546
+jgw_answer_window_mcpd3_evidence8_rank3_v1: train delta -89.25, selectable false, changed 546
+amg_bm25_evidence8_rank2_v1: train delta -29.25, selectable false, changed 37
+ewr_hybrid_window_mcpd3_evidence7_rank3_v1: train delta -16.60, selectable false, changed 550
+jgw_hybrid_window_mcpd3_evidence8_rank3_v1: train delta -16.60, selectable false, changed 550
+```
+
+### Dev validation 结果
+
+Dev 只验证 train-selected config，没有用于选择或调参。
+
+```text
+selected_config_id: amg_bm25_evidence8_rank3_v1
+dev_weighted_target_delta: 0.0
+dev_changed_answer_count: 0
+dev_validation_passed: false
+```
+
+Dev target bucket deltas：
+
+```text
+answerability_false_answer: 0
+gold_span_beats_selected_answer: 0
+evidence_selection_miss: 0
+```
+
+Dev metric deltas：
+
+```text
+answerable_refusal_rate: 0.0
+unanswerable_refusal_rate: 0.0
+gold_doc_citation_rate: 0.0
+average_token_f1: 0.0
+```
+
+### 决策
+
+```text
+status: primeqa_hybrid_evidence_answerability_comparison_completed_dev_guard_failed
+selected_config_id: amg_bm25_evidence8_rank3_v1
+selectable_config_count: 2
+dev_validation_passed: false
+can_continue_train_dev_development: true
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+fallback_strategies_enabled: false
+default_runtime_policy: unchanged
+recommended_next_direction: evidence_answerability_stop_decision
+```
+
+结论：Stage105 不支持把 Stage103/104 这组 evidence-answerability policy 进入 runtime，也不能打开 test gate。虽然若干
+answer-window/joint configs 在 train/dev target score 上有更大的负 delta，但它们没有通过 train selectability guards，不能从 dev
+反选。
+
+### 问题、原因与修正
+
+- 问题 1：实现时最初的 `dev_validation_not_used_for_selection` guard 只是自反判断，没有证明 dev 没进入 selection。
+  - 原因：第一次实现只验证了 train selection 结果存在，没有审计 selection ranking 字段边界。
+  - 修正：改为检查 train selection ranking 只能包含固定 train 字段：`rank`、`config_id`、`candidate_id`、
+    `train_weighted_target_score`、`train_weighted_target_delta`、`train_selectable`、`train_changed_answer_count`。
+- 问题 2：单元测试最初用字符串 `"answer_doc_id"` 做粗粒度扫描，误伤了合法统计字段 `unique_answer_doc_ids`。
+  - 原因：统计字段不是原始 answer doc id，但字符串包含相同子串。
+  - 修正：测试改为扫描精确 JSON key：`"answer_doc_id":` 和 `"question_text":`。
+- 问题 3：窗口类候选出现显著 target score 改善，但不能入选。
+  - 原因：改善主要来自更激进拒答或证据重选，同时触发 answerable refusal 或 citation guard。
+  - 修正：按 Stage104 冻结协议如实阻断这些 config，不从 dev 反选，不新增 fallback，也不改 runtime default。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check --fix src\ts_rag_agent\application\primeqa_hybrid_evidence_answerability_comparison.py scripts\run_primeqa_hybrid_evidence_answerability_comparison.py tests\test_primeqa_hybrid_evidence_answerability_comparison.py
+pytest -q tests\test_primeqa_hybrid_evidence_answerability_comparison.py
+python scripts\run_primeqa_hybrid_evidence_answerability_comparison.py --user-confirmed-comparison ...
+```
+
+结果：
+
+```text
+targeted pytest: 2 passed
+Stage105 run: passed
+guard checks: 29 / 29 passed
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 286 passed
+git diff --check: passed
+```
+
+### 我学到了
+
+- target bucket objective 必须和 train selectability guard 一起看；只看 weighted target score 会把大量 answerable refusal/citation
+  风险误判成改进。
+- Dev 上出现更好的非入选候选不能作为选择依据。Stage105 的正确行为是记录 dev 现象，但仍保持 train-only selection。
+- answerability margin gate 这次几乎是 no-op：train 只改变 1 个答案，dev 改变 0 个答案，所以 dev validation 失败是合理结果。
+- 可视化对这类阶段很有用：train/dev score、delta、selectability、changed answers、guard status 可以一起说明“为什么不能推进”。
+
+### 下一步
+
+Stage106：记录 evidence-answerability candidate family 的 stop/redesign decision。下一步需要解释：
+
+```text
+为什么 train-selected config 没有通过 dev validation；
+为什么 dev 上看起来更好的非 selectable configs 不能被反选；
+是否停止这条 Stage103/104 candidate family；
+如果 redesign，新的方案必须继续保持 train/dev-only、test locked、runtime defaults unchanged、no fallback strategies。
+```
