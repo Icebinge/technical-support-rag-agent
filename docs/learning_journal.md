@@ -24090,3 +24090,179 @@ git diff --check: passed
 Stage98：在用户确认后运行 frozen train/dev-only `selective_dense_sparse_low_overlap_gate_train_dev_v1` comparison。
 
 Stage98 仍然不能触碰 test，不能跑 final metrics，不能使用 source `DOC_IDS`，不能下载模型或刷新 dense cache，不能改变 runtime 默认策略。
+## Stage98：运行 selective dense+sparse train/dev-only comparison
+
+### 学习时间
+
+2026-07-15
+
+### 本阶段目标
+
+在用户确认 Stage97 frozen protocol 后，运行
+`selective_dense_sparse_low_overlap_gate_train_dev_v1` 的 train/dev-only
+comparison。边界保持不变：不读取 test，不运行 final metrics，不使用 source
+`DOC_IDS` 作为 runtime 检索证据，不下载模型，不刷新 dense cache，不改变 runtime
+默认策略。
+
+### 本阶段做了什么
+
+新增并验证了 Stage98 的独立比较链路：
+
+```text
+src\ts_rag_agent\application\primeqa_hybrid_selective_dense_sparse_comparison.py
+scripts\run_primeqa_hybrid_selective_dense_sparse_comparison.py
+tests\test_primeqa_hybrid_selective_dense_sparse_comparison.py
+docs\primeqa_hybrid_selective_dense_sparse_comparison.md
+```
+
+同步更新：
+
+```text
+docs\evaluation_strategy.md
+docs\data_strategy.md
+docs\learning_journal.md
+```
+
+Stage98 实现内容：
+
+- 读取 Stage68 train/dev split、PrimeQA documents、Stage75 baseline report、
+  Stage97 frozen protocol。
+- 只使用 Stage97 冻结的两个本地 dense cache 和本地 snapshot。
+- 按 Stage97 policy grid 运行 4 个 low-overlap selective dense+sparse policy。
+- 只用 train 选择 policy，dev 仅做 validation。
+- 报告只写公开安全字段、聚合指标和 bucket，不写 raw question、raw answer、
+  raw document text/title、query terms、matched token strings。
+- 生成 6 个 SVG 可视化结果。
+
+### 真实运行结果
+
+Stage98 真实命令重跑后 exit code 为 `0`，stderr 为空。
+
+```text
+selected_policy_id: sdsl_minilm_low_overlap_conservative_v1
+
+train baseline hit@10: 0.6622
+train selected hit@10: 0.6622
+train hit@10 delta: +0.0000
+train not_found@50 delta: 0
+
+dev baseline hit@10: 0.6974
+dev selected hit@10: 0.6974
+dev hit@10 delta: +0.0000
+dev hit@1 delta: +0.0000
+dev not_found@50 delta: 0
+dev top10 improvements: 0
+dev top10 regressions: 0
+dev gate activations: 0
+dev promotions: 0
+```
+
+决策：
+
+```text
+status: primeqa_hybrid_selective_dense_sparse_comparison_completed
+primary_contract_passed: false
+secondary_contract_passed: false
+guard_contract_passed: true
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+default_runtime_policy: unchanged
+```
+
+结论：Stage98 的 comparison 本身完成且 guard 通过，但 selected policy 没有在
+dev 上带来 hit@10 提升，也没有减少 not-found@50；因此 selective dense+sparse
+route 不应进入 final-test gate，也不应改 runtime 默认策略。
+
+### 可视化结果
+
+```text
+artifacts\primeqa_hybrid_selective_dense_sparse_comparison_stage98_visuals\stage98_selective_dense_sparse_train_hit_at_10.svg
+artifacts\primeqa_hybrid_selective_dense_sparse_comparison_stage98_visuals\stage98_selective_dense_sparse_dev_hit_at_10.svg
+artifacts\primeqa_hybrid_selective_dense_sparse_comparison_stage98_visuals\stage98_selective_dense_sparse_dev_hit10_delta.svg
+artifacts\primeqa_hybrid_selective_dense_sparse_comparison_stage98_visuals\stage98_selective_dense_sparse_dev_not_found_delta.svg
+artifacts\primeqa_hybrid_selective_dense_sparse_comparison_stage98_visuals\stage98_selective_dense_sparse_dev_promotions.svg
+artifacts\primeqa_hybrid_selective_dense_sparse_comparison_stage98_visuals\stage98_selective_dense_sparse_guard_check_status.svg
+```
+
+### 问题、原因与修正
+
+- 问题 1：单元测试 fixture 最初把 `alpha` 放进了 toy answer document title，
+  导致 BM25 baseline 也能命中，破坏了“dense gate 救回 BM25 未召回样本”的
+  测试目标。
+  - 原因：测试 query 和 toy document 之间意外存在 lexical overlap。
+  - 修正：去掉 toy answer document 里的 query token，只保留 dense embedding
+    可检索信号。
+  - 影响：修正后 targeted pytest 通过，测试目的和实现逻辑一致。
+- 问题 2：第一次真实运行虽然完整写出了 Stage98 JSON 和 SVG，但 shell 返回
+  exit code `1`。
+  - 原因：模型加载进度条写入 stderr，在 PowerShell 全流重定向下被包装成
+    `NativeCommandError`。
+  - 修正：设置 `HF_HUB_DISABLE_PROGRESS_BARS=1` 和 `TQDM_DISABLE=1`，并将
+    stdout/stderr 分开保存后重跑。
+  - 影响：第二次真实运行 exit code 为 `0`，stderr 为空，报告语义结果未改变。
+- 问题 3：selected policy 在 dev 上没有任何 gate activation。
+  - 原因：Stage97 冻结的 low-overlap 条件在 dev 的 76 个 answerable 样本上
+    全部未触发，主要被 BM25 top1 overlap gate 阻断。
+  - 修正：没有擅自放宽 threshold，因为 Stage97 明确禁止 dev-selected
+    threshold tuning。
+  - 影响：route 必须按协议停止，不能打开 final-test gate。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_selective_dense_sparse_comparison.py scripts\run_primeqa_hybrid_selective_dense_sparse_comparison.py tests\test_primeqa_hybrid_selective_dense_sparse_comparison.py
+pytest -q tests\test_primeqa_hybrid_selective_dense_sparse_comparison.py
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 260 passed
+git diff --check: passed
+```
+
+真实 Stage98 run：
+
+```text
+python scripts\run_primeqa_hybrid_selective_dense_sparse_comparison.py ...: exit code 0
+stderr: empty
+guard checks: 23 / 23 passed
+```
+
+产物安全检查：
+
+```text
+Select-String Stage98 JSON for question_text/question_title/answer_doc_id/DOC_IDS/query_terms/matched_token_strings: no matches
+artifact_safety.raw_question_text_written: false
+artifact_safety.raw_answer_text_written: false
+artifact_safety.raw_document_text_written: false
+artifact_safety.source_doc_ids_used_as_runtime_evidence: false
+```
+
+### 我学到了
+
+- dense+sparse 如果加了太保守的 low-overlap gate，可能完全避免 regression，但
+  也会让 dev 上没有任何有效 action；这类 route 不能靠“看起来更安全”推进，
+  必须看 train-selected policy 的 dev 合同是否真实通过。
+- Stage98 这类 train/dev comparison 必须把“运行成功”和“指标合同通过”分开：
+  本阶段运行成功，guard 通过，但 metric contract 没通过。
+- 对会输出模型加载进度的命令，最好从一开始就关闭 progress bar 并拆分
+  stdout/stderr，避免 PowerShell 把 stderr 进度条包装成失败状态。
+
+### 下一步
+
+Stage99：停止 selective dense+sparse route，并记录 stop decision。Stage99 仍然
+不能读取 test，不能运行 final metrics，不能调 dev threshold，不能改 runtime
+默认策略。它的目标是把 Stage97-Stage98 的证据总结为 route stop，而不是继续
+微调这个 gate。

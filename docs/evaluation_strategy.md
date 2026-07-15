@@ -757,3 +757,9 @@ The current Stage 97 selective dense+sparse protocol freeze is recorded in:
 ```text
 docs/primeqa_hybrid_selective_dense_sparse_protocol.md
 ```
+
+The current Stage 98 selective dense+sparse train/dev comparison is recorded in:
+
+```text
+docs/primeqa_hybrid_selective_dense_sparse_comparison.md
+```

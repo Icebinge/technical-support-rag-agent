@@ -482,6 +482,13 @@ recorded in:
 docs/primeqa_hybrid_selective_dense_sparse_protocol.md
 ```
 
+The current PrimeQA/TechQA hybrid selective dense+sparse train/dev comparison
+is recorded in:
+
+```text
+docs/primeqa_hybrid_selective_dense_sparse_comparison.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:
