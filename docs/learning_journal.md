@@ -25869,6 +25869,305 @@ runtime defaults unchanged
 no fallback strategies
 ```
 
+## Stage112：运行 retrieval_context_miss 根因审计
+
+### 记录顺序说明
+
+Stage111 已经记录在本文件中，但当前文件末尾仍保留着后写入的 Stage110 段落。
+这次 Stage112 记录追加在文件末尾，保持本次真实发生的记录可追溯；没有改写历史
+段落内容。
+
+### 目标
+
+按照 Stage111 冻结的协议，运行 train/dev-only `retrieval_context_miss`
+根因审计。这个阶段只回答一个问题：Stage102 中 gold context 没进 BM25 top10
+上下文的 148 个 answerable case，主要是哪些根因。
+
+本阶段不是候选策略实验，不选择 config，不调阈值，不改变 runtime 默认策略。
+
+### 新增内容
+
+新增审计实现：
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_retrieval_context_miss_root_cause_audit.py
+```
+
+新增运行脚本：
+
+```text
+scripts/run_primeqa_hybrid_retrieval_context_miss_root_cause_audit.py
+```
+
+新增测试：
+
+```text
+tests/test_primeqa_hybrid_retrieval_context_miss_root_cause_audit.py
+```
+
+新增正式记录：
+
+```text
+docs/primeqa_hybrid_retrieval_context_miss_root_cause_audit.md
+```
+
+同时更新索引：
+
+```text
+docs/data_strategy.md
+docs/evaluation_strategy.md
+```
+
+### 真实运行结果
+
+命令：
+
+```text
+python scripts\run_primeqa_hybrid_retrieval_context_miss_root_cause_audit.py --user-confirmed-audit --confirmation-note "user confirmed Stage112 train-dev retrieval-context-miss root-cause audit on 2026-07-16; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+输出：
+
+```text
+artifacts\primeqa_hybrid_retrieval_context_miss_root_cause_audit_stage112.json
+```
+
+结果：
+
+```text
+stage: Stage 112
+analysis_id: primeqa_hybrid_retrieval_context_miss_root_cause_audit_v1
+status: primeqa_hybrid_retrieval_context_miss_root_cause_audit_completed
+guard checks: 19 / 19 passed
+timing total: 235.469s
+```
+
+本阶段只加载：
+
+```text
+Stage111 frozen protocol
+Stage68 train split
+Stage68 dev split
+PrimeQA training/dev corpus sections
+```
+
+没有加载 test split，没有运行 final metrics，没有做 dev-only selection，没有 threshold
+tuning，没有修改 runtime defaults，没有加入 fallback strategies。
+
+### 数据规模
+
+真实加载：
+
+```text
+document_count: 28482
+section_count: 216648
+train_rows: 562
+dev_rows: 121
+train_answerable_rows: 370
+dev_answerable_rows: 76
+test_split_loaded: false
+```
+
+审计集合与 Stage102 `retrieval_context_miss` 完全对齐：
+
+```text
+train: 125
+dev: 23
+total: 148
+```
+
+answerable 条件下比例：
+
+```text
+train: 125 / 370 = 0.3378
+dev: 23 / 76 = 0.3026
+total: 148 / 446 = 0.3318
+```
+
+### 根因分布
+
+train/dev 合计 primary root cause：
+
+```text
+title_heading_mismatch: 74
+query_expression_gap: 65
+long_document_score_dilution: 4
+entity_version_error_code_mismatch: 3
+bm25_field_weighting_or_index_structure: 2
+```
+
+分 split：
+
+```text
+train title_heading_mismatch: 63
+train query_expression_gap: 55
+train long_document_score_dilution: 4
+train bm25_field_weighting_or_index_structure: 2
+train entity_version_error_code_mismatch: 1
+
+dev title_heading_mismatch: 11
+dev query_expression_gap: 10
+dev entity_version_error_code_mismatch: 2
+```
+
+共同出现在 train/dev 的 primary root cause：
+
+```text
+entity_version_error_code_mismatch
+query_expression_gap
+title_heading_mismatch
+```
+
+### 诊断信号
+
+148 个 audit case 中的 high-signal dimension：
+
+```text
+title_heading_mismatch: 137
+bm25_field_weighting_or_index_structure: 121
+entity_version_error_code_mismatch: 80
+query_expression_gap: 65
+long_document_score_dilution: 37
+section_boundary_or_span_locality: 10
+```
+
+gold document diagnostic rank bucket：
+
+```text
+not_found_top50: 110
+rank_21_to_50: 24
+rank_11_to_20: 14
+```
+
+question route 分布：
+
+```text
+other: 57
+error_or_log: 40
+install_upgrade_config: 32
+how_to_or_lookup: 12
+security_bulletin_vulnerability_detail: 4
+limitation_or_restriction: 3
+```
+
+confidence band：
+
+```text
+high_multi_signal: 103
+medium_two_signal: 39
+low_single_signal: 6
+```
+
+### 解释
+
+主要问题不是 answer composition，而是检索入口层面的 title/heading mismatch 和
+query expression gap。下一步如果继续推进，应该先冻结一个 retrieval/index
+redesign protocol，重点围绕：
+
+```text
+title/heading weighting
+section-level indexing
+entity/version/error-code handling
+```
+
+但这只是 Stage112 的审计解释，不是候选策略选择。当前仍不能 defaultize，不能跑
+test，也不能用 dev 反选 config。
+
+### 可视化结果
+
+已生成：
+
+```text
+artifacts\primeqa_hybrid_retrieval_context_miss_root_cause_audit_stage112_visuals\stage112_audit_case_counts_by_split.svg
+artifacts\primeqa_hybrid_retrieval_context_miss_root_cause_audit_stage112_visuals\stage112_primary_root_cause_counts.svg
+artifacts\primeqa_hybrid_retrieval_context_miss_root_cause_audit_stage112_visuals\stage112_dimension_high_signal_counts.svg
+artifacts\primeqa_hybrid_retrieval_context_miss_root_cause_audit_stage112_visuals\stage112_gold_rank_bucket_counts.svg
+artifacts\primeqa_hybrid_retrieval_context_miss_root_cause_audit_stage112_visuals\stage112_question_route_counts.svg
+artifacts\primeqa_hybrid_retrieval_context_miss_root_cause_audit_stage112_visuals\stage112_guard_check_status.svg
+```
+
+### 问题、原因与修正
+
+- 问题 1：实现时 answerable 计数一开始写成了
+  `sum(sample.answerable and sample.answer_doc_id ...)`。
+  - 原因：Python `and` 会返回 doc id 字符串，导致 `sum` 出现 int 和 str 相加。
+  - 修正：改为显式 `sum(1 for sample in samples if ...)`。
+- 问题 2：单测中 split guard 一开始按 `train, dev` 顺序比较，但观测值排序后是
+  `dev, train`。
+  - 原因：guard 的目标是集合一致，不应该依赖顺序。
+  - 修正：期望值也排序后比较。
+- 问题 3：Stage112 需要 `question_route`，但 Stage111 合同没有允许读 Stage69
+  candidate artifact。
+  - 原因：额外读取 Stage69 会扩大 Stage111 冻结的输入边界。
+  - 修正：使用已有 `classify_question_route` 从 runtime-visible question title/text
+    直接计算，不读 Stage69。
+
+### 验证
+
+目标验证：
+
+```text
+python -m ruff check src\ts_rag_agent\application\primeqa_hybrid_retrieval_context_miss_root_cause_audit.py scripts\run_primeqa_hybrid_retrieval_context_miss_root_cause_audit.py tests\test_primeqa_hybrid_retrieval_context_miss_root_cause_audit.py
+python -m pytest tests\test_primeqa_hybrid_retrieval_context_miss_root_cause_audit.py -q
+python scripts\run_primeqa_hybrid_retrieval_context_miss_root_cause_audit.py --user-confirmed-audit ...
+```
+
+结果：
+
+```text
+targeted ruff: passed
+targeted pytest: 3 passed
+Stage112 run: passed
+guard checks: 19 / 19 passed
+```
+
+全仓验证：
+
+```text
+python -m ruff check .
+python -m pytest -q
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 306 passed
+```
+
+### 我学到了
+
+- `retrieval_context_miss` 的最大根因不是单纯 top10 rank near miss；110 / 148
+  个 case 在 top50 里都找不到 gold doc。
+- train 和 dev 的 dominant primary root cause 都集中在
+  `title_heading_mismatch` 与 `query_expression_gap`，说明下一步要做 retrieval/index
+  protocol，而不是继续 answer-pipeline 阈值。
+- `bm25_field_weighting_or_index_structure` 虽然 primary count 只有 2，但 high-signal
+  count 有 121，说明它更像二级结构信号，适合纳入下一步协议设计。
+- 当前仍然没有使用 test；test 继续锁住。
+
+### 下一步
+
+Stage113：只有用户确认后，冻结 train/dev-only retrieval/index redesign protocol。
+建议围绕：
+
+```text
+title/heading weighting
+section-level indexing
+entity/version/error-code handling
+```
+
+继续保持：
+
+```text
+test locked
+no final metrics
+no dev-only selection
+no threshold tuning
+runtime defaults unchanged
+no fallback strategies
+```
+
 ## Stage111：冻结 retrieval_context_miss 根因审计协议
 
 ### 目标
@@ -27041,4 +27340,35 @@ no final metrics
 no dev-only selection
 runtime defaults unchanged
 no fallback strategies
+```
+
+## 当前阶段尾部索引：Stage110 到 Stage112
+
+说明：Stage110、Stage111、Stage112 都已经在本文件中记录；由于历史追加锚点重复，
+这三段正文在文件中的物理顺序不是时间顺序。以当前真实提交顺序为准：
+
+```text
+Stage110: failure-pattern redesign family stop decision
+Stage111: retrieval_context_miss audit protocol freeze
+Stage112: retrieval_context_miss root-cause audit
+```
+
+Stage112 当前状态：
+
+```text
+status: primeqa_hybrid_retrieval_context_miss_root_cause_audit_completed
+audit cases: train 125, dev 23, total 148
+guard checks: 19 / 19 passed
+full ruff: passed
+full pytest: 306 passed
+git diff --check: passed
+test locked
+runtime defaults unchanged
+no fallback strategies
+```
+
+当前下一步：
+
+```text
+Stage113: 用户确认后，冻结 train/dev-only retrieval/index redesign protocol。
 ```
