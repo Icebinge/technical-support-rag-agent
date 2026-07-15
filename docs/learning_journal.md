@@ -24415,3 +24415,155 @@ git diff --check: passed
 Stage100：总结 second-wave retrieval route exhaustion，并基于现有 train/dev 证据
 决定下一条研究方向。Stage100 仍然不能读取 test，不能运行 final metrics，不能把
 blocked source `DOC_IDS` diagnostic 变成 runtime/default policy。
+## Stage100：总结 second-wave retrieval route exhaustion
+
+### 学习时间
+
+2026-07-15
+
+### 本阶段目标
+
+基于既有 public-safe train/dev 证据，总结 Stage84 second-wave retrieval
+routes 是否已经耗尽，并决定下一条研究方向。本阶段不读取 train/dev/test split
+文件，不运行新的 retrieval metrics，不运行 final metrics，不调 dev threshold，
+不改变 runtime 默认策略。
+
+### 本阶段做了什么
+
+新增并验证了 Stage100 route-exhaustion summary 链路：
+
+```text
+src\ts_rag_agent\application\primeqa_hybrid_second_wave_route_exhaustion_summary.py
+scripts\summarize_primeqa_hybrid_second_wave_route_exhaustion.py
+tests\test_primeqa_hybrid_second_wave_route_exhaustion_summary.py
+docs\primeqa_hybrid_second_wave_route_exhaustion_summary.md
+```
+
+同步更新：
+
+```text
+docs\evaluation_strategy.md
+docs\data_strategy.md
+docs\learning_journal.md
+```
+
+Stage100 只读取 public-safe 报告：
+
+```text
+artifacts\primeqa_hybrid_retrieval_recall_exhaustion_summary_stage83.json
+artifacts\primeqa_hybrid_second_wave_retrieval_candidate_design_stage84.json
+artifacts\primeqa_hybrid_lexical_cluster_diversity_stop_decision_stage87.json
+artifacts\primeqa_hybrid_structured_query_stop_decision_stage90.json
+artifacts\primeqa_hybrid_section_signal_stop_decision_stage93.json
+artifacts\primeqa_hybrid_score_margin_bm25_stop_decision_stage96.json
+artifacts\primeqa_hybrid_selective_dense_sparse_stop_decision_stage99.json
+```
+
+### 真实运行结果
+
+Stage100 真实命令 exit code 为 `0`：
+
+```text
+status: primeqa_hybrid_second_wave_route_exhaustion_summary_completed
+first_wave_retrieval_candidates_exhausted: true
+second_wave_retrieval_route_family_exhausted: true
+runtime_advancing_second_wave_candidate_count: 0
+remaining_actionable_candidate_count: 0
+recommended_next_direction: answer_pipeline_error_decomposition
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+default_runtime_policy: unchanged
+```
+
+二次 retrieval route 结果：
+
+```text
+lexical_cluster_diversity_rerank_design: dev hit@10 delta +0.0000, stopped
+structured_query_keyphrase_compaction_design: dev hit@10 delta -0.0527, stopped
+section_signal_guarded_expansion_design: dev hit@10 delta +0.0000, stopped
+score_margin_bm25_normalization_gate_design: dev hit@10 delta +0.0000, stopped
+selective_dense_sparse_low_overlap_gate_design: dev hit@10 delta +0.0000, stopped
+```
+
+结论：Stage76 第一轮 retrieval candidates 和 Stage84 第二轮 retrieval routes 均已
+耗尽，没有任何 runtime-advancing retrieval candidate。下一条研究方向应转向
+`answer_pipeline_error_decomposition`，先把剩余 train/dev 失败拆成 retrieval、
+evidence selection、citation、answer composition 等 bucket，再决定下一种干预。
+
+### 可视化结果
+
+```text
+artifacts\primeqa_hybrid_second_wave_route_exhaustion_summary_stage100_visuals\stage100_second_wave_dev_hit10_deltas.svg
+artifacts\primeqa_hybrid_second_wave_route_exhaustion_summary_stage100_visuals\stage100_second_wave_top10_net_changes.svg
+artifacts\primeqa_hybrid_second_wave_route_exhaustion_summary_stage100_visuals\stage100_second_wave_route_outcomes.svg
+artifacts\primeqa_hybrid_second_wave_route_exhaustion_summary_stage100_visuals\stage100_next_direction_readiness.svg
+artifacts\primeqa_hybrid_second_wave_route_exhaustion_summary_stage100_visuals\stage100_route_exhaustion_decision_flags.svg
+artifacts\primeqa_hybrid_second_wave_route_exhaustion_summary_stage100_visuals\stage100_route_exhaustion_guard_check_status.svg
+```
+
+### 问题、原因与修正
+
+- 问题 1：Stage100 需要“决定下一方向”，但不能直接启动新实验。
+  - 原因：Stage99 只说明 retrieval route family exhausted；下一步方向需要基于证据
+    记录，但 Stage100 自身仍是 summary/decision checkpoint。
+  - 修正：输出 `next_direction_options`，推荐
+    `answer_pipeline_error_decomposition`，但不运行 Stage101 的指标或 protocol。
+  - 影响：下一步方向清楚，同时保持 test/final/defaultization 锁定。
+- 问题 2：再次设计 retrieval route 的诱惑很强，但已有两轮 retrieval 候选都没有
+  train-selected dev 合同通过。
+  - 原因：Stage76 与 Stage84 已覆盖 query view、fielded BM25、section rollup、
+    dense+sparse、BM25 参数、lexical diversity、structured query、section signal、
+    score-margin 和 selective dense+sparse。
+  - 修正：把 `third_wave_retrieval_design` 标为不推荐，除非未来先有新的 deployable
+    diagnostic signal。
+  - 影响：避免继续局部贪心地围着 retrieval gate 微调。
+
+### 验证
+
+局部验证：
+
+```text
+ruff check src\ts_rag_agent\application\primeqa_hybrid_second_wave_route_exhaustion_summary.py scripts\summarize_primeqa_hybrid_second_wave_route_exhaustion.py tests\test_primeqa_hybrid_second_wave_route_exhaustion_summary.py
+pytest -q tests\test_primeqa_hybrid_second_wave_route_exhaustion_summary.py
+python scripts\summarize_primeqa_hybrid_second_wave_route_exhaustion.py ...: exit code 0
+```
+
+结果：
+
+```text
+ruff: passed
+pytest: 3 passed
+Stage100 run: passed
+guard checks: 17 / 17 passed
+```
+
+全量验证：
+
+```text
+ruff check .: passed
+pytest -q: 266 passed
+git diff --check: passed
+```
+
+产物安全检查：
+
+```text
+Select-String Stage100 JSON for private fixture snippets and PrimeQA raw row fields: no matches
+```
+
+### 我学到了
+
+- 当 retrieval 候选连续两轮都没有 train-selected dev 合同通过时，继续扩大
+  retrieval grid 可能只是制造更多局部搜索；更好的下一步是先做 pipeline-level
+  error decomposition。
+- “下一方向推荐”也需要 guard：必须证明来源报告阶段正确、候选都已停止、final
+  metrics 仍锁定、runtime 默认策略未变、source `DOC_IDS` diagnostic 仍 blocked。
+- route exhaustion summary 的价值是防止后续重复回到已失败候选上微调阈值。
+
+### 下一步
+
+Stage101：设计 train/dev-only `answer_pipeline_error_decomposition` protocol。
+Stage101 仍然不能读取 test，不能运行 final metrics，不能改 runtime 默认策略；它
+应该只定义如何从现有 public-safe artifacts 里拆分 retrieval、evidence selection、
+citation 和 answer composition 错误。

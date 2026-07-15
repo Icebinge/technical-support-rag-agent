@@ -496,6 +496,13 @@ recorded in:
 docs/primeqa_hybrid_selective_dense_sparse_stop_decision.md
 ```
 
+The current PrimeQA/TechQA hybrid second-wave route exhaustion summary is
+recorded in:
+
+```text
+docs/primeqa_hybrid_second_wave_route_exhaustion_summary.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:

@@ -769,3 +769,9 @@ The current Stage 99 selective dense+sparse stop decision is recorded in:
 ```text
 docs/primeqa_hybrid_selective_dense_sparse_stop_decision.md
 ```
+
+The current Stage 100 second-wave route exhaustion summary is recorded in:
+
+```text
+docs/primeqa_hybrid_second_wave_route_exhaustion_summary.md
+```
