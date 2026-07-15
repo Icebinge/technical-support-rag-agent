@@ -775,3 +775,10 @@ The current Stage 100 second-wave route exhaustion summary is recorded in:
 ```text
 docs/primeqa_hybrid_second_wave_route_exhaustion_summary.md
 ```
+
+The current Stage 101 answer-pipeline error decomposition protocol freeze is
+recorded in:
+
+```text
+docs/primeqa_hybrid_answer_pipeline_error_decomposition_protocol.md
+```
