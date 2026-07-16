@@ -608,6 +608,13 @@ recorded in:
 docs/primeqa_hybrid_retrieval_index_redesign_stop_decision.md
 ```
 
+The current PrimeQA/TechQA hybrid high-recall first-stage union candidate-pool
+comparison is recorded in:
+
+```text
+docs/primeqa_hybrid_high_recall_union_comparison.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:

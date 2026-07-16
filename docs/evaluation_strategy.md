@@ -873,3 +873,10 @@ The current Stage 115 retrieval/index redesign stop decision is recorded in:
 ```text
 docs/primeqa_hybrid_retrieval_index_redesign_stop_decision.md
 ```
+
+The current Stage 116 high-recall first-stage union candidate-pool comparison
+is recorded in:
+
+```text
+docs/primeqa_hybrid_high_recall_union_comparison.md
+```

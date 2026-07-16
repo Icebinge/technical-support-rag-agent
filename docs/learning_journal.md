@@ -28014,3 +28014,184 @@ no final metrics
 runtime defaults unchanged
 no fallback strategies
 ```
+
+## 2026-07-16 - Stage 116 high-recall multi-route union candidate pool
+
+### 本阶段目标
+
+按用户确认的新方向，先做第一阶段高召回候选池：用多路检索路线取并集，先把金文档尽量召回到
+top100/top200 候选池里；第二阶段再考虑精排或精确查找。
+
+本阶段只做 train/dev 离线 recall-only 实验：
+
+```text
+test locked
+no final metrics
+runtime defaults unchanged
+no fallback strategies
+no source DOC_IDS oracle route
+```
+
+### 新增内容
+
+代码：
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_high_recall_union_comparison.py
+scripts/run_primeqa_hybrid_high_recall_union_comparison.py
+tests/test_primeqa_hybrid_high_recall_union_comparison.py
+```
+
+文档：
+
+```text
+docs/primeqa_hybrid_high_recall_union_comparison.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+```
+
+产物：
+
+```text
+artifacts/primeqa_hybrid_high_recall_union_stage116.json
+artifacts/primeqa_hybrid_high_recall_union_stage116_visuals/
+```
+
+### 真实运行
+
+命令：
+
+```text
+python scripts\run_primeqa_hybrid_high_recall_union_comparison.py --user-confirmed-direction --confirmation-note "user confirmed Stage116 first-stage high-recall multi-route union candidate-pool experiment on 2026-07-16; train/dev only; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+实际耗时：
+
+```text
+total: 835.505 seconds
+```
+
+使用路线：
+
+```text
+full_document_bm25
+section_bm25_max_section_rollup
+title_heading_weighted_bm25
+title_heading_only_bm25
+special_token_boosted_bm25
+dense_cache__intfloat_e5_small_v2__512_passage
+dense_cache__sentence_transformers_all_MiniLM_L6_v2__1600_noprefix
+```
+
+dense 路线只使用已有本地 Stage80 cache：
+
+```text
+dense_channel_preflight.status: dense_channels_ready
+can_run_without_download: true
+no_model_download_attempted: true
+```
+
+核心结果：
+
+```text
+train answerable: 370
+dev answerable: 76
+
+train union hit@100: 332 / 370 = 0.8973
+train union hit@200: 345 / 370 = 0.9324
+train uncapped union: 358 / 370 = 0.9676
+
+dev union hit@100: 66 / 76 = 0.8684
+dev union hit@200: 69 / 76 = 0.9079
+dev uncapped union: 72 / 76 = 0.9474
+```
+
+相对 full-document BM25：
+
+```text
+train hit@100 delta: +20 hits, +0.0541
+train hit@200 delta: +14 hits, +0.0378
+
+dev hit@100 delta: +3 hits, +0.0395
+dev hit@200 delta: +3 hits, +0.0395
+```
+
+train 5-fold 稳定性：
+
+```text
+hit@100 average: 0.8965
+hit@100 min/max/spread: 0.8592 / 0.9200 / 0.0608
+
+hit@200 average: 0.9326
+hit@200 min/max/spread: 0.9067 / 0.9565 / 0.0498
+```
+
+### 可视化结果
+
+已生成：
+
+```text
+artifacts\primeqa_hybrid_high_recall_union_stage116_visuals\stage116_dev_channel_hit_at_100.svg
+artifacts\primeqa_hybrid_high_recall_union_stage116_visuals\stage116_dev_union_recall_by_pool_depth.svg
+artifacts\primeqa_hybrid_high_recall_union_stage116_visuals\stage116_dev_union_delta_vs_baseline.svg
+artifacts\primeqa_hybrid_high_recall_union_stage116_visuals\stage116_dev_marginal_hits_by_channel.svg
+artifacts\primeqa_hybrid_high_recall_union_stage116_visuals\stage116_train_fold_union_hit_at_100.svg
+artifacts\primeqa_hybrid_high_recall_union_stage116_visuals\stage116_candidate_pool_size_summary.svg
+artifacts\primeqa_hybrid_high_recall_union_stage116_visuals\stage116_guard_check_status.svg
+```
+
+### 问题、原因与修正
+
+- 问题 1：Stage116 不能再被理解为 top10 替代排序实验。
+  - 原因：Stage81、Stage97/98 已经验证过 dense+sparse 作为 top10/runtime 替代没有稳定收益。
+  - 修正：本阶段明确改成 first-stage candidate pool，指标看 recall@50/100/200 和 uncapped union，不跑回答生成。
+- 问题 2：未截断并集平均候选过大。
+  - 真实数据：dev average uncapped union size = 662.2632，p95 = 806。
+  - 修正：文档明确 practical boundary 是 RRF 排序后的 top200 pool；下一步不能把未截断并集直接喂给回答链。
+- 问题 3：dense cache 不能触发下载，也不能在失败时静默降级。
+  - 原因：这会把实验变成不透明的兜底策略。
+  - 修正：dense enabled 时必须通过 Stage80 本地 cache preflight；本次通过，未尝试下载。
+- 问题 4：小 topK 单测不能假设真实 top100/top200 一定存在。
+  - 原因：单测使用小型 fixture。
+  - 修正：decision 逻辑改成读取本次配置中可用的 primary/max pool depth。
+
+### 验证
+
+目标验证：
+
+```text
+python -m ruff check src\ts_rag_agent\application\primeqa_hybrid_high_recall_union_comparison.py scripts\run_primeqa_hybrid_high_recall_union_comparison.py tests\test_primeqa_hybrid_high_recall_union_comparison.py
+python -m pytest tests\test_primeqa_hybrid_high_recall_union_comparison.py -q
+python scripts\run_primeqa_hybrid_high_recall_union_comparison.py --user-confirmed-direction ...
+```
+
+结果：
+
+```text
+targeted ruff: passed
+targeted pytest: 3 passed
+Stage116 run: passed
+guard checks: 11 / 11 passed
+public_safe_contract.forbidden_keys_found: []
+```
+
+### 我学到了
+
+- 这条路线终于把“先召回、后精排”的两阶段边界拆清楚了：第一阶段只负责让金文档进入候选池，不负责直接回答。
+- 多路并集确实能补 BM25 的尾部召回，dev top200 从 66/76 提到 69/76；虽然提升不大，但足够进入第二阶段精排设计。
+- dense route 单独替代 top10 不稳定，但作为 union 的尾部补充仍有价值；这和前面 dense+sparse 失败并不矛盾。
+- 候选池规模是下一阶段最关键约束：top200 可以作为工程边界，uncapped union 太大。
+
+### 下一步
+
+Stage117：设计 second-stage precision/reranking protocol over fixed Stage116 top200 candidate pool。
+
+继续保持：
+
+```text
+test locked
+train/dev only
+no final metrics
+runtime defaults unchanged
+no fallback strategies
+```
