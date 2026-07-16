@@ -189,8 +189,20 @@ default_runtime_policy: unchanged
 
 ## Next Step
 
-Stage121 should run the frozen fast-filter plus alternate-screening protocol on
-train grouped cross-validation and dev report-only validation.
+Stage121 has now run the frozen fast-filter plus alternate-screening protocol on
+train grouped cross-validation and dev report-only validation:
+
+```text
+docs/primeqa_hybrid_fast_filter_screening_validation.md
+```
+
+The selected train-CV-safe config is:
+
+```text
+special_token_exact_window40_rule_selector_v1
+```
+
+The result supports changed-case review, not runtime defaultization.
 
 Continue to preserve:
 

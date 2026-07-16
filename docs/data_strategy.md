@@ -654,6 +654,19 @@ Stage120 reads only the public-safe Stage119 stop decision report. It does not
 load split files, corpus documents, or candidate rows, and it does not write raw
 question text, answer text, document text, document IDs, or candidate rows.
 
+The current PrimeQA/TechQA hybrid fast-filter plus alternate-screening
+train-CV/dev validation is recorded in:
+
+```text
+docs/primeqa_hybrid_fast_filter_screening_validation.md
+```
+
+Stage121 loads only train/dev split files, the public Stage120 protocol, local
+corpus documents, and existing local dense cache metadata. It rebuilds candidate
+records in memory only. It does not load the test split, does not run final test
+metrics, and does not write raw candidate rows or raw document/question/answer
+text into the public report.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

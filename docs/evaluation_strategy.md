@@ -906,3 +906,17 @@ recorded in:
 ```text
 docs/primeqa_hybrid_fast_filter_screening_protocol.md
 ```
+
+The current Stage 121 fast-filter plus alternate-screening train-CV/dev
+validation is recorded in:
+
+```text
+docs/primeqa_hybrid_fast_filter_screening_validation.md
+```
+
+The current public-source notes on high-recall RAG agent retrieval patterns are
+recorded in:
+
+```text
+docs/rag_high_recall_agent_research_notes.md
+```

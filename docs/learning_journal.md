@@ -28848,3 +28848,124 @@ What I learned:
 
 Next step: Stage121 should run the frozen fast-filter plus alternate-screening
 protocol on train grouped cross-validation and dev report-only validation.
+
+## 2026-07-16 - Stage 121 fast-filter screening train-CV/dev validation
+
+Goal: run the Stage120 fast-filter plus alternate-screening protocol on train
+grouped cross-validation and dev report-only validation, then compare it with
+public-source high-recall RAG/agent retrieval patterns.
+
+What changed:
+
+- Added `src/ts_rag_agent/application/primeqa_hybrid_fast_filter_screening_validation.py`.
+- Added `scripts/run_primeqa_hybrid_fast_filter_screening_validation.py`.
+- Added `tests/test_primeqa_hybrid_fast_filter_screening_validation.py`.
+- Added `docs/primeqa_hybrid_fast_filter_screening_validation.md`.
+- Added `docs/rag_high_recall_agent_research_notes.md`.
+- Updated evaluation/data strategy docs and Stage120 protocol follow-up notes.
+
+Final real run:
+
+```text
+python scripts\run_primeqa_hybrid_fast_filter_screening_validation.py --user-confirmed-validation --confirmation-note "user confirmed Stage121 train-CV/dev fast-filter plus alternate-screening validation after Stage120 protocol freeze; rerun after protected-prefix duplicate segment fix; test locked; dev report-only; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+Baseline reproduced:
+
+```text
+train hit@10: 0.6892
+train hit@20: 0.7541
+train hit@200: 0.9324
+train mrr@20: 0.5062
+
+dev hit@10: 0.7237
+dev hit@20: 0.8026
+dev hit@200: 0.9079
+dev mrr@20: 0.5588
+```
+
+Result:
+
+```text
+status: primeqa_hybrid_fast_filter_screening_completed_train_cv_selected_dev_reported
+selected_config_id: special_token_exact_window40_rule_selector_v1
+selected_family_id: evidence_density_fast_filter_family_v1
+guard checks: 14 / 14 passed
+guard-passed configs: 2 / 6
+selectable positive configs: 1 / 6
+```
+
+Selected config train-CV result:
+
+```text
+hit@10 delta: +0.0000
+hit@20 delta: +0.0027
+hit@20 count delta: +1
+hit@200 delta: +0.0000
+mrr@20 delta: +0.0000
+average promoted tail docs into top10: 0.0
+```
+
+Selected config dev report-only result:
+
+```text
+hit@10 delta: +0.0000
+hit@20 delta: +0.0000
+hit@200 delta: +0.0000
+mrr@20 delta: -0.0008
+dev_used_for_selection: false
+dev_used_for_retuning: false
+```
+
+Important failed-but-interesting signal:
+
+```text
+top10_locked_route_vote_window50_pairwise_logistic_v1:
+  train hit@20 delta: +0.0108
+  dev hit@20 delta: +0.0132
+  blocked by train_cv_hit_at_20_regression_rate: 0.0189 > 0.01
+```
+
+Bug found and fixed before final run:
+
+```text
+when protected_prefix_depth > 10, ranks 11-20 were appended again
+```
+
+This duplicated already-protected records and created an invalid hit@200 loss
+for one config. I fixed the segment assembly and reran the real Stage121
+validation. The final artifact and docs use the rerun result.
+
+Public high-recall RAG/agent research notes:
+
+- LlamaIndex and Elastic document RRF/fusion patterns over multiple result
+  lists.
+- Haystack documents hybrid BM25 plus embedding retrieval, followed by ranking.
+- ColBERT, SPLADE, HyDE, RAPTOR, and Self-RAG show broader first-stage,
+  learned sparse/late-interaction, query expansion, hierarchical retrieval, and
+  adaptive retrieval directions.
+
+What I learned:
+
+- Stage121 is safer than full top200 reranking, but the selected improvement is
+  weak: train-CV gains one hit@20 case and dev hit@10/hit@20/hit@200 are flat.
+- The fixed Stage116 top200 pool still caps recall at 0.9324 train and 0.9079
+  dev; second-stage screening cannot recover missing gold documents outside
+  top200.
+- The strongest public pattern for genuinely higher recall is to improve the
+  first-stage candidate generator through multi-query/hybrid/learned-sparse or
+  late-interaction retrieval, then keep a conservative second-stage screener.
+
+Verification:
+
+```text
+targeted ruff: passed
+targeted pytest: 2 passed
+Stage121 final real rerun: passed
+full ruff: passed
+full pytest: 330 passed
+```
+
+Next step: Stage122 should review changed cases for the selected safe config
+and the stronger-but-blocked logistic config before designing any new
+first-stage recall expansion protocol.
