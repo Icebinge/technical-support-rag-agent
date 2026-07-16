@@ -27837,3 +27837,180 @@ no final metrics
 runtime defaults unchanged
 no fallback strategies
 ```
+
+## 2026-07-16 - Stage 115 retrieval/index redesign stop decision
+
+### 本阶段目标
+
+把 Stage114 的真实结论正式固化为 stop decision：冻结的 Stage113
+retrieval/index redesign family 没有 train-CV-selectable config，不能进入 runtime、
+不能打开 final-test gate，也不能用 dev report-only 结果反向挑选候选。
+
+### 新增内容
+
+代码：
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_retrieval_index_redesign_stop_decision.py
+scripts/decide_primeqa_hybrid_retrieval_index_redesign_stop.py
+tests/test_primeqa_hybrid_retrieval_index_redesign_stop_decision.py
+```
+
+文档：
+
+```text
+docs/primeqa_hybrid_retrieval_index_redesign_stop_decision.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+```
+
+产物：
+
+```text
+artifacts/primeqa_hybrid_retrieval_index_redesign_stop_decision_stage115.json
+artifacts/primeqa_hybrid_retrieval_index_redesign_stop_decision_stage115_visuals/
+```
+
+### 真实运行
+
+命令：
+
+```text
+python scripts\decide_primeqa_hybrid_retrieval_index_redesign_stop.py --user-confirmed-stop --confirmation-note "user confirmed Stage115 retrieval/index redesign stop decision on 2026-07-16 after Stage114 selected 0 of 8 configs; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+结果：
+
+```text
+status: primeqa_hybrid_retrieval_index_redesign_family_stopped
+stopped_family_id: retrieval_index_redesign_candidate_family
+stopped_protocol_id: primeqa_hybrid_retrieval_index_redesign_protocol_v1
+stopped_analysis_id: primeqa_hybrid_retrieval_index_redesign_train_cv_dev_validation_v1
+guard checks: 25 / 25 passed
+recommended_next_direction: user_confirmed_next_research_direction_required
+```
+
+继续禁止：
+
+```text
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+fallback_strategies_enabled: false
+default_runtime_policy: unchanged
+```
+
+### 停止原因
+
+Stage114 的 8 个候选没有任何一个通过 train-CV selectability。
+
+最佳 retrieval 改善只有：
+
+```text
+retrieval_context_miss delta: -4
+gold doc recall@10 delta: +0.0108
+```
+
+但这些候选被 downstream guard 拦住：
+
+```text
+evc_special_token_exact_boost_v1:
+  changed answer rate: 0.1833
+  failed guards:
+    train_cv_answerability_false_answer_delta_within_guard
+    train_cv_evidence_selection_miss_delta_within_guard
+
+evc_special_token_title_heading_boost_v1:
+  changed answer rate: 0.7278
+  failed guards:
+    train_cv_evidence_selection_miss_delta_within_guard
+    train_cv_gold_span_beats_selected_delta_within_guard
+    train_cv_changed_answer_rate_within_guard
+```
+
+title/heading 加权候选也有小幅 retrieval 改善，但 changed-answer rate 太高：
+
+```text
+thw_title2_heading2_body1_doc_bm25_v1:
+  retrieval_context_miss delta: -3
+  recall@10 delta: +0.0081
+  changed answer rate: 0.7171
+
+thw_title3_heading2_body1_doc_bm25_v1:
+  retrieval_context_miss delta: -3
+  recall@10 delta: +0.0081
+  changed answer rate: 0.8327
+```
+
+section-level family 没有形成 retrieval 改善：
+
+```text
+best section objective delta: +31.5
+best section retrieval_context_miss delta: +9
+```
+
+### 可视化结果
+
+已生成：
+
+```text
+artifacts\primeqa_hybrid_retrieval_index_redesign_stop_decision_stage115_visuals\stage115_train_cv_retrieval_context_miss_deltas.svg
+artifacts\primeqa_hybrid_retrieval_index_redesign_stop_decision_stage115_visuals\stage115_train_cv_gold_doc_recall_deltas.svg
+artifacts\primeqa_hybrid_retrieval_index_redesign_stop_decision_stage115_visuals\stage115_train_cv_changed_answer_rates.svg
+artifacts\primeqa_hybrid_retrieval_index_redesign_stop_decision_stage115_visuals\stage115_train_cv_guard_failure_reasons.svg
+artifacts\primeqa_hybrid_retrieval_index_redesign_stop_decision_stage115_visuals\stage115_selectability_by_family.svg
+artifacts\primeqa_hybrid_retrieval_index_redesign_stop_decision_stage115_visuals\stage115_stop_decision_flags.svg
+artifacts\primeqa_hybrid_retrieval_index_redesign_stop_decision_stage115_visuals\stage115_stop_guard_check_status.svg
+```
+
+### 问题、原因与修正
+
+- 问题 1：Stage115 很容易被误解成可以根据 dev 里 F1 小涨继续挑选候选。
+  - 原因：Stage114 中部分 config 在 dev report-only 上有正向 F1。
+  - 修正：Stage115 明确 `dev_selection_used: false`、`dev_retuning_used: false`，
+    并把下一步设置为 `user_confirmed_next_research_direction_required`。
+- 问题 2：Stage115 不应再次运行 retrieval/answer metrics。
+  - 原因：stop decision 只负责冻结路线状态，不负责产生新指标。
+  - 修正：实现只读取 Stage114 public-safe JSON；guard 中显式记录 split files、
+    corpus documents、new metrics、final metrics 均未运行。
+- 问题 3：后续路线不能由 stop decision 偷偷决定。
+  - 原因：新研究方向会引入新的假设和设计取舍。
+  - 修正：decision 只要求用户确认下一研究方向，不自动启动 Stage116 协议。
+
+### 验证
+
+目标验证：
+
+```text
+python -m ruff check src\ts_rag_agent\application\primeqa_hybrid_retrieval_index_redesign_stop_decision.py scripts\decide_primeqa_hybrid_retrieval_index_redesign_stop.py tests\test_primeqa_hybrid_retrieval_index_redesign_stop_decision.py
+python -m pytest tests\test_primeqa_hybrid_retrieval_index_redesign_stop_decision.py -q
+python scripts\decide_primeqa_hybrid_retrieval_index_redesign_stop.py --user-confirmed-stop ...
+```
+
+结果：
+
+```text
+targeted ruff: passed
+targeted pytest: 3 passed
+Stage115 run: passed
+guard checks: 25 / 25 passed
+```
+
+### 我学到了
+
+- stop decision 不能只写“失败了”，还要保存为什么失败、哪个 guard 阻断、dev 为什么不能救。
+- retrieval recall 的小幅改善如果带来 evidence selection 和 changed-answer 风险，就不能进入 runtime。
+- Stage115 之后已经没有当前 retrieval/index redesign route 可以继续默认推进；下一步必须先确认新研究方向。
+
+### 下一步
+
+Stage116：只有用户确认新研究方向后，才能冻结新的 train/dev-only protocol。
+
+继续保持：
+
+```text
+test locked
+no final metrics
+runtime defaults unchanged
+no fallback strategies
+```

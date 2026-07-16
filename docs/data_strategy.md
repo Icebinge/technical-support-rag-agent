@@ -601,6 +601,13 @@ comparison is recorded in:
 docs/primeqa_hybrid_retrieval_index_redesign_comparison.md
 ```
 
+The current PrimeQA/TechQA hybrid retrieval/index redesign stop decision is
+recorded in:
+
+```text
+docs/primeqa_hybrid_retrieval_index_redesign_stop_decision.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:

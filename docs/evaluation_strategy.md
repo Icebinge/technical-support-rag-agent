@@ -867,3 +867,9 @@ recorded in:
 ```text
 docs/primeqa_hybrid_retrieval_index_redesign_comparison.md
 ```
+
+The current Stage 115 retrieval/index redesign stop decision is recorded in:
+
+```text
+docs/primeqa_hybrid_retrieval_index_redesign_stop_decision.md
+```
