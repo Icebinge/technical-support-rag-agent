@@ -1055,3 +1055,18 @@ verification-reason, metric, isolation, and public-trace deltas were zero, but
 the sidecar again captured none of 9 train and 1 dev append opportunities.
 Therefore agent integration is validated while sidecar effectiveness remains
 `safe_but_neutral`; test and runtime-default gates remain closed.
+
+The current Stage 138 optional sidecar-agent entrypoint and executable
+action-state protocol freeze is recorded in:
+
+```text
+docs/primeqa_hybrid_optional_sidecar_agent_entrypoint_protocol.md
+```
+
+Stage138 executes only the deterministic state machine, covering accepted and
+refused terminal paths plus invalid-transition rejection. Its 31/31 guards
+inherit Stage137 integration and isolation facts while keeping the runtime
+entrypoint unimplemented. This is protocol evidence, not train/dev answer
+evaluation or runtime action-order validation. Stage139 must implement the
+optional adapter and revalidate per-row action traces and Stage137 answer-path
+invariance before any runtime integration decision.

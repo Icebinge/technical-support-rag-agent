@@ -879,6 +879,19 @@ trace objects exist only in memory. The saved report contains aggregate metrics,
 identity/isolation counts, offline train/dev opportunity diagnostics, guards,
 and visualization metadata. Test remains unloaded.
 
+The current PrimeQA/TechQA hybrid Stage138 optional sidecar-agent entrypoint
+and executable action-state protocol freeze is recorded in:
+
+```text
+docs/primeqa_hybrid_optional_sidecar_agent_entrypoint_protocol.md
+```
+
+Stage138 reads only the saved public-safe Stage137 aggregate report. It loads no
+split files, corpus documents, candidate rows, model outputs, gold labels, or
+test data. Its two canonical action traces are synthetic public-safe state
+transitions, not per-sample runtime traces. The optional runtime entrypoint is
+not implemented or registered as the default.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

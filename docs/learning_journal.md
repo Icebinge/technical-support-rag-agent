@@ -30863,3 +30863,129 @@ git diff --check: passed
 下一步：Stage138 冻结可选 sidecar-agent entrypoint 与 action-state protocol，明确 retrieve、answer、verify、
 observe、refuse 状态和转换，复用已验证的 Stage137 orchestrator；它仍不是 runtime 默认策略，不打开 test，
 不加入兜底策略。
+
+## 2026-07-17 - Stage 138 可选 sidecar-agent 入口与 action-state protocol 冻结
+
+目标：在不修改 Stage136/137 已验证 orchestrator、不接入默认 runtime 的前提下，把下一阶段 agent 入口需要遵守的
+状态、动作、终止条件和权限边界固化成可执行、可测试、可公开审计的协议。该阶段只读取 Stage137 公开聚合产物，
+不重新加载 train/dev 原始数据，不读取 test，不运行检索和答案评估。
+
+本步改动：
+
+- 新增 `src/ts_rag_agent/application/primeqa_hybrid_sidecar_agent_entrypoint_protocol.py`。
+- 新增 `scripts/freeze_primeqa_hybrid_sidecar_agent_entrypoint_protocol.py`。
+- 新增 `tests/test_primeqa_hybrid_sidecar_agent_entrypoint_protocol.py`。
+- 新增 `docs/primeqa_hybrid_optional_sidecar_agent_entrypoint_protocol.md`。
+- 更新 Stage137 follow-up、data strategy、evaluation strategy 和本 learning journal。
+
+工程实现：
+
+- 用 `SidecarAgentState` 和 `SidecarAgentAction` 枚举固化 `ready`、`retrieve`、`answer`、`verify`、
+  `observe`、`complete`、`refuse`。
+- 用 `SidecarAgentTransitionPolicy` 协议定义可替换的转换策略接口，以
+  `FrozenSidecarAgentTransitionPolicy` 实现 Stage138 固定策略。
+- `SidecarAgentActionStateMachine` 封装当前状态和不可变 transition trace；非法动作抛出
+  `InvalidSidecarAgentTransitionError`，抛错前不改变状态。
+- 固定正常终止路径为 `retrieve -> answer -> verify -> observe -> complete`。
+- 固定拒绝终止路径为 `retrieve -> answer -> verify -> observe -> refuse`。
+- `complete` 和 `refuse` 都是无出口终态；协议没有循环、重试动作、fallback transition 或二次检索。
+- `observe` 定义为验证完成后的 sidecar 诊断发布状态，不允许 sidecar 进入 generator 或 verifier 上下文。
+- Stage138 真实执行两条规范状态路径并写入公开安全聚合 trace，但不执行 runtime orchestrator，
+  因此不声称真实业务 action order 已验证。
+
+真实冻结命令：
+
+```text
+python scripts/freeze_primeqa_hybrid_sidecar_agent_entrypoint_protocol.py --user-confirmed-protocol --confirmation-note "user confirmed Stage138 optional sidecar-agent entrypoint and executable action-state protocol freeze after Stage137 validation; protocol-only runtime entrypoint not wired; test locked; no final metrics; runtime defaults unchanged; no retries or fallback strategies"
+```
+
+真实结果：
+
+```text
+status: primeqa_hybrid_optional_sidecar_agent_entrypoint_protocol_frozen
+guard checks: 31 / 31 passed
+failed checks: []
+optional agent entrypoint protocol frozen: true
+state machine executable: true
+runtime entrypoint implemented: false
+runtime action order validated: false
+can implement optional agent entrypoint now: true
+test split loaded: false
+final test metrics run: false
+runtime defaultization allowed now: false
+retry actions enabled: false
+fallback strategies enabled: false
+default runtime policy: unchanged
+public-safe forbidden keys: []
+```
+
+继承并守住的 Stage137 事实：
+
+```text
+source guards: 36 / 36 passed
+train/dev rows: 562 / 121
+answer-path identity violations: 0
+sidecar generation/verification leaks: 0
+sidecar/primary overlaps: 0
+public trace violations: 0
+train append opportunities / captures: 9 / 0
+dev append opportunities / captures: 1 / 0
+sidecar effectiveness: safe_but_neutral
+```
+
+遇到的问题、原因和修正：
+
+- 首轮 ruff 发现一个未使用的 `asdict` 导入和一处测试行超过 100 字符。这是新增文件的静态格式问题，
+  删除未使用导入并拆行后定向 ruff 通过；没有改动协议语义。
+- Stage136 orchestrator 内部已经封装了 observation、generation 和 verification，Stage138 若直接把一次 orchestrator
+  调用事后包装成多个动作，会误导为真实执行顺序已被观察。为避免制造不真实结论，本步只实现并执行纯状态机，
+  明确记录 `runtime_entrypoint_implemented=false` 和 `runtime_action_order_validated=false`，把真实适配与逐样本验证留给
+  Stage139。
+- `observe` 容易被误解为把 sidecar 证据加入答案。协议把它限定为 verification 之后的诊断发布动作，并继续冻结
+  sidecar answer-generation、verification-context 和 primary-replacement 权限为 false。
+
+本步学到的东西：
+
+- Agent 的“流程图”只有变成拒绝非法状态、封闭终态并能输出可审计 trace 的状态机，才是可以落实的工程协议。
+- 状态协议通过不等于业务入口通过。Stage138 证明的是 transition semantics；Stage137 证明的是 orchestrator
+  answer-path invariance。只有 Stage139 把二者真正接起来并重新观察依赖输入，才能证明 runtime action trace。
+- 拒绝必须是正式终态，而不是隐含触发另一条检索或答案路径。当前协议发生拒绝后直接终止，没有重试和兜底。
+- `safe_but_neutral` 必须继续保留：Stage138 没有产生新的 citation recovery 或 answer-quality 数据。
+
+可视化结果：
+
+```text
+stage138_stage137_identity_isolation_counts.svg
+stage138_sidecar_opportunity_capture.svg
+stage138_state_outdegree.svg
+stage138_entrypoint_permission_flags.svg
+stage138_decision_flags.svg
+stage138_guard_check_status.svg
+```
+
+阶段内验证：
+
+```text
+targeted ruff: passed
+targeted pytest: 10 passed
+Stage138 real public-aggregate protocol freeze: passed
+Stage138 guard checks: 31 / 31 passed
+artifact ignore check: passed
+```
+
+全仓库验证：
+
+```text
+full repository ruff check: passed
+Stage138 changed-file format check: 3 files already formatted
+full repository pytest: 419 passed
+git diff --check: passed
+full repository ruff format check: not clean, 314 historical Python files would be reformatted
+```
+
+全仓 `ruff format --check .` 使用 Ruff 0.15.21，报告 314 个历史 Python 文件需要格式化；本步新增的 3 个
+Python 文件不在该列表中。因为这些历史文件与 Stage138 协议无关，本步没有批量重写它们，也没有把该项误写成通过。
+
+下一步：Stage139 实现真正的可选 entrypoint adapter，把冻结状态机接到 Stage137-validated orchestrator，并运行 train
+五折分组完整性验证与 dev 单次只读 action-trace 验证。逐样本必须只有五次合法转换，并继续比较 generator/verifier
+实际输入、原始答案、验证答案和验证原因；dev 不选参，test 继续锁定，runtime 默认不变，不加入重试或兜底策略。

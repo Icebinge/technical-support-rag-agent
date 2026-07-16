@@ -260,10 +260,15 @@ This does not authorize runtime defaultization. The current sidecar adds
 diagnostic visibility but no demonstrated citation-recovery or answer-quality
 benefit.
 
-## Next Step
+## Follow-Up
 
-Stage138 should freeze an optional sidecar-agent entrypoint and action-state
-protocol. It should define explicit retrieve, answer, verify, observe, and
-refuse states around the validated Stage137 orchestrator while keeping the
-existing runtime default unchanged. Test remains locked and fallback strategies
+Stage138 completed the optional sidecar-agent entrypoint and executable
+action-state protocol freeze. The protocol is recorded in:
+
+```text
+docs/primeqa_hybrid_optional_sidecar_agent_entrypoint_protocol.md
+```
+
+The state machine passed all freeze guards, but the runtime entrypoint remains
+unimplemented and non-default. Test remains locked and fallback strategies
 remain disabled.
