@@ -160,7 +160,14 @@ default_runtime_policy: unchanged
 
 ## Next Step
 
-Stage132 should run the frozen append-candidate evidence shortlist train-CV/dev
-validation. Train grouped cross-validation is the selection surface; dev remains
-single-pass report-only. Test remains locked, runtime defaults stay unchanged,
-and fallback strategies stay disabled.
+Stage132 ran the frozen append-candidate evidence shortlist train-CV/dev
+validation and selected the conservative sidecar config. The result is recorded
+in:
+
+```text
+docs/primeqa_hybrid_append_candidate_evidence_shortlist_validation.md
+```
+
+The next step is Stage133: review the selected sidecar config before any
+runtime or test gate. Test remains locked, runtime defaults stay unchanged, and
+fallback strategies stay disabled.

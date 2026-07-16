@@ -989,3 +989,10 @@ freeze is recorded in:
 ```text
 docs/primeqa_hybrid_append_candidate_evidence_shortlist_protocol.md
 ```
+
+The current Stage 132 append-candidate evidence shortlist train-CV/dev
+validation is recorded in:
+
+```text
+docs/primeqa_hybrid_append_candidate_evidence_shortlist_validation.md
+```

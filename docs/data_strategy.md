@@ -796,6 +796,20 @@ prefix evidence protected and treat Stage128 append candidates as supplemental
 evidence candidates. The configs are not runtime defaults and are not fallback
 strategies.
 
+The current PrimeQA/TechQA hybrid Stage132 append-candidate evidence shortlist
+train-CV/dev validation is recorded in:
+
+```text
+docs/primeqa_hybrid_append_candidate_evidence_shortlist_validation.md
+```
+
+Stage132 loads only train/dev split files, local corpus documents, existing
+local dense cache metadata, and public-safe Stage125/128/131 protocol
+artifacts. It does not load the test split, does not run final test metrics,
+and writes only aggregate public-safe profile, selection, guard, and
+visualization summaries. It selected only the conservative sidecar config; this
+is not runtime defaultization.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

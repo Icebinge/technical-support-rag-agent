@@ -30020,3 +30020,139 @@ Next step: Stage132 should run the frozen append-candidate evidence shortlist
 train-CV/dev validation. Train grouped cross-validation is the selection surface;
 dev remains report-only. Test remains locked, runtime defaults remain unchanged,
 and fallback strategies remain disabled.
+
+## 2026-07-16 - Stage 132 append-candidate evidence shortlist train-CV/dev validation
+
+目标：按照 Stage131 冻结的协议，真实运行 3 个 append-candidate evidence
+shortlist configs 的 train grouped-CV + dev report-only 验证。测试集继续锁定，
+不运行 final test metrics，不修改 runtime 默认策略，不加入兜底策略。
+
+本步改动：
+
+- 新增 `src/ts_rag_agent/application/primeqa_hybrid_append_candidate_evidence_shortlist_validation.py`。
+- 新增 `scripts/run_primeqa_hybrid_append_candidate_evidence_shortlist_validation.py`。
+- 新增 `tests/test_primeqa_hybrid_append_candidate_evidence_shortlist_validation.py`。
+- 新增 `docs/primeqa_hybrid_append_candidate_evidence_shortlist_validation.md`。
+- 更新 Stage131 follow-up、data/evaluation strategy 和本 learning journal。
+
+真实运行命令：
+
+```text
+python scripts\run_primeqa_hybrid_append_candidate_evidence_shortlist_validation.py --user-confirmed-validation --confirmation-note "user confirmed Stage132 append-candidate evidence shortlist train-CV/dev validation after Stage131 protocol freeze; train/dev only; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+候选池检查：
+
+```text
+train rows: 562
+dev rows: 121
+train prefix identity violation count: 0
+dev prefix identity violation count: 0
+train append budget exceeded count: 0
+dev append budget exceeded count: 0
+train append count average: 200.0
+dev append count average: 200.0
+```
+
+Train-CV 结果：
+
+```text
+candidate count: 3
+eligible config count: 1
+selected config: prefix10_append_sidecar_probe_v1
+
+prefix10_append_sidecar_probe_v1:
+  guard: passed
+  verified F1 delta vs Stage116: +0.0000
+  gold citation count delta vs Stage116: +0
+  target-depth gold hit delta vs Stage116: +9
+  changed answer rate vs Stage116: 0.0000
+
+prefix9_append1_high_precision_v1:
+  guard: failed
+  verified F1 delta vs Stage116: +0.0015
+  gold citation count delta vs Stage116: +0
+  target-depth gold hit delta vs Stage116: +9
+  changed answer rate vs Stage116: 0.3932
+  failed check: append_selected_citations_do_not_displace_prefix_like_citations_without_gold_gain
+
+prefix8_append2_balanced_probe_v1:
+  guard: failed
+  verified F1 delta vs Stage116: -0.0001
+  gold citation count delta vs Stage116: -1
+  target-depth gold hit delta vs Stage116: +9
+  changed answer rate vs Stage116: 0.3932
+  failed checks:
+    verified_f1_delta_vs_stage116_non_negative
+    gold_citation_count_delta_vs_stage116_non_negative
+    append_selected_citations_do_not_displace_prefix_like_citations_without_gold_gain
+```
+
+Dev report-only 结果：
+
+```text
+prefix10_append_sidecar_probe_v1:
+  verified F1 delta vs Stage116: +0.0000
+  gold citation count delta vs Stage116: +0
+  target-depth gold hit delta vs Stage116: +1
+  changed answer rate vs Stage116: 0.0000
+
+prefix9_append1_high_precision_v1:
+  verified F1 delta vs Stage116: -0.0036
+  gold citation count delta vs Stage116: -2
+  target-depth gold hit delta vs Stage116: +1
+  changed answer rate vs Stage116: 0.4132
+
+prefix8_append2_balanced_probe_v1:
+  verified F1 delta vs Stage116: -0.0053
+  gold citation count delta vs Stage116: -2
+  target-depth gold hit delta vs Stage116: +1
+  changed answer rate vs Stage116: 0.4132
+```
+
+结果：
+
+```text
+status: primeqa_hybrid_append_candidate_evidence_shortlist_validation_completed
+guard checks: 22 / 22 passed
+selected_config_id: prefix10_append_sidecar_probe_v1
+eligible_config_count: 1 / 3
+recommended_next_direction: review_append_candidate_evidence_shortlist_selected_config
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+runtime_defaultization_allowed_now: false
+fallback_strategies_enabled: false
+default_runtime_policy: unchanged
+public_safe_contract.forbidden_keys_found: []
+```
+
+本步学到的东西：
+
+- Stage132 验证确认：只要 append candidates 能替换 prefix slots，就很容易重现
+  Stage130 的 displacement 风险。
+- `prefix9_append1_high_precision_v1` 在 train-CV 上 F1 小幅增加且 gold citation
+  count 持平，但 append selected citations 仍然挤掉 prefix-like citations，且没有正向
+  gold citation gain，所以被 guard 阻断。
+- `prefix8_append2_balanced_probe_v1` 在 train-CV 和 dev 都明显更危险，citation 和 F1
+  都退化，必须停止这条替换式路线。
+- `prefix10_append_sidecar_probe_v1` 是 safe-but-neutral：answer context 与 Stage116
+  保持一致，所以 answer quality 不变、changed answer rate 为 0，同时保留 top400
+  retrieval coverage。它是 agent 设计候选信号，不是 runtime 默认策略。
+- 下一步不能直接打开 test 或 defaultization；应该先 review 这个 selected sidecar
+  config，看它是否对 agent 设计有实际意义。
+
+Verification:
+
+```text
+targeted ruff: passed
+targeted pytest: 6 passed
+Stage132 real validation: passed
+artifact ignore check: passed
+full ruff: passed
+full pytest: 374 passed
+```
+
+Next step: Stage133 should review the selected Stage132 sidecar config before
+any runtime or test gate. Test remains locked, runtime defaults remain unchanged,
+and fallback strategies remain disabled.
