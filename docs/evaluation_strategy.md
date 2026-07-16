@@ -968,3 +968,10 @@ selected prefix-preserving expansion is recorded in:
 ```text
 docs/primeqa_hybrid_agent_retrieval_integration_protocol.md
 ```
+
+The current Stage 129 agent retrieval integration train-CV/dev validation is
+recorded in:
+
+```text
+docs/primeqa_hybrid_agent_retrieval_integration_validation.md
+```

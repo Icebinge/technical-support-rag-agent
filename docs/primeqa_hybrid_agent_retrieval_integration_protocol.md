@@ -247,3 +247,13 @@ default_runtime_policy: unchanged
 Stage129 should run train grouped-CV plus dev report-only validation for the
 frozen agent retrieval integration protocol. Test remains locked, runtime
 defaults remain unchanged, and fallback strategies remain disabled.
+
+Stage129 completed this validation in:
+
+```text
+docs/primeqa_hybrid_agent_retrieval_integration_validation.md
+```
+
+The validation is blocked/failed for runtime approval: Stage128 top400 preserved
+the recall gain but lost 1 train-CV gold citation versus the Stage116 top200
+agent-pool control.

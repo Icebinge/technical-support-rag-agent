@@ -755,6 +755,21 @@ remain the immutable Stage116 prefix, ranks 201-400 are append-only recall
 candidates for Stage129 validation, runtime defaults stay unchanged, and
 fallback strategies stay disabled.
 
+The current PrimeQA/TechQA hybrid Stage129 agent retrieval integration
+train-CV/dev validation is recorded in:
+
+```text
+docs/primeqa_hybrid_agent_retrieval_integration_validation.md
+```
+
+Stage129 loads only train/dev split files, the public-safe Stage128 protocol,
+the public-safe Stage125 executable append config, local corpus documents, and
+existing local dense cache metadata. It does not load the test split, does not
+run final test metrics, and writes only aggregate public-safe profile,
+candidate-pool, guard, and visualization summaries. It does not write raw
+candidate rows, raw question text, raw answer text, raw document text, raw
+document IDs, or raw sample IDs.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

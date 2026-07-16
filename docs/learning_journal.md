@@ -29637,3 +29637,154 @@ artifact ignore check: passed
 Next step: Stage129 should run train grouped-CV plus dev report-only validation
 for the frozen agent retrieval integration protocol. Test remains locked,
 runtime defaults remain unchanged, and fallback strategies remain disabled.
+
+## 2026-07-16 - Stage 129 agent retrieval integration validation
+
+目标：验证 Stage128 冻结的 top400 agent candidate pool 是否能被 evidence
+selection / citation validation 安全消费，而不是只看 recall 是否提高。
+
+本步改动：
+
+- 新增 `src/ts_rag_agent/application/primeqa_hybrid_agent_retrieval_integration_validation.py`。
+- 新增 `scripts/run_primeqa_hybrid_agent_retrieval_integration_validation.py`。
+- 新增 `tests/test_primeqa_hybrid_agent_retrieval_integration_validation.py`。
+- 新增 `docs/primeqa_hybrid_agent_retrieval_integration_validation.md`。
+- 更新 Stage128 follow-up、data/evaluation strategy 和本 learning journal。
+
+真实运行命令：
+
+```text
+python scripts\run_primeqa_hybrid_agent_retrieval_integration_validation.py --user-confirmed-validation --confirmation-note "user confirmed Stage129 agent retrieval integration train-CV/dev validation after Stage128 protocol freeze; train/dev only; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+过程修正：
+
+- 第一版让 sentence evidence selector 直接扫 400-document candidate pool，
+  运行超过工具侧 20 分钟窗口后被停止。这个结果没有作为实验结论。
+- 随后改成更合理的两段式 agent consumer：
+  candidate pool -> cheap document shortlist top10 -> sentence evidence selection。
+- 第二版完成后发现 unanswerable 样本没有构造 Stage116/128 候选池，会把
+  answerability 指标人为抬高。该 artifact 没作为最终结论。
+- 修正后对 train/dev 全部样本构造候选池并重跑，最终结果以下方 corrected
+  Stage129 artifact 为准。
+
+验证 profile：
+
+```text
+baseline: stage102_bm25_top10_verified_baseline
+  candidate depth: 10
+  answer context depth: 10
+  verifier max citation rank: 3
+
+control: stage116_top200_agent_pool_control
+  candidate depth: 200
+  answer context depth: 10
+  verifier max citation rank: 200
+
+candidate: stage128_prefix_append_top400_agent_pool
+  candidate depth: 400
+  answer context depth: 10
+  verifier max citation rank: 400
+```
+
+候选池检查：
+
+```text
+train rows: 562
+dev rows: 121
+train/dev append count average: 200.0 / 200.0
+prefix identity violations: 0
+append budget exceeded: 0
+```
+
+Train-CV 结果：
+
+```text
+baseline BM25 top10:
+  verified F1: 0.2015
+  gold citation rate: 0.5014
+  gold citation count: 176
+  gold hit at profile depth: 245 / 370 = 0.6622
+
+Stage116 top200 control:
+  verified F1: 0.1946
+  gold citation rate: 0.4092
+  gold citation count: 151
+  gold hit at profile depth: 345 / 370 = 0.9324
+
+Stage128 top400 candidate:
+  verified F1: 0.1949
+  gold citation rate: 0.4065
+  gold citation count: 150
+  gold hit at profile depth: 354 / 370 = 0.9568
+```
+
+Stage128 vs Stage116 control:
+
+```text
+verified F1 delta: +0.0003
+gold citation rate delta: -0.0027
+gold citation count delta: -1
+answerable refusal rate delta: +0.0000
+unanswerable refusal rate delta: +0.0000
+gold hit count at profile depth delta: +9
+gold hit rate at profile depth delta: +0.0244
+changed verified answers: 221
+```
+
+Dev report-only:
+
+```text
+Stage128 verified F1: 0.1837
+Stage128 gold citation rate: 0.4079
+Stage128 gold hit at profile depth: 70 / 76 = 0.9211
+changed verified answers vs Stage116 control: 50
+dev selection allowed: false
+dev retuning allowed: false
+```
+
+结果：
+
+```text
+status: primeqa_hybrid_agent_retrieval_integration_validation_blocked_or_failed
+guard checks: 20 / 21 passed
+failed guard: stage129_agent_answer_quality_train_cv_guard
+failed train-CV sub-check: gold_citation_count_delta_vs_stage116_non_negative
+train_cv_validation_passed: false
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+runtime_defaultization_allowed_now: false
+fallback_strategies_enabled: false
+default_runtime_policy: unchanged
+recommended_next_direction: review_stage129_agent_integration_failure_patterns
+```
+
+本步学到的东西：
+
+- 召回提高仍然不能直接等价为 answer pipeline 通过。Stage128 top400 确实多召回
+  9 个 train gold doc，但 evidence selection 后 gold citation 少了 1 个。
+- 400-depth candidate pool 必须有第二阶段精筛，否则 sentence 级 evidence selector
+  直接扫全文过重，不适合当前 agent 验证路线。
+- 即使加入 document shortlist，append 区域确实被使用：
+  train-CV selected citations 中 42 个来自 ranks 201-400，但这没有带来
+  gold-citation-safe 的净收益。
+- Stage116 top200 control 仍然是当前更稳的 agent-pool 边界；Stage128 需要先做
+  failure-pattern review，不能进入 runtime/defaultization。
+- 本步没有打开测试集，没有运行 final test metrics，没有修改 runtime 默认策略，
+  也没有加入任何兜底策略。
+
+Verification:
+
+```text
+targeted ruff: passed
+targeted pytest: 6 passed
+Stage129 corrected real validation: passed as an executed run, but validation guard failed
+artifact ignore check: passed
+full ruff: passed
+full pytest: 356 passed
+```
+
+Next step: Stage130 should review Stage129 agent-integration failure patterns
+before any runtime or final-test gate. Test remains locked, runtime defaults
+remain unchanged, and fallback strategies remain disabled.
