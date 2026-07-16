@@ -633,6 +633,16 @@ Stage118 rebuilt 74,000 train and 15,200 dev candidate records in memory only.
 It did not write raw candidate rows, raw question text, raw answer text, raw
 document text, or raw document IDs.
 
+The current PrimeQA/TechQA hybrid second-stage reranking stop decision is
+recorded in:
+
+```text
+docs/primeqa_hybrid_second_stage_reranking_stop_decision.md
+```
+
+Stage119 reads only the public-safe Stage118 report. It does not load split
+files, corpus documents, or candidate rows.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

@@ -893,3 +893,9 @@ recorded in:
 ```text
 docs/primeqa_hybrid_second_stage_reranking_validation.md
 ```
+
+The current Stage 119 second-stage reranking stop decision is recorded in:
+
+```text
+docs/primeqa_hybrid_second_stage_reranking_stop_decision.md
+```

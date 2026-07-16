@@ -194,8 +194,16 @@ Stage118 should not be defaultized and should not open the final test gate.
 
 ## Next Step
 
-Stage119 should record the second-stage reranking stop decision, preserving the
-current boundary:
+Stage119 recorded the second-stage reranking stop decision:
+
+```text
+report: artifacts\primeqa_hybrid_second_stage_reranking_stop_decision_stage119.json
+doc: docs\primeqa_hybrid_second_stage_reranking_stop_decision.md
+status: primeqa_hybrid_second_stage_reranking_family_stopped
+recommended_next_direction: user_confirmed_next_research_direction_required
+```
+
+Stage119 preserved the current boundary:
 
 ```text
 test locked
@@ -203,3 +211,5 @@ no final metrics
 runtime defaults unchanged
 no fallback strategies
 ```
+
+The next train/dev-only research direction requires explicit user confirmation.

@@ -28582,3 +28582,181 @@ runtime defaults unchanged
 no fallback strategies
 ```
 
+
+## 2026-07-16 - Stage 119 second-stage reranking stop decision
+
+### 本阶段目标
+
+把 Stage118 的 `0 / 8` 可选配置结果正式记录为 second-stage reranking stop decision。
+
+本阶段只读 Stage118 public-safe report，不重新加载 split 文件、不加载 corpus、不重建 candidate rows、不运行 retrieval/reranking/answer/final metrics。
+
+继续保持：
+
+```text
+test locked
+no final metrics
+runtime defaults unchanged
+no fallback strategies
+```
+
+### 新增内容
+
+代码：
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_second_stage_reranking_stop_decision.py
+scripts/decide_primeqa_hybrid_second_stage_reranking_stop.py
+tests/test_primeqa_hybrid_second_stage_reranking_stop_decision.py
+```
+
+文档：
+
+```text
+docs/primeqa_hybrid_second_stage_reranking_stop_decision.md
+docs/primeqa_hybrid_second_stage_reranking_validation.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+```
+
+产物：
+
+```text
+artifacts/primeqa_hybrid_second_stage_reranking_stop_decision_stage119.json
+artifacts/primeqa_hybrid_second_stage_reranking_stop_decision_stage119_visuals/
+```
+
+### 真实运行
+
+命令：
+
+```text
+python scripts\decide_primeqa_hybrid_second_stage_reranking_stop.py --user-confirmed-stop --confirmation-note "user confirmed Stage119 second-stage reranking stop decision in current turn after Stage118 selected 0 of 8 configs; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+结果：
+
+```text
+status: primeqa_hybrid_second_stage_reranking_family_stopped
+stopped_family_id: second_stage_reranking_candidate_family
+recommended_next_direction: user_confirmed_next_research_direction_required
+guard checks: 27 / 27 passed
+public_safe_contract.forbidden_keys_found: []
+```
+
+停止依据：
+
+```text
+Stage118 selected configs: 0 / 8
+train top200 gold present: 0.9324
+dev top200 gold present: 0.9079
+hit@200 loss across configs: 0
+```
+
+这说明问题不是 top200 recall 丢失，而是 reranking 造成 top10/top20 排名回退。
+
+### 主要停止证据
+
+两个有正向信号但被 guard 阻止的 config：
+
+```text
+crf_lexical_routes_first_v1:
+  train mrr@20 delta: +0.0102
+  train hit@10 delta: -0.0162
+  train hit@20 delta: -0.0190
+  train hit@200 delta: +0.0000
+  failed guards:
+    train_cv_hit_at_20_regression_rate_within_guard
+    train_cv_top10_regression_count_within_guard
+
+crf_route_agreement_best_rank_v1:
+  train mrr@20 delta: +0.0018
+  train hit@10 delta: +0.0000
+  train hit@20 delta: +0.0081
+  train hit@200 delta: +0.0000
+  failed guards:
+    train_cv_bm25_top10_gold_demotions_to_below_50_within_guard
+    train_cv_hit_at_20_regression_rate_within_guard
+    train_cv_top10_regression_count_within_guard
+```
+
+family 结果：
+
+```text
+channel_rank_feature_reranker_family_v1: 0 / 2 selectable
+lexical_document_feature_reranker_family_v1: 0 / 3 selectable
+supervised_lightweight_reranker_family_v1: 0 / 3 selectable
+```
+
+dev 观察：
+
+```text
+dev_used_for_selection: false
+dev_used_for_retuning: false
+dev_observations_are_non_adoptable: true
+best dev mrr@20 delta: +0.0085 from crf_lexical_routes_first_v1
+```
+
+dev 观察不能推翻 train-CV stop decision。
+
+### 可视化结果
+
+已生成：
+
+```text
+artifacts\primeqa_hybrid_second_stage_reranking_stop_decision_stage119_visuals\stage119_train_cv_objective_scores.svg
+artifacts\primeqa_hybrid_second_stage_reranking_stop_decision_stage119_visuals\stage119_train_cv_mrr_at_20_deltas.svg
+artifacts\primeqa_hybrid_second_stage_reranking_stop_decision_stage119_visuals\stage119_train_cv_hit_at_10_deltas.svg
+artifacts\primeqa_hybrid_second_stage_reranking_stop_decision_stage119_visuals\stage119_train_cv_guard_failure_reasons.svg
+artifacts\primeqa_hybrid_second_stage_reranking_stop_decision_stage119_visuals\stage119_selectability_by_family.svg
+artifacts\primeqa_hybrid_second_stage_reranking_stop_decision_stage119_visuals\stage119_stop_decision_flags.svg
+artifacts\primeqa_hybrid_second_stage_reranking_stop_decision_stage119_visuals\stage119_stop_guard_check_status.svg
+```
+
+### 问题、原因与修正
+
+- 问题 1：Stage118 在 no-selectable 情况下没有在 `train_cv_selection` 内重复写 `selection_mode`。
+  - 原因：Stage118 的 selection mode 已在 split contract 中，no-selectable branch 没有重复保存。
+  - 修正：Stage119 summary 从 split contract 补全 `selection_mode`，报告中显示为 `train_grouped_cross_validation_then_full_train_refit`。
+
+- 问题 2：dev 中仍有 `crf_lexical_routes_first_v1` 的小幅 `mrr@20 +0.0085`。
+  - 原因：Stage118 对所有 config 都算了 dev report-only 指标。
+  - 修正：Stage119 明确记录 `dev_observations_are_non_adoptable: true`，不允许用 dev 反向选择或救回 train-CV 失败配置。
+
+### 验证
+
+目标验证：
+
+```text
+python -m ruff check src\ts_rag_agent\application\primeqa_hybrid_second_stage_reranking_stop_decision.py scripts\decide_primeqa_hybrid_second_stage_reranking_stop.py tests\test_primeqa_hybrid_second_stage_reranking_stop_decision.py
+pytest -q tests\test_primeqa_hybrid_second_stage_reranking_stop_decision.py
+python scripts\decide_primeqa_hybrid_second_stage_reranking_stop.py --user-confirmed-stop ...
+```
+
+结果：
+
+```text
+targeted ruff: passed
+targeted pytest: 3 passed
+Stage119 real run: passed
+guard checks: 27 / 27 passed
+```
+
+### 我学到了
+
+- second-stage reranking 这条路线现在应该停止：它没有解决召回缺失，也无法安全改善排序；主要问题是把已有 top10/top20 正例往后推。
+- 如果后续继续做 precision，只能重新开一个更保守的新研究方向，例如限定 rerank window 或只处理低置信候选；但这需要新的用户确认，不能从当前 stop decision 自动跳过去。
+- dev 中的小幅正向信号只能作为观察，不能作为选择依据。
+
+### 下一步
+
+Stage120：需要用户确认后，选择新的 train/dev-only 研究方向。
+
+继续保持：
+
+```text
+test locked
+no final metrics
+runtime defaults unchanged
+no fallback strategies
+```
