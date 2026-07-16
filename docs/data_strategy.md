@@ -782,6 +782,20 @@ split files, corpus documents, candidate rows, model outputs, or test data. It
 writes only aggregate public-safe failure-pattern, action-boundary, guard, and
 visualization summaries.
 
+The current PrimeQA/TechQA hybrid Stage131 append-candidate evidence shortlist
+redesign protocol freeze is recorded in:
+
+```text
+docs/primeqa_hybrid_append_candidate_evidence_shortlist_protocol.md
+```
+
+Stage131 reads only the public-safe Stage130 aggregate failure review. It does
+not load split files, corpus documents, candidate rows, model outputs, or test
+data. It freezes three validation-only shortlist configs that keep Stage116
+prefix evidence protected and treat Stage128 append candidates as supplemental
+evidence candidates. The configs are not runtime defaults and are not fallback
+strategies.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

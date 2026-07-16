@@ -982,3 +982,10 @@ recorded in:
 ```text
 docs/primeqa_hybrid_agent_integration_failure_review.md
 ```
+
+The current Stage 131 append-candidate evidence shortlist redesign protocol
+freeze is recorded in:
+
+```text
+docs/primeqa_hybrid_append_candidate_evidence_shortlist_protocol.md
+```

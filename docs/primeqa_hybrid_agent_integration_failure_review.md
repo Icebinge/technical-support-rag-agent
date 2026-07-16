@@ -179,7 +179,12 @@ default_runtime_policy: unchanged
 
 ## Next Step
 
-Stage131 should freeze a train/dev-only append-candidate evidence shortlist
-redesign protocol. The protocol should keep Stage116 evidence stable and test
-append candidates as supplemental evidence rather than unrestricted replacements.
-Test remains locked.
+Stage131 froze the train/dev-only append-candidate evidence shortlist redesign
+protocol in:
+
+```text
+docs/primeqa_hybrid_append_candidate_evidence_shortlist_protocol.md
+```
+
+The next step is Stage132: run the frozen train-CV/dev append-shortlist
+validation. Test remains locked.

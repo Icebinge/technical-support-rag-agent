@@ -29918,3 +29918,105 @@ full pytest: 362 passed
 Next step: Stage131 should freeze a train/dev-only append-candidate evidence
 shortlist redesign protocol. Test remains locked, runtime defaults remain
 unchanged, and fallback strategies remain disabled.
+
+## 2026-07-16 - Stage 131 append-candidate evidence shortlist redesign protocol freeze
+
+目标：根据 Stage130 的失败复盘，冻结一个 train/dev-only 的
+append-candidate evidence shortlist redesign protocol。这个协议只定义下一步
+Stage132 怎么验证，不运行真实 retrieval/answer metrics，不打开测试集，不修改
+runtime 默认策略，也不加入兜底策略。
+
+本步改动：
+
+- 新增 `src/ts_rag_agent/application/primeqa_hybrid_append_candidate_evidence_shortlist_protocol.py`。
+- 新增 `scripts/freeze_primeqa_hybrid_append_candidate_evidence_shortlist_protocol.py`。
+- 新增 `tests/test_primeqa_hybrid_append_candidate_evidence_shortlist_protocol.py`。
+- 新增 `docs/primeqa_hybrid_append_candidate_evidence_shortlist_protocol.md`。
+- 更新 Stage130 follow-up、data/evaluation strategy 和本 learning journal。
+
+真实运行命令：
+
+```text
+python scripts\freeze_primeqa_hybrid_append_candidate_evidence_shortlist_protocol.py --user-confirmed-protocol --confirmation-note "user confirmed Stage131 append-candidate evidence shortlist redesign protocol freeze after Stage130 failure review; train/dev only; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+Stage130 来源事实：
+
+```text
+source status: primeqa_hybrid_stage129_agent_integration_failure_review_completed
+source next direction: freeze_append_candidate_evidence_shortlist_redesign_protocol
+source guard checks: 12 / 12 passed
+stage128_direct_agent_integration_path_blocked: true
+train gold hit delta: +9
+train gold citation delta: -1
+train append selected citations: 42
+train prefix-like selected citation delta: -42
+train changed answer rate: 0.3932
+dev gold hit delta: +1
+dev gold citation delta: -2
+dev changed answer rate: 0.4132
+```
+
+冻结的 shortlist configs：
+
+```text
+prefix10_append_sidecar_probe_v1:
+  protected prefix slots: 10
+  replacement append slots: 0
+  append sidecar slots: 3
+
+prefix9_append1_high_precision_v1:
+  protected prefix slots: 9
+  replacement append slots: 1
+  append sidecar slots: 2
+
+prefix8_append2_balanced_probe_v1:
+  protected prefix slots: 8
+  replacement append slots: 2
+  append sidecar slots: 2
+```
+
+结果：
+
+```text
+status: primeqa_hybrid_append_candidate_evidence_shortlist_redesign_protocol_frozen
+guard checks: 14 / 14 passed
+recommended_next_direction: run_append_candidate_evidence_shortlist_train_cv_dev_validation
+can_run_append_shortlist_validation_now: true
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+runtime_defaultization_allowed_now: false
+fallback_strategies_enabled: false
+default_runtime_policy: unchanged
+public_safe_contract.forbidden_keys_found: []
+```
+
+本步学到的东西：
+
+- Stage128 top400 不是完全没用；它的问题是 append candidates 进入 selected
+  evidence 后挤掉了稳定 prefix-like citations，却没有保护 gold citation。
+- 所以下一步不能继续让 append candidates 自由竞争 answer context，而要把它们放进
+  受控 gate：最多替换 0/1/2 个 prefix slot，并且必须以 gold citation guard 为第一门槛。
+- `prefix10_append_sidecar_probe_v1` 是保守控制组：append 只做 sidecar citation
+  verification，不生成 answer text，也不替换主 answer context。
+- `prefix9_append1_high_precision_v1` 和 `prefix8_append2_balanced_probe_v1`
+  是有界替换实验，不是 runtime 默认，也不是兜底策略。
+- Stage131 只冻结协议，没有证明这些 configs 有效果；真实效果要等 Stage132
+  在 train grouped CV + dev report-only 上验证。
+
+Verification:
+
+```text
+targeted ruff: passed
+targeted pytest: 6 passed
+Stage131 real protocol freeze: passed
+artifact ignore check: passed
+full ruff: passed
+full pytest: 368 passed
+```
+
+Next step: Stage132 should run the frozen append-candidate evidence shortlist
+train-CV/dev validation. Train grouped cross-validation is the selection surface;
+dev remains report-only. Test remains locked, runtime defaults remain unchanged,
+and fallback strategies remain disabled.
