@@ -899,3 +899,10 @@ The current Stage 119 second-stage reranking stop decision is recorded in:
 ```text
 docs/primeqa_hybrid_second_stage_reranking_stop_decision.md
 ```
+
+The current Stage 120 fast-filter plus alternate-screening protocol freeze is
+recorded in:
+
+```text
+docs/primeqa_hybrid_fast_filter_screening_protocol.md
+```

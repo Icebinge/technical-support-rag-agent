@@ -643,6 +643,17 @@ docs/primeqa_hybrid_second_stage_reranking_stop_decision.md
 Stage119 reads only the public-safe Stage118 report. It does not load split
 files, corpus documents, or candidate rows.
 
+The current PrimeQA/TechQA hybrid fast-filter plus alternate-screening protocol
+freeze is recorded in:
+
+```text
+docs/primeqa_hybrid_fast_filter_screening_protocol.md
+```
+
+Stage120 reads only the public-safe Stage119 stop decision report. It does not
+load split files, corpus documents, or candidate rows, and it does not write raw
+question text, answer text, document text, document IDs, or candidate rows.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

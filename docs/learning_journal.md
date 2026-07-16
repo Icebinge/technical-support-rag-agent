@@ -28760,3 +28760,91 @@ no final metrics
 runtime defaults unchanged
 no fallback strategies
 ```
+
+## 2026-07-16 - Stage 120 fast-filter screening protocol freeze
+
+Goal: replace the stopped full-top200 second-stage reranking direction with a
+train/dev-only protocol that first performs a cheap fast filter, then applies a
+more constrained alternate screening selector.
+
+What changed:
+
+- Added `src/ts_rag_agent/application/primeqa_hybrid_fast_filter_screening_protocol.py`.
+- Added `scripts/freeze_primeqa_hybrid_fast_filter_screening_protocol.py`.
+- Added `tests/test_primeqa_hybrid_fast_filter_screening_protocol.py`.
+- Added `docs/primeqa_hybrid_fast_filter_screening_protocol.md`.
+- Updated evaluation/data strategy docs and linked Stage119 to the Stage120
+  follow-up.
+
+Real run:
+
+```text
+python scripts\freeze_primeqa_hybrid_fast_filter_screening_protocol.py --user-confirmed-protocol --confirmation-note "user confirmed Stage120 fast-filter plus alternate screening protocol after Stage119 stopped full top200 reranking; train/dev only; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+Result:
+
+```text
+status: primeqa_hybrid_fast_filter_screening_protocol_frozen
+recommended_next_direction: run_fast_filter_screening_train_cv_dev_validation
+guard checks: 16 / 16 passed
+candidate families: 3
+candidate configs: 6
+public_safe_contract.forbidden_keys_found: []
+```
+
+Frozen design:
+
+```text
+source pool: Stage116 top200
+full_top200_rerank_allowed: false
+screening_may_add_documents: false
+screening_may_use_uncapped_union: false
+minimum protected_prefix_depth: 5
+maximum promotion_budget_top10: 1
+```
+
+Important boundaries:
+
+```text
+train grouped-CV selection only
+dev report-only
+test locked
+no final metrics
+runtime defaults unchanged
+fallback_strategies_enabled: false
+```
+
+Visualizations generated:
+
+```text
+artifacts\primeqa_hybrid_fast_filter_screening_protocol_stage120_visuals\stage120_stage119_stop_summary.svg
+artifacts\primeqa_hybrid_fast_filter_screening_protocol_stage120_visuals\stage120_candidate_family_counts.svg
+artifacts\primeqa_hybrid_fast_filter_screening_protocol_stage120_visuals\stage120_fast_filter_window_sizes.svg
+artifacts\primeqa_hybrid_fast_filter_screening_protocol_stage120_visuals\stage120_promotion_budgets.svg
+artifacts\primeqa_hybrid_fast_filter_screening_protocol_stage120_visuals\stage120_guard_thresholds.svg
+artifacts\primeqa_hybrid_fast_filter_screening_protocol_stage120_visuals\stage120_protocol_decision_flags.svg
+artifacts\primeqa_hybrid_fast_filter_screening_protocol_stage120_visuals\stage120_guard_check_status.svg
+```
+
+Verification:
+
+```text
+targeted ruff: passed
+targeted pytest: 3 passed
+Stage120 real run: passed
+full ruff: passed
+full pytest: 328 passed
+```
+
+What I learned:
+
+- The next reasonable route is not to rerank the whole top200. Stage119 showed
+  that this preserves hit@200 but damages top10/top20 ordering.
+- The new protocol must protect the already-good prefix and only allow a small
+  number of high-confidence tail candidates to compete for top positions.
+- Stage120 is only a protocol freeze. It does not prove better recall or
+  ranking quality yet.
+
+Next step: Stage121 should run the frozen fast-filter plus alternate-screening
+protocol on train grouped cross-validation and dev report-only validation.

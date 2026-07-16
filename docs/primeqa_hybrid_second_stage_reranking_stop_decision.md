@@ -146,8 +146,16 @@ test gate.
 
 ## Next Step
 
-Stage120 requires user confirmation before choosing the next train/dev-only
-research direction.
+Stage120 has now frozen the next train/dev-only research direction:
+
+```text
+docs/primeqa_hybrid_fast_filter_screening_protocol.md
+```
+
+The new direction is a conservative fast-filter plus alternate-screening
+protocol over the fixed Stage116 top200 pool. It does not reopen Stage119 full
+top200 reranking, does not change runtime defaults, and does not open final
+test metrics.
 
 Continue to preserve:
 
