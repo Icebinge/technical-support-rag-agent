@@ -163,8 +163,12 @@ default_runtime_policy: unchanged
 
 ## Next Step
 
-Stage133 should review the selected Stage132 sidecar config before any runtime
-or test gate. The review should decide whether the safe-but-neutral sidecar
-signal is useful for agent design, whether replacement configs should be
-stopped, and what the next train/dev-only agent step should be. Test remains
-locked.
+Stage133 reviewed the selected Stage132 sidecar config and recorded the result
+in:
+
+```text
+docs/primeqa_hybrid_append_candidate_evidence_shortlist_selected_config_review.md
+```
+
+The next step is Stage134: freeze a train/dev-only `Stage116 answer context +
+Stage128 sidecar observation` agent protocol. Test remains locked.

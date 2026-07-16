@@ -996,3 +996,10 @@ validation is recorded in:
 ```text
 docs/primeqa_hybrid_append_candidate_evidence_shortlist_validation.md
 ```
+
+The current Stage 133 append-candidate evidence shortlist selected-config
+review is recorded in:
+
+```text
+docs/primeqa_hybrid_append_candidate_evidence_shortlist_selected_config_review.md
+```

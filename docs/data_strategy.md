@@ -810,6 +810,19 @@ and writes only aggregate public-safe profile, selection, guard, and
 visualization summaries. It selected only the conservative sidecar config; this
 is not runtime defaultization.
 
+The current PrimeQA/TechQA hybrid Stage133 append-candidate evidence shortlist
+selected-config review is recorded in:
+
+```text
+docs/primeqa_hybrid_append_candidate_evidence_shortlist_selected_config_review.md
+```
+
+Stage133 reads only the public-safe Stage132 aggregate validation report. It
+classifies the selected sidecar config as safe but neutral, stops the replacement
+append answer-context route, and allows only a future agent-protocol design step.
+It does not load split files, corpus documents, candidate rows, model outputs,
+or test data.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

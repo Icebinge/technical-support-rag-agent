@@ -30156,3 +30156,115 @@ full pytest: 374 passed
 Next step: Stage133 should review the selected Stage132 sidecar config before
 any runtime or test gate. Test remains locked, runtime defaults remain unchanged,
 and fallback strategies remain disabled.
+
+## 2026-07-16 - Stage 133 append-candidate evidence shortlist selected-config review
+
+目标：只读取 Stage132 public-safe aggregate artifact，复盘 selected sidecar config
+是否值得进入 agent 协议设计，并明确它不能直接进入 runtime/default/test gate。
+
+本步改动：
+
+- 新增 `src/ts_rag_agent/application/primeqa_hybrid_append_candidate_evidence_shortlist_selected_config_review.py`。
+- 新增 `scripts/review_primeqa_hybrid_append_candidate_evidence_shortlist_selected_config.py`。
+- 新增 `tests/test_primeqa_hybrid_append_candidate_evidence_shortlist_selected_config_review.py`。
+- 新增 `docs/primeqa_hybrid_append_candidate_evidence_shortlist_selected_config_review.md`。
+- 更新 Stage132 follow-up、data/evaluation strategy 和本 learning journal。
+
+真实运行命令：
+
+```text
+python scripts\review_primeqa_hybrid_append_candidate_evidence_shortlist_selected_config.py --user-confirmed-review --confirmation-note "user confirmed Stage133 selected sidecar config review after Stage132 append-shortlist validation; public-safe aggregate only; train/dev only; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+Stage132 来源事实：
+
+```text
+source status: primeqa_hybrid_append_candidate_evidence_shortlist_validation_completed
+source next direction: review_append_candidate_evidence_shortlist_selected_config
+selected config: prefix10_append_sidecar_probe_v1
+eligible config count: 1 / 3
+source guard checks: 22 / 22 passed
+```
+
+Selected config review：
+
+```text
+classification: safe_but_neutral_sidecar
+train F1 delta vs Stage116: +0.0000
+train gold citation delta vs Stage116: +0
+train target-depth gold hit delta vs Stage116: +9
+train changed answer rate vs Stage116: 0.0000
+dev F1 delta vs Stage116: +0.0000
+dev gold citation delta vs Stage116: +0
+dev target-depth gold hit delta vs Stage116: +1
+dev changed answer rate vs Stage116: 0.0000
+```
+
+Sidecar contract：
+
+```text
+protected prefix slots: 10
+replacement append slots: 0
+append sidecar slots: 3
+append sidecar can generate answer text: false
+append sidecar can replace prefix slots: false
+append sidecar can support agent observation: true
+append sidecar can support future citation verification: true
+```
+
+Replacement route review：
+
+```text
+replacement configs reviewed: 2
+replacement configs failed: 2
+primary failure pattern: append_displacement_without_gold_gain
+recommendation: stop_replacement_append_answer_context_route
+```
+
+结果：
+
+```text
+status: primeqa_hybrid_append_candidate_evidence_shortlist_selected_config_review_completed
+guard checks: 14 / 14 passed
+selected_config_id: prefix10_append_sidecar_probe_v1
+selected_config_classification: safe_but_neutral_sidecar
+selected_config_supported_for_agent_protocol_design: true
+selected_config_supported_for_runtime_defaultization: false
+selected_config_supported_for_answer_context_replacement: false
+replacement_append_answer_context_route_stopped: true
+recommended_next_direction: freeze_stage116_answer_context_plus_stage128_sidecar_agent_protocol
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+runtime_defaultization_allowed_now: false
+fallback_strategies_enabled: false
+default_runtime_policy: unchanged
+public_safe_contract.forbidden_keys_found: []
+```
+
+本步学到的东西：
+
+- `prefix10_append_sidecar_probe_v1` 的价值不是提升 answer F1 或 citation count；
+  它的价值是保持 Stage116 answer context 完全不变，同时保留 top400 coverage 作为
+  agent sidecar observation。
+- 这说明它可以进入 agent 协议设计，但不能被描述成 answer-quality improvement。
+- `prefix9` 和 `prefix8` 两条替换式路线再次复现 append displacement 风险，应停止
+  `append candidates replace prefix evidence` 的方向。
+- 下一步应该冻结一个明确的 agent protocol：主 answer context 仍由 Stage116
+  稳定行为控制；Stage128 append/top400 只能作为 sidecar observation 或未来 citation
+  verification 信号，不能生成 answer text、不能替换 prefix evidence。
+
+Verification:
+
+```text
+targeted ruff: passed
+targeted pytest: 4 passed
+Stage133 real review: passed
+artifact ignore check: passed
+full ruff: passed
+full pytest: 378 passed
+```
+
+Next step: Stage134 should freeze a train/dev-only Stage116 answer-context plus
+Stage128 sidecar-observation agent protocol. Test remains locked, runtime
+defaults remain unchanged, and fallback strategies remain disabled.
