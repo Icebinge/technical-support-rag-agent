@@ -940,3 +940,10 @@ recorded in:
 ```text
 docs/primeqa_hybrid_first_stage_recall_expansion_validation.md
 ```
+
+The current Stage 125 Stage116 prefix-preserving recall expansion protocol
+freeze is recorded in:
+
+```text
+docs/primeqa_hybrid_prefix_preserving_recall_expansion_protocol.md
+```

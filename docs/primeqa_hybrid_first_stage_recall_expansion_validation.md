@@ -154,8 +154,13 @@ artifacts\primeqa_hybrid_first_stage_recall_expansion_validation_stage124_visual
 
 ## Next Step
 
-Stage125 should freeze a Stage116 prefix-preserving recall expansion protocol.
-It should keep positions 1-200 exactly unchanged and evaluate only appended
+Stage125 froze a Stage116 prefix-preserving recall expansion protocol. The
+result is recorded in:
+
+```text
+docs/primeqa_hybrid_prefix_preserving_recall_expansion_protocol.md
+```
+
+It keeps positions 1-200 exactly unchanged and evaluates only appended
 201-300/400 candidates on train-CV plus dev report-only data. Test remains
 locked.
-

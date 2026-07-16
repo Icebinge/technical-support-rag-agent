@@ -29205,3 +29205,81 @@ artifact ignore check: passed
 Next step: Stage125 should freeze a Stage116 prefix-preserving recall expansion
 protocol that evaluates appended 201-300/400 candidates while keeping ranks
 1-200 exactly unchanged. Test remains locked.
+
+## 2026-07-16 - Stage 125 Stage116 prefix-preserving recall expansion protocol freeze
+
+Goal: freeze a train/dev-only protocol that preserves the Stage116 top200
+prefix exactly and appends only new candidates into ranks 201-300/400.
+
+What changed:
+
+- Added `src/ts_rag_agent/application/primeqa_hybrid_prefix_preserving_recall_expansion_protocol.py`.
+- Added `scripts/freeze_primeqa_hybrid_prefix_preserving_recall_expansion_protocol.py`.
+- Added `tests/test_primeqa_hybrid_prefix_preserving_recall_expansion_protocol.py`.
+- Added `docs/primeqa_hybrid_prefix_preserving_recall_expansion_protocol.md`.
+- Updated evaluation/data strategy docs and the Stage124 follow-up notes.
+
+Final real run:
+
+```text
+python scripts\freeze_primeqa_hybrid_prefix_preserving_recall_expansion_protocol.py --user-confirmed-protocol --confirmation-note "user confirmed Stage125 Stage116 prefix-preserving recall expansion protocol after Stage124 no-selection validation; train/dev only; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+Source signal:
+
+```text
+Stage124 status: primeqa_hybrid_first_stage_recall_expansion_validation_completed_no_selection
+recommended_next_direction: design_stage116_prefix_preserving_recall_expansion_protocol
+eligible_config_count: 0 / 7
+selected_config_id: null
+best_train_target_depth_gain: +9
+minimum_positive_train_hit_at_200_loss_count: 1
+```
+
+Frozen protocol:
+
+```text
+status: primeqa_hybrid_stage116_prefix_preserving_recall_expansion_protocol_frozen
+recommended_next_direction: run_stage116_prefix_preserving_recall_expansion_train_cv_dev_validation
+candidate config count: 6
+candidate families: 4
+append budgets: 100 and 200
+target pool depths: 300 and 400
+append_start_rank: 201
+guard checks: 18 / 18 passed
+```
+
+Hard prefix contract:
+
+```text
+Stage116 ranks 1-200 remain identical: true
+prefix reorder allowed: false
+prefix drop allowed: false
+insert before rank 201 allowed: false
+hit@200 loss count must be zero by construction: true
+```
+
+What I learned:
+
+- Stage124's useful signal should be tested as append-only recall, not as
+  whole-pool reranking.
+- The next protocol should make hit@200 preservation a structural invariant:
+  if ranks 1-200 remain identical, the hit@200 boundary cannot regress.
+- The remaining open question is whether appended 201-300/400 candidates still
+  recover enough additional gold documents once all prefix duplicates are
+  removed.
+
+Verification so far:
+
+```text
+targeted ruff: passed
+targeted pytest: 3 passed
+Stage125 real protocol freeze: passed
+full ruff: passed
+full pytest: 341 passed
+artifact ignore check: passed
+```
+
+Next step: Stage126 should run the frozen prefix-preserving recall expansion
+train-CV/dev validation and report whether appended candidates add recall while
+the Stage116 top200 boundary remains unchanged. Test remains locked.

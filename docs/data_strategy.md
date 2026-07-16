@@ -704,6 +704,18 @@ test split, does not run final test metrics, and does not write raw candidate
 rows, raw question text, raw answer text, raw document text, raw document IDs,
 or raw sample IDs.
 
+The current PrimeQA/TechQA hybrid Stage116 prefix-preserving recall expansion
+protocol freeze is recorded in:
+
+```text
+docs/primeqa_hybrid_prefix_preserving_recall_expansion_protocol.md
+```
+
+Stage125 reads only the public-safe Stage124 validation report. It does not load
+split files, corpus documents, candidate rows, model outputs, or test data. It
+freezes a train/dev-only append-only protocol and writes only public-safe
+configuration summaries.
+
 ## Leakage Checks
 
 Before reporting evaluation results:
