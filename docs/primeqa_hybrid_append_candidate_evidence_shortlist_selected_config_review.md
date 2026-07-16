@@ -184,8 +184,13 @@ default_runtime_policy: unchanged
 
 ## Next Step
 
-Stage134 should freeze a train/dev-only `Stage116 answer context + Stage128
-sidecar observation` agent protocol. The sidecar can be exposed to an agent as
-an observation and future citation-verification signal, but it cannot generate
-answer text, replace prefix evidence, become a runtime default, or open the
-final test gate.
+Stage134 completed the train/dev-only `Stage116 answer context + Stage128
+sidecar observation` agent protocol freeze in:
+
+```text
+docs/primeqa_hybrid_stage116_answer_context_stage128_sidecar_protocol.md
+```
+
+The next step is Stage135: validate the frozen sidecar-observation protocol on
+train grouped-CV plus dev report-only. Test remains locked, runtime defaults
+remain unchanged, and fallback strategies remain disabled.

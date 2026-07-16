@@ -1003,3 +1003,10 @@ review is recorded in:
 ```text
 docs/primeqa_hybrid_append_candidate_evidence_shortlist_selected_config_review.md
 ```
+
+The current Stage 134 Stage116 answer-context plus Stage128 sidecar-observation
+agent protocol freeze is recorded in:
+
+```text
+docs/primeqa_hybrid_stage116_answer_context_stage128_sidecar_protocol.md
+```

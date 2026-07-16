@@ -823,6 +823,20 @@ append answer-context route, and allows only a future agent-protocol design step
 It does not load split files, corpus documents, candidate rows, model outputs,
 or test data.
 
+The current PrimeQA/TechQA hybrid Stage134 Stage116 answer-context plus
+Stage128 sidecar-observation agent protocol freeze is recorded in:
+
+```text
+docs/primeqa_hybrid_stage116_answer_context_stage128_sidecar_protocol.md
+```
+
+Stage134 reads only saved public-safe aggregate Stage128, Stage129, and
+Stage133 reports. It does not load split files, corpus documents, candidate
+rows, model outputs, or test data. It freezes a two-channel agent protocol:
+Stage116 remains the only primary answer-context source, while Stage128/Stage132
+append candidates are exposed only as sidecar observations for future
+train/dev validation.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

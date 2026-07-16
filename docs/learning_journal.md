@@ -30268,3 +30268,100 @@ full pytest: 378 passed
 Next step: Stage134 should freeze a train/dev-only Stage116 answer-context plus
 Stage128 sidecar-observation agent protocol. Test remains locked, runtime
 defaults remain unchanged, and fallback strategies remain disabled.
+
+## 2026-07-16 - Stage 134 Stage116 answer-context plus Stage128 sidecar-observation agent protocol freeze
+
+目标：在 Stage133 确认 `prefix10_append_sidecar_probe_v1` 只能作为 safe-but-neutral
+sidecar 之后，冻结一个明确的 agent 协议：主答案上下文继续由 Stage116 稳定行为提供，
+Stage128/Stage132 append candidates 只能作为 sidecar observation 或未来 citation-verification
+信号，不能生成 answer text，不能替换 prefix evidence，不能打开 runtime/default/test gate。
+
+本步改动：
+- 新增 `src/ts_rag_agent/application/primeqa_hybrid_sidecar_agent_protocol.py`。
+- 新增 `scripts/freeze_primeqa_hybrid_stage116_answer_context_stage128_sidecar_protocol.py`。
+- 新增 `tests/test_primeqa_hybrid_stage116_answer_context_stage128_sidecar_protocol.py`。
+- 新增 `docs/primeqa_hybrid_stage116_answer_context_stage128_sidecar_protocol.md`。
+- 更新 Stage133 follow-up、data/evaluation strategy 和本 learning journal。
+
+真实运行命令：
+
+```text
+python scripts\freeze_primeqa_hybrid_stage116_answer_context_stage128_sidecar_protocol.py --user-confirmed-protocol --confirmation-note "user confirmed Stage134 Stage116 answer-context plus Stage128 sidecar-observation agent protocol freeze after Stage133 selected sidecar review; public-safe aggregate only; train/dev only; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+来源事实：
+
+```text
+Stage128 source status: primeqa_hybrid_agent_retrieval_integration_protocol_frozen
+Stage128 candidate pool depth: 400
+Stage128 candidate pool is not automatic answer context: true
+Stage129 direct integration status: primeqa_hybrid_agent_retrieval_integration_validation_blocked_or_failed
+Stage129 train F1 delta vs Stage116: +0.0003
+Stage129 train gold citation delta vs Stage116: -1
+Stage129 train target-depth hit delta vs Stage116: +9
+Stage129 train changed verified answers vs Stage116: 221
+Stage133 selected sidecar: prefix10_append_sidecar_probe_v1
+Stage133 selected sidecar classification: safe_but_neutral_sidecar
+```
+
+冻结协议：
+
+```text
+protocol_id: primeqa_hybrid_stage116_answer_context_stage128_sidecar_agent_protocol_v1
+primary answer context channel: stage116_primary_answer_context
+primary answer context depth: 10
+sidecar candidates included in primary answer context: false
+sidecar observation channel: stage128_stage132_sidecar_observation
+sidecar candidate pool depth: 400
+sidecar observation slots: 3
+sidecar can generate answer text: false
+sidecar can replace primary context: false
+sidecar can support agent observation: true
+sidecar can support future citation verification: true
+```
+
+结果：
+
+```text
+status: primeqa_hybrid_stage116_answer_context_stage128_sidecar_agent_protocol_frozen
+guard checks: 19 / 19 passed
+recommended_next_direction: run_stage116_answer_context_stage128_sidecar_observation_train_cv_dev_validation
+can_continue_agent_design_implementation: true
+can_build_sidecar_observation_adapter_now: true
+direct_stage128_all400_answer_context_remains_blocked: true
+replacement_append_answer_context_route_remains_stopped: true
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+runtime_defaultization_allowed_now: false
+fallback_strategies_enabled: false
+default_runtime_policy: unchanged
+public_safe_contract.forbidden_keys_found: []
+```
+
+本步学到的东西：
+
+- 现在可以进入 agent 形态，但不是让 Stage128 top400 直接参与答案生成；直接 all-400 路线在
+  Stage129 已经因为 train-CV gold citation -1 被阻断。
+- `prefix10_append_sidecar_probe_v1` 的价值是隔离：保持 Stage116 answer context 完全不变，
+  同时把 top400 coverage 作为 sidecar observation 保留下来。
+- Stage134 明确了两个 channel 的边界：primary channel 可以生成答案，sidecar channel 只能观察/
+  辅助验证，不能替换、重排或生成答案。
+- 下一步如果要开始 agent，应该先做 Stage135 的 sidecar-observation adapter/integrity validation，
+  验证主答案上下文 identity、sidecar 可用性和 citation-verification signal coverage，而不是直接
+  runtime defaultization。
+
+Verification:
+
+```text
+targeted ruff: passed
+targeted pytest: 4 passed
+Stage134 real protocol freeze: passed
+artifact ignore check: passed
+full ruff: passed
+full pytest: 382 passed
+```
+
+Next step: Stage135 should run train grouped-CV plus dev report-only validation
+for the frozen sidecar-observation protocol. Test remains locked, runtime
+defaults remain unchanged, and fallback strategies remain disabled.
