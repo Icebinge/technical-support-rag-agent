@@ -615,6 +615,13 @@ comparison is recorded in:
 docs/primeqa_hybrid_high_recall_union_comparison.md
 ```
 
+The current PrimeQA/TechQA hybrid second-stage reranking protocol freeze is
+recorded in:
+
+```text
+docs/primeqa_hybrid_second_stage_reranking_protocol.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:

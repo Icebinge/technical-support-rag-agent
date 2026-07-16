@@ -880,3 +880,9 @@ is recorded in:
 ```text
 docs/primeqa_hybrid_high_recall_union_comparison.md
 ```
+
+The current Stage 117 second-stage reranking protocol freeze is recorded in:
+
+```text
+docs/primeqa_hybrid_second_stage_reranking_protocol.md
+```

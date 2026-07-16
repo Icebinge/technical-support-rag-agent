@@ -28195,3 +28195,202 @@ no final metrics
 runtime defaults unchanged
 no fallback strategies
 ```
+
+## 2026-07-16 - Stage 117 second-stage reranking protocol freeze
+
+### 本阶段目标
+
+把 Stage116 的第一阶段 top200 高召回候选池固定下来，设计第二阶段 precision/reranking 的
+train-CV/dev 验证协议。
+
+本阶段只冻结协议，不构建候选 rows，不跑 reranking 指标，不跑 answer metrics：
+
+```text
+test locked
+train/dev protocol only
+no final metrics
+runtime defaults unchanged
+no fallback strategies
+```
+
+### 新增内容
+
+代码：
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_second_stage_reranking_protocol.py
+scripts/freeze_primeqa_hybrid_second_stage_reranking_protocol.py
+tests/test_primeqa_hybrid_second_stage_reranking_protocol.py
+```
+
+文档：
+
+```text
+docs/primeqa_hybrid_second_stage_reranking_protocol.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+```
+
+产物：
+
+```text
+artifacts/primeqa_hybrid_second_stage_reranking_protocol_stage117.json
+artifacts/primeqa_hybrid_second_stage_reranking_protocol_stage117_visuals/
+```
+
+### 真实运行
+
+命令：
+
+```text
+python scripts\freeze_primeqa_hybrid_second_stage_reranking_protocol.py --user-confirmed-protocol --confirmation-note "user confirmed Stage117 second-stage precision/reranking protocol over fixed Stage116 top200 candidate pool on 2026-07-16; train/dev only; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+结果：
+
+```text
+status: primeqa_hybrid_second_stage_reranking_protocol_frozen
+protocol_id: primeqa_hybrid_second_stage_reranking_protocol_v1
+recommended_next_direction: run_second_stage_reranking_train_cv_dev_validation
+guard checks: 19 / 19 passed
+public_safe_contract.forbidden_keys_found: []
+```
+
+继续禁止：
+
+```text
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+fallback_strategies_enabled: false
+default_runtime_policy: unchanged
+```
+
+### 冻结的协议
+
+固定候选池：
+
+```text
+source_pool_id: stage116_multi_route_union_candidate_pool
+candidate_pool_depth: 200
+reranker_may_reorder_pool: true
+reranker_may_add_documents: false
+reranker_may_drop_documents_before_top200_metric: false
+uncapped_union_is_not_runtime_input: true
+```
+
+候选 family：
+
+```text
+channel_rank_feature_reranker_family_v1: 2 configs
+lexical_document_feature_reranker_family_v1: 3 configs
+supervised_lightweight_reranker_family_v1: 3 configs
+```
+
+冻结的 8 个 config：
+
+```text
+crf_route_agreement_best_rank_v1
+crf_lexical_routes_first_v1
+ldf_title_heading_overlap_v1
+ldf_title_heading_body_coverage_v1
+ldf_special_token_title_heading_v1
+slr_logistic_balanced_v1
+slr_logistic_hard_negative_v1
+slr_ridge_rank_proxy_v1
+```
+
+选择规则：
+
+```text
+selection_split: train
+selection_mode: train_grouped_cross_validation_then_full_train_refit
+minimum_train_folds: 5
+validation_split: dev
+dev_validation_mode: single_pass_report_only_no_retuning
+```
+
+主要指标：
+
+```text
+mrr_at_20_delta_vs_stage116_order
+hit_at_10_delta_vs_stage116_order
+hit_at_20_delta_vs_stage116_order
+```
+
+关键 guard：
+
+```text
+maximum_train_cv_hit_at_200_loss_count: 0
+maximum_train_cv_bm25_top10_gold_demotions_to_below_50: 0
+maximum_train_cv_hit_at_20_regression_rate: 0.02
+maximum_train_cv_top10_regression_count: 3
+minimum_train_cv_mrr_at_20_delta: 0.0
+```
+
+### 可视化结果
+
+已生成：
+
+```text
+artifacts\primeqa_hybrid_second_stage_reranking_protocol_stage117_visuals\stage117_stage116_candidate_pool_recall.svg
+artifacts\primeqa_hybrid_second_stage_reranking_protocol_stage117_visuals\stage117_candidate_family_priorities.svg
+artifacts\primeqa_hybrid_second_stage_reranking_protocol_stage117_visuals\stage117_candidate_config_counts.svg
+artifacts\primeqa_hybrid_second_stage_reranking_protocol_stage117_visuals\stage117_objective_weights.svg
+artifacts\primeqa_hybrid_second_stage_reranking_protocol_stage117_visuals\stage117_guard_thresholds.svg
+artifacts\primeqa_hybrid_second_stage_reranking_protocol_stage117_visuals\stage117_protocol_decision_flags.svg
+artifacts\primeqa_hybrid_second_stage_reranking_protocol_stage117_visuals\stage117_guard_check_status.svg
+```
+
+### 问题、原因与修正
+
+- 问题 1：第二阶段很容易被误解成可以直接用 Stage116 的 uncapped union。
+  - 原因：uncapped union 的 recall 更高，但平均候选数达到数百篇。
+  - 修正：Stage117 固定 top200 pool，并显式 blocked `uncapped_union_as_answer_input_blocked`。
+- 问题 2：监督 reranker 需要 gold label，但不能把 gold label 变成 runtime feature。
+  - 原因：训练时可用 train label，运行时不能依赖答案文档或测试信息。
+  - 修正：feature contract 区分 `training_only_label_sources` 和 `forbidden_runtime_feature_sources`。
+- 问题 3：Stage117 不能偷跑候选 rows 或指标。
+  - 原因：它只是 protocol freeze，下一阶段才运行 train-CV/dev validation。
+  - 修正：guard 记录 `candidate_rows_not_built_in_stage117: true` 和
+    `protocol_freeze_only_no_candidate_rows_no_metrics`。
+
+### 验证
+
+目标验证：
+
+```text
+python -m ruff check src\ts_rag_agent\application\primeqa_hybrid_second_stage_reranking_protocol.py scripts\freeze_primeqa_hybrid_second_stage_reranking_protocol.py tests\test_primeqa_hybrid_second_stage_reranking_protocol.py
+python -m pytest tests\test_primeqa_hybrid_second_stage_reranking_protocol.py -q
+python scripts\freeze_primeqa_hybrid_second_stage_reranking_protocol.py --user-confirmed-protocol ...
+```
+
+结果：
+
+```text
+targeted ruff: passed
+targeted pytest: 3 passed
+Stage117 run: passed
+guard checks: 19 / 19 passed
+```
+
+### 我学到了
+
+- 第二阶段应该解决“金文档已经在池里，但排名不够靠前”的问题，而不是再扩大召回池。
+- top200 是这条路线目前最合适的工程边界：允许精排有空间，同时避免 uncapped union 变成不可控输入。
+- 监督 reranker 可以进入候选，但必须把训练标签和 runtime 特征分清楚，否则会形成泄漏。
+
+### 下一步
+
+Stage118：按 Stage117 冻结协议，运行 second-stage reranking train-CV/dev validation。
+
+继续保持：
+
+```text
+test locked
+train/dev only
+no final metrics
+dev report-only, no retuning
+runtime defaults unchanged
+no fallback strategies
+```
