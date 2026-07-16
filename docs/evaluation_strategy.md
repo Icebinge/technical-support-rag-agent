@@ -933,3 +933,10 @@ in:
 ```text
 docs/primeqa_hybrid_first_stage_recall_expansion_protocol.md
 ```
+
+The current Stage 124 first-stage recall expansion train-CV/dev validation is
+recorded in:
+
+```text
+docs/primeqa_hybrid_first_stage_recall_expansion_validation.md
+```

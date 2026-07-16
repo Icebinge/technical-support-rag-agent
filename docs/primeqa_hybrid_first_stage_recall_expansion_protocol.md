@@ -191,6 +191,12 @@ default_runtime_policy: unchanged
 
 ## Next Step
 
-Stage124 should run the frozen first-stage recall expansion protocol on train
-grouped cross-validation and dev report-only validation. Test remains locked.
+Stage124 ran the frozen first-stage recall expansion protocol on train grouped
+cross-validation and dev report-only validation. The result is recorded in:
 
+```text
+docs/primeqa_hybrid_first_stage_recall_expansion_validation.md
+```
+
+No config was selected because every positive train target-depth recall signal
+introduced at least one Stage116 hit@200 loss. Test remains locked.

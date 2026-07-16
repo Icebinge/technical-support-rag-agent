@@ -29125,3 +29125,83 @@ artifact ignore check: passed
 Next step: Stage124 should run the frozen first-stage recall expansion
 train-CV/dev validation and report whether any bounded 300/400-depth candidate
 pool actually improves recall without losing Stage116 hit@200 coverage.
+
+## 2026-07-16 - Stage 124 first-stage recall expansion validation
+
+Goal: run the frozen Stage123 first-stage recall expansion protocol on train
+grouped cross-validation and dev report-only validation, then decide whether any
+bounded 300/400-depth candidate pool can improve recall without losing the
+Stage116 top200 boundary.
+
+What changed:
+
+- Added `src/ts_rag_agent/application/primeqa_hybrid_first_stage_recall_expansion_validation.py`.
+- Added `scripts/run_primeqa_hybrid_first_stage_recall_expansion_validation.py`.
+- Added `tests/test_primeqa_hybrid_first_stage_recall_expansion_validation.py`.
+- Added `docs/primeqa_hybrid_first_stage_recall_expansion_validation.md`.
+- Updated evaluation/data strategy docs and the Stage123 follow-up notes.
+
+Final real run:
+
+```text
+python scripts\run_primeqa_hybrid_first_stage_recall_expansion_validation.py --user-confirmed-validation --confirmation-note "user confirmed Stage124 first-stage recall expansion train-CV/dev validation after Stage123 protocol freeze; train/dev only; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+Baseline reproduced:
+
+```text
+train Stage116 top200: 345 / 370 = 0.9324
+dev Stage116 top200: 69 / 76 = 0.9079
+```
+
+Result:
+
+```text
+status: primeqa_hybrid_first_stage_recall_expansion_validation_completed_no_selection
+eligible_config_count: 0 / 7
+selected_config_id: null
+positive_target_depth_signal_blocked_by_hit_at_200_loss: true
+recommended_next_direction: design_stage116_prefix_preserving_recall_expansion_protocol
+guard checks: 16 / 16 passed
+```
+
+Best positive but blocked signals:
+
+```text
+rrf_same_routes_top400_k60_v1:
+  train target-depth gain: +9
+  train hit@200 delta/losses: +1 / 1
+  dev target-depth gain: +1
+  train guard passed: false
+
+existing_dense_cache_broad_union_top400_v1:
+  train target-depth gain: +9
+  train hit@200 delta/losses: +1 / 1
+  dev target-depth gain: +1
+  train guard passed: false
+```
+
+What I learned:
+
+- Bounded 300/400 pools do contain extra recall signal, but reranking the whole
+  broader pool can demote at least one previously recovered Stage116 top200
+  gold document.
+- The no-loss hit@200 guard is doing useful work: every positive train signal
+  failed because of hit@200 losses.
+- The next design should preserve the Stage116 top200 prefix exactly and append
+  new candidates only after rank 200.
+
+Verification so far:
+
+```text
+targeted ruff: passed
+targeted pytest: 3 passed
+Stage124 real validation rerun: passed
+full ruff: passed
+full pytest: 338 passed
+artifact ignore check: passed
+```
+
+Next step: Stage125 should freeze a Stage116 prefix-preserving recall expansion
+protocol that evaluates appended 201-300/400 candidates while keeping ranks
+1-200 exactly unchanged. Test remains locked.

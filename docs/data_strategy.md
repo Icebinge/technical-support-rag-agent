@@ -691,6 +691,19 @@ Stage123 reads only the public-safe Stage122 report. It does not load split
 files, corpus documents, candidate rows, model outputs, or test data. It freezes
 a train/dev-only protocol and writes only public-safe configuration summaries.
 
+The current PrimeQA/TechQA hybrid first-stage recall expansion train-CV/dev
+validation is recorded in:
+
+```text
+docs/primeqa_hybrid_first_stage_recall_expansion_validation.md
+```
+
+Stage124 loads only train/dev split files, the public Stage123 protocol, local
+corpus documents, and existing local dense cache metadata. It does not load the
+test split, does not run final test metrics, and does not write raw candidate
+rows, raw question text, raw answer text, raw document text, raw document IDs,
+or raw sample IDs.
+
 ## Leakage Checks
 
 Before reporting evaluation results:
