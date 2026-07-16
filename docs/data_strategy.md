@@ -680,6 +680,17 @@ dense cache metadata. It rebuilds candidate records in memory only. It does not
 load the test split, does not run final test metrics, and writes only
 public-safe aggregate summaries plus anonymized changed-case hashes.
 
+The current PrimeQA/TechQA hybrid first-stage recall expansion protocol freeze
+is recorded in:
+
+```text
+docs/primeqa_hybrid_first_stage_recall_expansion_protocol.md
+```
+
+Stage123 reads only the public-safe Stage122 report. It does not load split
+files, corpus documents, candidate rows, model outputs, or test data. It freezes
+a train/dev-only protocol and writes only public-safe configuration summaries.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

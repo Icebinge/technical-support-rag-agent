@@ -120,7 +120,13 @@ seek large recall gains. The stronger logistic screener has useful recall
 signal, but it pays for that signal with guard-relevant regressions. The safe
 selected screener does not materially improve dev recall.
 
-The next work should design a first-stage recall expansion protocol. The target
-is a broader, simple, fast candidate generator that raises candidate-pool recall
-before any precise second-stage selection.
+Stage123 froze the first-stage recall expansion protocol. The result is
+recorded in:
 
+```text
+docs/primeqa_hybrid_first_stage_recall_expansion_protocol.md
+```
+
+The target is a broader, simple, fast candidate generator that raises
+candidate-pool recall before any precise second-stage selection. Test remains
+locked.

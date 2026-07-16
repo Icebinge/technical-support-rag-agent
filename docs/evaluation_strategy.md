@@ -926,3 +926,10 @@ The current Stage 122 fast-filter screening changed-case review is recorded in:
 ```text
 docs/primeqa_hybrid_fast_filter_screening_changed_case_review.md
 ```
+
+The current Stage 123 first-stage recall expansion protocol freeze is recorded
+in:
+
+```text
+docs/primeqa_hybrid_first_stage_recall_expansion_protocol.md
+```

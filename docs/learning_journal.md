@@ -29042,3 +29042,86 @@ artifact ignore check: passed
 Next step: Stage123 should freeze a first-stage recall expansion protocol that
 keeps the test split locked and evaluates broader simple candidate generation on
 train-CV plus dev report-only data.
+
+## 2026-07-16 - Stage 123 first-stage recall expansion protocol freeze
+
+Goal: freeze a train/dev-only protocol for broader first-stage candidate-pool
+recall after Stage122 showed that second-stage fast screening has real but
+guard-risky hit@20 signal.
+
+What changed:
+
+- Added `src/ts_rag_agent/application/primeqa_hybrid_first_stage_recall_expansion_protocol.py`.
+- Added `scripts/freeze_primeqa_hybrid_first_stage_recall_expansion_protocol.py`.
+- Added `tests/test_primeqa_hybrid_first_stage_recall_expansion_protocol.py`.
+- Added `docs/primeqa_hybrid_first_stage_recall_expansion_protocol.md`.
+- Updated evaluation/data strategy docs and the Stage122 follow-up notes.
+
+Final real run:
+
+```text
+python scripts\freeze_primeqa_hybrid_first_stage_recall_expansion_protocol.py --user-confirmed-protocol --confirmation-note "user confirmed Stage123 first-stage recall expansion protocol after Stage122 changed-case review; train/dev only; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+Source signal:
+
+```text
+Stage122 status: primeqa_hybrid_fast_filter_screening_changed_case_review_completed
+recommended_next_direction: design_first_stage_recall_expansion_protocol
+
+selected safe config hit@20 recoveries/regressions:
+  train: 4 / 3
+  dev: 0 / 0
+
+blocked logistic config hit@20 recoveries/regressions:
+  train: 11 / 7
+  dev: 2 / 1
+```
+
+Frozen protocol:
+
+```text
+status: primeqa_hybrid_first_stage_recall_expansion_protocol_frozen
+recommended_next_direction: run_first_stage_recall_expansion_train_cv_dev_validation
+candidate config count: 7
+candidate families: 4
+target pool depths: 300 and 400
+maximum channel top_k: 400
+guard checks: 16 / 16 passed
+```
+
+Guard boundaries:
+
+```text
+test split loaded: false
+final test metrics run: false
+runtime defaults changed: false
+fallback strategies enabled: false
+model downloads allowed: false
+public_safe_contract.forbidden_keys_found: []
+```
+
+What I learned:
+
+- The next productive experiment should make the first-stage candidate pool
+  broader before doing any precision screening.
+- The Stage116 uncapped union provides a real upper-bound clue, but it is too
+  large for default runtime use, so Stage123 freezes bounded 300/400-depth
+  experiments.
+- The guard must preserve Stage116 hit@200 while measuring target-depth gains;
+  otherwise broader recall could simply trade away the current top200 boundary.
+
+Verification so far:
+
+```text
+targeted ruff: passed
+targeted pytest: 3 passed
+Stage123 real protocol freeze: passed
+full ruff: passed
+full pytest: 335 passed
+artifact ignore check: passed
+```
+
+Next step: Stage124 should run the frozen first-stage recall expansion
+train-CV/dev validation and report whether any bounded 300/400-depth candidate
+pool actually improves recall without losing Stage116 hit@200 coverage.
