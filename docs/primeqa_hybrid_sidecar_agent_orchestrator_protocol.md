@@ -72,15 +72,15 @@ ranks above the frozen top400 pool boundary.
 metadata needed to inspect channel routing and sidecar selection:
 
 ```text
-primary candidate count and rank list
-verification candidate count and maximum rank
+primary context count
+verification context count
 sidecar observation rank and source region
 query-overlap and retrieval-prior scores
 novel-query coverage indicators
 selected-for-generation flag: always false
 selected-for-verification flag: always false
 answer and verification refusal flags
-verification reason and checked-candidate count
+verification reasons
 ```
 
 It does not serialize raw question text, answer text, document text, document
@@ -155,10 +155,14 @@ validation. This is an implementation-readiness decision, not an effectiveness
 decision: the current sidecar still captured none of Stage135's 9 train and 1
 dev append-region opportunities.
 
-## Next Step
+## Follow-Up
 
-Stage137 should run the fixed Stage116-primary plus Stage128-sidecar agent
-orchestrator over train five-fold grouped cross-validation and one dev
-report-only pass. It must not tune on dev, load test, change runtime defaults,
-enable fallback strategies, or claim sidecar effectiveness without measured
-evidence.
+Stage137 completed the fixed Stage116-primary plus Stage128-sidecar agent
+orchestrator train five-fold grouped-CV and dev report-only validation. Actual
+generator and verifier inputs, answers, verification reasons, sidecar isolation,
+and public traces remained identical or valid on all 683 rows.
+
+The sidecar remained safe but neutral with train `0/9` and dev `0/1` captures.
+The next step is Stage138 optional agent-entrypoint protocol freeze. Test remains
+locked, runtime defaults remain unchanged, and fallback strategies remain
+disabled.

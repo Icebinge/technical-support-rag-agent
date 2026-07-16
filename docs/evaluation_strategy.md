@@ -1040,3 +1040,18 @@ sidecar isolation policy, public-safe trace schema, inherited Stage135 safety
 facts, and locked test/default/fallback boundaries. Stage137 is frozen as train
 five-fold grouped-CV integrity validation followed by one dev report-only pass;
 dev cannot select or retune the orchestrator.
+
+The current Stage 137 Stage116-control versus sidecar-agent train grouped-CV/dev
+report-only validation is recorded in:
+
+```text
+docs/primeqa_hybrid_sidecar_agent_orchestrator_validation.md
+```
+
+Stage137 runs both paths on every train/dev row and records the actual generator
+and verifier inputs in memory. Train uses five grouped folds for integrity
+checks; dev is reported once without selection or retuning. All context, answer,
+verification-reason, metric, isolation, and public-trace deltas were zero, but
+the sidecar again captured none of 9 train and 1 dev append opportunities.
+Therefore agent integration is validated while sidecar effectiveness remains
+`safe_but_neutral`; test and runtime-default gates remain closed.

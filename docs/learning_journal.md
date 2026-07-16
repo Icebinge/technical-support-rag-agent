@@ -30659,3 +30659,207 @@ git diff --check: passed
 下一步：Stage137 运行固定 orchestrator 的 train 5 折分组交叉验证与 dev 单次只读验证。该阶段要真实比较
 Stage116 control 与 agent orchestrator 的生成答案、验证答案和 trace 隔离性，并报告 sidecar selection/miss
 诊断；dev 不参与选择或调参，test 继续锁定，runtime 默认策略不变，不加入兜底策略。
+
+## 2026-07-16 - Stage 137 sidecar agent orchestrator train-CV/dev validation
+
+目标：把 Stage136 已实现但尚未真实逐样本运行的 agent orchestrator，在完整 train 5 折分组交叉验证和
+dev 单次只读报告上跑通。每条样本同时执行 Stage116 control 与 Stage136 agent，验证 generator/verifier
+实际输入、原始答案、验证答案、验证原因、sidecar 隔离和公开 trace；不在 dev 选参数，不加载 test。
+
+本步改动：
+
+- 新增 `src/ts_rag_agent/application/primeqa_hybrid_sidecar_agent_orchestrator_validation.py`。
+- 新增 `scripts/run_primeqa_hybrid_sidecar_agent_orchestrator_validation.py`。
+- 新增 `tests/test_primeqa_hybrid_sidecar_agent_orchestrator_validation.py`。
+- 新增 `docs/primeqa_hybrid_sidecar_agent_orchestrator_validation.md`。
+- 更新 Stage136 follow-up、data/evaluation strategy 和本 learning journal。
+- 纠正 Stage136 文档对 public trace 字段的描述：代码真实提供 context count 和 verification reasons，
+  没有提供之前文档误写的 primary rank list、verification max rank 或 checked-candidate count。
+
+工程实现：
+
+- 新增 `Stage116ControlRunner`，使用冻结的 Stage116 top10 answer context 与 ranks 1-200 verifier context。
+- 新增 `RecordingAnswerGenerator` 和 `RecordingAnswerVerifier`，在内存记录 agent 依赖真实收到的完整上下文。
+- 新增 `PrimeQAHybridSidecarAgentValidationHarness`，逐样本运行 Stage136 orchestrator 并返回记录到的依赖输入。
+- 每条样本比较 control/agent generation context、verification context、original answer、verified answer 和 reasons。
+- sidecar handle 与 generator/verifier/primary handle 在内存求交，任何泄漏都会进入聚合违规计数并阻断协议。
+- 每条 public trace 在内存序列化并检查 forbidden keys、权限 flags、context counts 和 gold/test 读取 flags。
+- gold answer document 只在 agent 执行结束后用于 train/dev 离线 opportunity/capture 聚合，不进入在线信号。
+- 公开 JSON 不写逐样本问题、答案、文档、文档标识、runtime handles、candidate rows、gold 或 test membership。
+
+真实运行命令：
+
+```text
+python scripts/run_primeqa_hybrid_sidecar_agent_orchestrator_validation.py --user-confirmed-validation --confirmation-note "user confirmed Stage137 real fixed-orchestrator train five-fold grouped-CV and dev single-pass report-only validation after Stage136 protocol freeze; no candidate selection; no dev retuning; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+执行过程：
+
+- 进程一次启动后自然运行到结束，没有中途终止、重启、抽样或改用测试集。
+- 真实输出写入 `artifacts/primeqa_hybrid_sidecar_agent_orchestrator_validation_stage137.json`。
+- JSON 和 7 张 SVG 位于 `.gitignore` 覆盖的 `artifacts/`，没有提交私有运行产物。
+
+数据与候选池：
+
+```text
+train rows: 562
+train answerable rows: 370
+dev rows: 121
+dev answerable rows: 76
+train folds: 5
+train prefix identity violations: 0
+dev prefix identity violations: 0
+train append budget exceeded: 0
+dev append budget exceeded: 0
+append candidates per row: 200
+test split loaded: false
+```
+
+Train control vs agent：
+
+```text
+control verified average token F1: 0.1946
+agent verified average token F1: 0.1946
+F1 delta: +0.0000
+control verified gold citation count: 151
+agent verified gold citation count: 151
+gold citation delta: +0
+generation context identity violations: 0
+verification context identity violations: 0
+changed original answers: 0 / 562
+changed verified answers: 0 / 562
+changed verification reasons: 0 / 562
+```
+
+Train 五折：
+
+```text
+fold row counts: 113 / 113 / 112 / 112 / 112
+generation context violations by fold: 0 / 0 / 0 / 0 / 0
+verification context violations by fold: 0 / 0 / 0 / 0 / 0
+changed verified answers by fold: 0 / 0 / 0 / 0 / 0
+sidecar answer-path leaks by fold: 0 / 0 / 0 / 0 / 0
+public trace violations by fold: 0 / 0 / 0 / 0 / 0
+append opportunities by fold: 2 / 3 / 2 / 0 / 2
+sidecar captures by fold: 0 / 0 / 0 / 0 / 0
+```
+
+Dev report-only control vs agent：
+
+```text
+control verified average token F1: 0.1873
+agent verified average token F1: 0.1873
+F1 delta: +0.0000
+control verified gold citation count: 33
+agent verified gold citation count: 33
+gold citation delta: +0
+generation context identity violations: 0
+verification context identity violations: 0
+changed original answers: 0 / 121
+changed verified answers: 0 / 121
+changed verification reasons: 0 / 121
+dev used for selection or retuning: false
+```
+
+运行后来源审计：
+
+- Stage137 结束后，读取 Stage137 与 Stage132 的公开聚合 JSON 做独立对比；这不是 Stage137 内置 guard，
+  也没有触发重跑。
+- Stage137 train control F1/citation `0.1946 / 151` 与 Stage132 保存的 Stage116 profile 完全一致。
+- Stage137 dev control F1/citation `0.1873 / 33` 与 Stage132 保存的 Stage116 profile 完全一致。
+- 这补充确认了本轮两个 runner 不只是彼此一致，也没有共同偏离已保存的历史 Stage116 control 指标。
+
+Sidecar 诊断：
+
+```text
+train observations: 1686, availability 1.0000
+train query-overlap row coverage: 1.0000
+train novel-query row coverage: 0.3897
+train append opportunities / sidecar captures: 9 / 0
+dev observations: 363, availability 1.0000
+dev query-overlap row coverage: 1.0000
+dev novel-query row coverage: 0.4298
+dev append opportunities / sidecar captures: 1 / 0
+```
+
+公开 trace 与隔离：
+
+```text
+sidecar generation leaks: 0
+sidecar verification leaks: 0
+sidecar/primary overlaps: 0
+public trace serialization violations: 0
+public trace forbidden keys: 0
+public trace contract violations: 0
+```
+
+结果：
+
+```text
+status: primeqa_hybrid_sidecar_agent_orchestrator_train_cv_dev_validation_passed
+guard checks: 36 / 36 passed
+agent orchestrator integration validated: true
+sidecar effectiveness status: safe_but_neutral
+sidecar citation-verification effectiveness demonstrated: false
+can claim answer-quality improvement: false
+can claim retrieval improvement: false
+can freeze optional agent entrypoint protocol now: true
+can open final test gate now: false
+can run final test metrics now: false
+can use test for tuning: false
+runtime defaultization allowed now: false
+fallback strategies enabled: false
+default runtime policy: unchanged
+public_safe_contract.forbidden_keys_found: []
+```
+
+本步学到的东西：
+
+- Agent integration 已真实跑通，不再只是协议或离线 adapter：683 条样本上实际 generator/verifier 输入和
+  Stage116 control 完全一致，答案和验证原因也完全一致。
+- Recording wrapper 比只检查 trace flag 更强：它直接观察依赖实际收到的对象，因此可以发现“声明没用 sidecar，
+  实际却传入了 sidecar”的实现错误。
+- 集成安全与算法有效性必须继续分开。当前 agent sidecar 提供稳定的 observation/diagnostic trace，
+  但仍然没有捕获 train 9 个、dev 1 个 append gold opportunity。
+- `novel_query_coverage_observed_not_answer_evidence` 的名字是必要的：novel token coverage 不是答案证据，
+  不能因为有 219 个 train、52 个 dev 此类状态就声称 citation recovery。
+- Stage137 可以支持下一步建立可选 agent 入口和显式 action states，但不支持 runtime 默认化或 final test。
+
+运行耗时：
+
+```text
+build candidate pools: 1516.081 seconds
+run control and agent traces: 19.767 seconds
+total: 1601.302 seconds
+```
+
+候选池构建仍占绝大部分时间；这是工程成本，不是效果指标。
+
+可视化结果：
+
+```text
+stage137_train_fold_identity_violations.svg
+stage137_split_answer_metric_deltas.svg
+stage137_sidecar_isolation_violations.svg
+stage137_sidecar_opportunity_capture.svg
+stage137_sidecar_signal_coverage.svg
+stage137_decision_flags.svg
+stage137_guard_check_status.svg
+```
+
+Verification before full repository regression:
+
+```text
+targeted ruff and format check: passed
+Stage135-137 targeted pytest: 27 passed
+Stage137 real train-CV/dev validation: passed
+Stage137 guard checks: 36 / 36 passed
+artifact ignore check: passed
+full ruff: passed
+full pytest: 409 passed
+git diff --check: passed
+```
+
+下一步：Stage138 冻结可选 sidecar-agent entrypoint 与 action-state protocol，明确 retrieve、answer、verify、
+observe、refuse 状态和转换，复用已验证的 Stage137 orchestrator；它仍不是 runtime 默认策略，不打开 test，
+不加入兜底策略。

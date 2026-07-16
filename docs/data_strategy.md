@@ -865,6 +865,20 @@ content handles, gold labels, or test data. Its public artifact freezes channel
 routing, trace fields, guards, and the Stage137 validation plan. No per-row
 runtime trace is written in Stage136.
 
+The current PrimeQA/TechQA hybrid Stage137 Stage116-control versus sidecar-agent
+train-CV/dev validation is recorded in:
+
+```text
+docs/primeqa_hybrid_sidecar_agent_orchestrator_validation.md
+```
+
+Stage137 loads only frozen train/dev split files, local training/dev corpus
+documents, existing local dense caches, and public-safe Stage125/128/135/136
+artifacts. Per-row control and agent executions, answers, document handles, and
+trace objects exist only in memory. The saved report contains aggregate metrics,
+identity/isolation counts, offline train/dev opportunity diagnostics, guards,
+and visualization metadata. Test remains unloaded.
+
 ## Leakage Checks
 
 Before reporting evaluation results:
