@@ -28969,3 +28969,76 @@ full pytest: 330 passed
 Next step: Stage122 should review changed cases for the selected safe config
 and the stronger-but-blocked logistic config before designing any new
 first-stage recall expansion protocol.
+
+## 2026-07-16 - Stage 122 fast-filter screening changed-case review
+
+Goal: review changed cases for the Stage121 selected safe fast-filter config
+and the stronger-but-guard-blocked logistic config, then decide whether the
+signal justifies more second-stage screening work or a return to first-stage
+recall expansion.
+
+What changed:
+
+- Added `src/ts_rag_agent/application/primeqa_hybrid_fast_filter_screening_changed_case_review.py`.
+- Added `scripts/review_primeqa_hybrid_fast_filter_screening_changed_cases.py`.
+- Added `tests/test_primeqa_hybrid_fast_filter_screening_changed_case_review.py`.
+- Added `docs/primeqa_hybrid_fast_filter_screening_changed_case_review.md`.
+- Updated evaluation/data strategy docs and the Stage121 follow-up notes.
+
+Final real run:
+
+```text
+python scripts\review_primeqa_hybrid_fast_filter_screening_changed_cases.py --user-confirmed-review --confirmation-note "user confirmed Stage122 changed-case review after Stage121 selected special-token config and blocked logistic hit@20 signal; train/dev only; test locked; dev report-only; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+Result:
+
+```text
+status: primeqa_hybrid_fast_filter_screening_changed_case_review_completed
+recommended_next_direction: design_first_stage_recall_expansion_protocol
+guard checks: 14 / 14 passed
+test_split_loaded: false
+dev_report_only: true
+runtime_defaults_unchanged: true
+fallback_strategies_enabled: false
+public_safe_contract.forbidden_keys_found: []
+```
+
+Changed-case review:
+
+```text
+special_token_exact_window40_rule_selector_v1:
+  interpretation: safe_but_weak
+  train hit@20 recoveries/regressions: 4 / 3
+  dev hit@20 recoveries/regressions: 0 / 0
+
+top10_locked_route_vote_window50_pairwise_logistic_v1:
+  interpretation: positive_signal_but_guard_risky
+  train hit@20 recoveries/regressions: 11 / 7
+  dev hit@20 recoveries/regressions: 2 / 1
+```
+
+What I learned:
+
+- The blocked logistic route has real hit@20 recovery signal, so it should not
+  be dismissed as noise.
+- The same blocked route also creates guard-relevant hit@20 regressions, so the
+  Stage121 guard block remains justified.
+- The selected safe config is too weak for meaningful dev recall improvement.
+- The next useful direction is first-stage candidate-pool recall expansion, not
+  more aggressive defaultization of second-stage screening.
+
+Verification:
+
+```text
+targeted ruff: passed
+targeted pytest: 2 passed
+Stage122 real run: passed
+full ruff: passed
+full pytest: 332 passed
+artifact ignore check: passed
+```
+
+Next step: Stage123 should freeze a first-stage recall expansion protocol that
+keeps the test split locked and evaluates broader simple candidate generation on
+train-CV plus dev report-only data.

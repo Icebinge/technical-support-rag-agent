@@ -920,3 +920,9 @@ recorded in:
 ```text
 docs/rag_high_recall_agent_research_notes.md
 ```
+
+The current Stage 122 fast-filter screening changed-case review is recorded in:
+
+```text
+docs/primeqa_hybrid_fast_filter_screening_changed_case_review.md
+```

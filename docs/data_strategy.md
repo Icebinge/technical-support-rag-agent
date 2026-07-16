@@ -667,6 +667,19 @@ records in memory only. It does not load the test split, does not run final test
 metrics, and does not write raw candidate rows or raw document/question/answer
 text into the public report.
 
+The current PrimeQA/TechQA hybrid fast-filter screening changed-case review is
+recorded in:
+
+```text
+docs/primeqa_hybrid_fast_filter_screening_changed_case_review.md
+```
+
+Stage122 loads only train/dev split files, the public Stage120 protocol, the
+public Stage121 validation report, local corpus documents, and existing local
+dense cache metadata. It rebuilds candidate records in memory only. It does not
+load the test split, does not run final test metrics, and writes only
+public-safe aggregate summaries plus anonymized changed-case hashes.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

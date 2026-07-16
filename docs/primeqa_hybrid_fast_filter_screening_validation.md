@@ -178,7 +178,7 @@ The result supports changed-case review, not runtime adoption.
 
 ## Next Step
 
-Stage122 should review changed cases for:
+Stage122 reviewed changed cases for:
 
 ```text
 selected safe config:
@@ -188,6 +188,12 @@ strong but blocked config:
   top10_locked_route_vote_window50_pairwise_logistic_v1
 ```
 
-The review should explain whether the blocked config's extra hit@20 gains are
-coming from real recoveries or from unacceptable regressions. Test remains
-locked.
+The result is recorded in:
+
+```text
+docs/primeqa_hybrid_fast_filter_screening_changed_case_review.md
+```
+
+The blocked logistic config's extra hit@20 gains are real, but they come with
+guard-relevant hit@20 regressions. Test remains locked. The next direction is a
+first-stage recall expansion protocol.
