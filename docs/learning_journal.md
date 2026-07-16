@@ -29528,3 +29528,112 @@ artifact ignore check: passed
 
 Next step: Stage128 should freeze the agent retrieval integration protocol for
 the selected prefix-preserving expansion. Test remains locked.
+
+## 2026-07-16 - Stage 128 agent retrieval integration protocol freeze
+
+目标：冻结 Stage126 所选 prefix-preserving recall expansion 的 agent 检索接入协议，
+把 400-depth 输出明确为候选池，而不是直接作为 answer context。
+
+本步改动：
+
+- 新增 `src/ts_rag_agent/application/primeqa_hybrid_agent_retrieval_integration_protocol.py`。
+- 新增 `scripts/freeze_primeqa_hybrid_agent_retrieval_integration_protocol.py`。
+- 新增 `tests/test_primeqa_hybrid_agent_retrieval_integration_protocol.py`。
+- 新增 `docs/primeqa_hybrid_agent_retrieval_integration_protocol.md`。
+- 更新 Stage127 follow-up、data/evaluation strategy 和本 learning journal。
+
+真实运行命令：
+
+```text
+python scripts\freeze_primeqa_hybrid_agent_retrieval_integration_protocol.py --user-confirmed-protocol --confirmation-note "user confirmed Stage128 agent retrieval integration protocol freeze after Stage127 selected-config review; train/dev only; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+Stage127 来源事实：
+
+```text
+source status: primeqa_hybrid_stage116_prefix_preserving_recall_expansion_selected_config_review_completed
+source next direction: freeze_agent_retrieval_integration_protocol_for_selected_prefix_expansion
+selected config: prefix_existing_dense_broad_append200_v1
+selected family: stage116_prefix_existing_dense_append_family_v1
+train incremental recall gain: +9 / 370 = 0.0243
+dev incremental recall gain: +1 / 76 = 0.0132
+train/dev hit@200 losses: 0 / 0
+train/dev prefix identity violations: 0 / 0
+```
+
+冻结后的协议：
+
+```text
+protocol id: primeqa_hybrid_agent_retrieval_integration_protocol_v1
+route name: stage116_prefix_expansion_agent_candidate_pool_integration
+candidate_pool_output_depth: 400
+candidate_pool_is_not_automatic_answer_context: true
+answer_context_policy: unchanged_until_stage129_validation
+ranks 1-200: stage116_immutable_prefix
+ranks 201-400: stage128_append_expansion
+```
+
+Agent 消费边界：
+
+```text
+allowed after Stage129 validation:
+  evidence_selection
+  answerability_estimation
+  citation_validation
+
+blocked in Stage128:
+  direct_answer_context_all_400
+  runtime_default_retrieval_route
+  fallback_strategy_route
+```
+
+结果：
+
+```text
+status: primeqa_hybrid_agent_retrieval_integration_protocol_frozen
+recommended_next_direction: run_agent_retrieval_integration_train_cv_dev_validation
+guard checks: 17 / 17 passed
+can_run_agent_retrieval_integration_validation_now: true
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+runtime_defaultization_allowed_now: false
+fallback_strategies_enabled: false
+default_runtime_policy: unchanged
+public_safe_contract.forbidden_keys_found: []
+```
+
+本步学到的东西：
+
+- 召回扩展的收益必须和 answer quality 分开记录。Stage128 只证明协议边界清楚，
+  不证明 agent 使用 400-depth 候选池后答案一定更好。
+- top200 边界是当前最重要的安全约束：ranks 1-200 不能重排、不能删除、不能插入扩展候选。
+- 201-400 的额外候选只能交给 Stage129 的 evidence selection / answerability /
+  citation validation 实验验证，不能直接塞进最终回答上下文。
+- dev 上更强的 `prefix_query_variant_append100_v1` 仍然只能作为风险信号记录，
+  因为 dev 是 report-only，不能反向调参。
+- 这一阶段没有打开测试集，没有运行 final test metrics，没有修改 runtime 默认策略，
+  也没有加入任何兜底策略。
+
+问题与处理：
+
+- 问题：Stage127 只批准进入 agent 协议设计，不能直接默认化。
+  处理：Stage128 冻结了候选池协议和 Stage129 验证计划，明确 blocked consumers。
+- 问题：400-depth 输出容易被误解成完整 answer context。
+  处理：协议中显式写入 `candidate_pool_is_not_automatic_answer_context: true`，
+  并阻断 `direct_answer_context_all_400`。
+
+Verification:
+
+```text
+targeted ruff: passed
+targeted pytest: 3 passed
+Stage128 real protocol freeze: passed
+full ruff: passed
+full pytest: 350 passed
+artifact ignore check: passed
+```
+
+Next step: Stage129 should run train grouped-CV plus dev report-only validation
+for the frozen agent retrieval integration protocol. Test remains locked,
+runtime defaults remain unchanged, and fallback strategies remain disabled.

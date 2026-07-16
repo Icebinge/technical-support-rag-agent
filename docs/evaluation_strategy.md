@@ -961,3 +961,10 @@ prefix-preserving recall expansion is recorded in:
 ```text
 docs/primeqa_hybrid_prefix_preserving_recall_expansion_selected_config_review.md
 ```
+
+The current Stage 128 agent retrieval integration protocol freeze for the
+selected prefix-preserving expansion is recorded in:
+
+```text
+docs/primeqa_hybrid_agent_retrieval_integration_protocol.md
+```

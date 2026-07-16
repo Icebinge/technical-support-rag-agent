@@ -741,6 +741,20 @@ split files, corpus documents, candidate rows, model outputs, or test data. It
 keeps runtime defaults unchanged and writes only public-safe selected-config and
 agent-integration summaries.
 
+The current PrimeQA/TechQA hybrid Stage116 prefix-preserving recall expansion
+agent retrieval integration protocol freeze is recorded in:
+
+```text
+docs/primeqa_hybrid_agent_retrieval_integration_protocol.md
+```
+
+Stage128 reads only the public-safe Stage127 selected-config review. It does
+not load split files, corpus documents, candidate rows, model outputs, or test
+data. It freezes only a public-safe agent candidate-pool contract: ranks 1-200
+remain the immutable Stage116 prefix, ranks 201-400 are append-only recall
+candidates for Stage129 validation, runtime defaults stay unchanged, and
+fallback strategies stay disabled.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

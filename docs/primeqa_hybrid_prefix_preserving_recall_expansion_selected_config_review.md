@@ -184,3 +184,13 @@ Stage128 should freeze an agent retrieval integration protocol for the selected
 prefix-preserving expansion. The protocol should treat the 400-depth output as a
 candidate pool for evidence selection, not as an automatic answer context. Test
 remains locked.
+
+Stage128 completed this protocol freeze in:
+
+```text
+docs/primeqa_hybrid_agent_retrieval_integration_protocol.md
+```
+
+The frozen protocol keeps ranks 1-200 immutable, exposes ranks 201-400 only as
+additional agent candidate-pool entries, blocks direct all-400 answer context,
+and keeps runtime defaults unchanged.
