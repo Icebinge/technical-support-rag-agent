@@ -238,10 +238,18 @@ fallback_strategies_enabled: false
 default_runtime_policy: unchanged
 ```
 
-## Next Step
+## Follow-Up
 
-Stage135 should run train grouped-CV plus dev report-only validation for the
-frozen sidecar-observation protocol. It should verify that the primary Stage116
-answer context remains unchanged while sidecar observation records are available
-for agent-facing observation/citation-verification probes. Test remains locked,
-runtime defaults remain unchanged, and fallback strategies remain disabled.
+Stage135 completed the train grouped-CV plus dev report-only adapter validation
+in:
+
+```text
+docs/primeqa_hybrid_stage116_answer_context_stage128_sidecar_observation_validation.md
+```
+
+The two-channel interface passed all integrity and isolation checks, but the
+current three-slot sidecar captured none of the 9 train and 1 dev incremental
+gold opportunities in the Stage128 append region. The interface can move into
+train/dev agent orchestration, while citation-verification effectiveness remains
+unproven. Test remains locked, runtime defaults remain unchanged, and fallback
+strategies remain disabled.

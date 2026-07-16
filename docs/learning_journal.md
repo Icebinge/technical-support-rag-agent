@@ -30365,3 +30365,177 @@ full pytest: 382 passed
 Next step: Stage135 should run train grouped-CV plus dev report-only validation
 for the frozen sidecar-observation protocol. Test remains locked, runtime
 defaults remain unchanged, and fallback strategies remain disabled.
+
+## 2026-07-16 - Stage 135 Stage116 answer-context plus Stage128 sidecar-observation validation
+
+目标：把 Stage134 冻结的双通道协议做成真实可执行的 adapter，并在 train 5 折分组交叉验证与
+dev 单次只读报告上验证三件事：Stage116 主答案上下文是否保持完全一致、Stage128 sidecar 是否与
+答案生成和主上下文替换严格隔离、sidecar citation-verification 信号是否真实可用。测试集继续锁定，
+不运行 final test metrics，不修改 runtime 默认策略，不加入兜底策略。
+
+本步改动：
+
+- 新增 `src/ts_rag_agent/application/primeqa_hybrid_sidecar_observation_validation.py`。
+- 新增 `scripts/run_primeqa_hybrid_stage116_answer_context_stage128_sidecar_observation_validation.py`。
+- 新增 `tests/test_primeqa_hybrid_stage116_answer_context_stage128_sidecar_observation_validation.py`。
+- 新增 `docs/primeqa_hybrid_stage116_answer_context_stage128_sidecar_observation_validation.md`。
+- 更新 Stage134 follow-up、data/evaluation strategy 和本 learning journal。
+
+工程实现：
+
+- 新增可注入 `CandidateScoringPolicy` 的 `PrimeQAHybridSidecarObservationAdapter`，默认实现只使用
+  runtime 可见的 query/document token overlap 与 retrieval rank，不读取 gold 标签。
+- 主通道固定输出 Stage116 prefix ranks 1-200 中的 10 个 answer-context records。
+- sidecar 固定从 Stage128 append ranks 201-400 中输出最多 3 个 metadata-only observations。
+- answer generator 接口只能取得主通道结果；sidecar 不能生成答案、不能替换或重排主上下文。
+- gold 标签只在 adapter 完成观察之后用于 train/dev 离线聚合诊断，不进入在线信号或阈值。
+- 公开 JSON 只写聚合统计；runtime content handles、问题、文档和候选记录只存在于内存。
+
+真实运行命令：
+
+```text
+python scripts\run_primeqa_hybrid_stage116_answer_context_stage128_sidecar_observation_validation.py --user-confirmed-validation --confirmation-note "user confirmed Stage135 real train grouped-CV and dev report-only sidecar observation validation after Stage134 protocol freeze; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+数据与候选池检查：
+
+```text
+train rows: 562
+train answerable rows: 370
+dev rows: 121
+dev answerable rows: 76
+train folds: 5
+train prefix identity violations: 0
+dev prefix identity violations: 0
+train append budget exceeded: 0
+dev append budget exceeded: 0
+test split loaded: false
+```
+
+Train grouped-CV 聚合结果：
+
+```text
+primary-context identity violations: 0
+answer-generation context identity violations: 0
+sidecar answer-context leaks: 0
+sidecar/primary overlaps: 0
+record field violations: 0
+rank-region violations: 0
+slot overflows: 0
+rows with full three-slot observations: 562 / 562
+sidecar observations: 1686
+query-overlap signal rate: 1.0000
+rows with novel-query coverage: 219 / 562 (0.3897)
+append-pool incremental gold opportunities: 9
+sidecar incremental gold captures: 0
+sidecar opportunity capture rate: 0.0000
+```
+
+五折稳定性：
+
+```text
+fold row counts: 113 / 113 / 112 / 112 / 112
+all-fold primary identity violations: 0
+all-fold sidecar leaks: 0
+minimum fold observation availability: 1.0000
+mean fold query-overlap signal coverage: 1.0000
+mean fold novel-query coverage: 0.3898
+append incremental opportunities by fold: 2 / 3 / 2 / 0 / 2
+sidecar captures by fold: 0 / 0 / 0 / 0 / 0
+```
+
+Dev report-only 结果：
+
+```text
+primary-context identity violations: 0
+answer-generation context identity violations: 0
+sidecar answer-context leaks: 0
+sidecar/primary overlaps: 0
+record field violations: 0
+rank-region violations: 0
+slot overflows: 0
+rows with full three-slot observations: 121 / 121
+sidecar observations: 363
+query-overlap signal rate: 1.0000
+rows with novel-query coverage: 52 / 121 (0.4298)
+append-pool incremental gold opportunities: 1
+sidecar incremental gold captures: 0
+sidecar opportunity capture rate: 0.0000
+dev used for selection or retuning: false
+```
+
+Stage132 来源答案不变性：
+
+```text
+train verified F1 delta vs Stage116: +0.0000
+train gold citation count delta vs Stage116: +0
+train changed verified answers: 0
+dev verified F1 delta vs Stage116: +0.0000
+dev gold citation count delta vs Stage116: +0
+dev changed verified answers: 0
+```
+
+结果：
+
+```text
+status: primeqa_hybrid_sidecar_observation_validation_passed
+guard checks: 30 / 30 passed
+sidecar observation protocol validated: true
+can implement train/dev agent orchestrator now: true
+direct Stage128 all-400 answer context remains blocked: true
+sidecar can generate answer text: false
+sidecar can replace primary context: false
+can open final test gate now: false
+can run final test metrics now: false
+can use test for tuning: false
+runtime defaultization allowed now: false
+fallback strategies enabled: false
+default runtime policy: unchanged
+public_safe_contract.forbidden_keys_found: []
+```
+
+本步学到的东西：
+
+- Stage135 真正证明的是双通道接口安全：683 条 train/dev 样本上主上下文 identity 违规为 0，
+  sidecar 泄漏、重叠、字段和 rank-region 违规也全部为 0。
+- `query-overlap signal rate = 1.0` 只说明每个 observation 都有可计算信号，不能解释成找到了遗漏证据。
+- top400 append 区域真实增加了 train 9 个、dev 1 个 gold 机会，但当前三槽 sidecar 一个都没有选中。
+  因此 citation-verification 接口可用，但 evidence-recovery 有效性尚未证明。
+- 当前 sidecar 仍然是 `safe_but_neutral`，不能宣称 answer F1、citation 或 retrieval precision 提升，
+  更不能据此打开 test/defaultization gate。
+- 下一阶段可以开始 train/dev agent orchestrator，但必须把 sidecar 保持为 observation/diagnostic channel，
+  并输出可解释的选择与 miss trace；不能让它暗中进入答案生成。
+
+运行耗时：
+
+```text
+build candidate pools: 2867.530 seconds
+build and validate observations: 20.423 seconds
+total: 2977.666 seconds
+```
+
+候选池构建占绝大部分耗时，这是后续工程化缓存需要处理的成本问题，不是算法效果结论。
+
+过程异常与纠正：
+
+- 等待期间，一个外层等待包装器曾把工具返回对象误读成进程已结束，因此短暂报告了“进程结束但无产物”。
+- 随即通过 `Win32_Process` 重新核查，确认真实验证进程 `PID 20276` 仍在运行，马上向用户更正。
+- 该误读没有终止、重启或修改真实验证进程；之后一直等待到进程自然退出并写出 Stage135 JSON 与 SVG。
+
+Verification:
+
+```text
+targeted ruff and format check: passed
+targeted pytest: 6 passed
+Stage135 real train-CV/dev validation: passed
+artifact ignore check: passed
+full ruff: passed
+full pytest: 388 passed
+```
+
+Next step: Stage136 should implement the train/dev-only Stage116-primary plus
+Stage128-sidecar agent orchestrator and public-safe trace contract. It should
+preserve the current answer path exactly and expose sidecar selection/miss
+evidence for diagnosis. Citation-verification effectiveness remains unproven;
+test remains locked, runtime defaults remain unchanged, and fallback strategies
+remain disabled.

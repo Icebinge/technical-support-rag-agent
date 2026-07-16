@@ -837,6 +837,20 @@ Stage116 remains the only primary answer-context source, while Stage128/Stage132
 append candidates are exposed only as sidecar observations for future
 train/dev validation.
 
+The current PrimeQA/TechQA hybrid Stage135 Stage116 answer-context plus
+Stage128 sidecar-observation train-CV/dev validation is recorded in:
+
+```text
+docs/primeqa_hybrid_stage116_answer_context_stage128_sidecar_observation_validation.md
+```
+
+Stage135 loads only the frozen train/dev split files, local training/dev corpus
+documents, existing local dense caches, and public-safe Stage125/128/132/134
+artifacts. Runtime content handles and observation records exist only in memory.
+The committed report contains aggregate summaries only and does not contain raw
+questions, answers, document text, document identifiers, sample identifiers, or
+candidate rows. The test split remains unloaded.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

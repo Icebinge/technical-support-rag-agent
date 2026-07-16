@@ -1010,3 +1010,19 @@ agent protocol freeze is recorded in:
 ```text
 docs/primeqa_hybrid_stage116_answer_context_stage128_sidecar_protocol.md
 ```
+
+The current Stage 135 Stage116 answer-context plus Stage128 sidecar-observation
+train grouped-CV/dev report-only validation is recorded in:
+
+```text
+docs/primeqa_hybrid_stage116_answer_context_stage128_sidecar_observation_validation.md
+```
+
+Stage135 separates interface validity from evidence-recovery effectiveness.
+Primary-context identity, sidecar isolation, record completeness, and signal
+availability are train grouped-CV integrity checks; dev is report-only. The
+adapter passed those checks, but its three-slot sidecar captured none of the 9
+train and 1 dev incremental append-region gold opportunities. This result
+permits train/dev agent-interface implementation, but it is not evidence of
+answer-quality improvement, citation-verification effectiveness, runtime
+defaultization, or readiness to open the final-test gate.
