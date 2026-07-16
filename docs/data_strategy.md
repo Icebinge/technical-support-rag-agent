@@ -851,6 +851,20 @@ The committed report contains aggregate summaries only and does not contain raw
 questions, answers, document text, document identifiers, sample identifiers, or
 candidate rows. The test split remains unloaded.
 
+The current PrimeQA/TechQA hybrid Stage136 Stage116-primary plus
+Stage128-sidecar agent orchestrator and public-safe trace protocol freeze is
+recorded in:
+
+```text
+docs/primeqa_hybrid_sidecar_agent_orchestrator_protocol.md
+```
+
+Stage136 reads only the public-safe Stage135 aggregate report. It does not load
+train/dev split files, corpus documents, candidate rows, model outputs, runtime
+content handles, gold labels, or test data. Its public artifact freezes channel
+routing, trace fields, guards, and the Stage137 validation plan. No per-row
+runtime trace is written in Stage136.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

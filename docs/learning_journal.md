@@ -30539,3 +30539,123 @@ preserve the current answer path exactly and expose sidecar selection/miss
 evidence for diagnosis. Citation-verification effectiveness remains unproven;
 test remains locked, runtime defaults remain unchanged, and fallback strategies
 remain disabled.
+
+## 2026-07-16 - Stage 136 sidecar agent orchestrator and public-safe trace protocol freeze
+
+目标：在 Stage135 已证明双通道接口安全、但 sidecar 证据恢复有效性尚未证明的前提下，实现真正可调用的
+agent orchestrator，并冻结公开安全 trace 与下一阶段验证协议。主答案和验证路径必须继续只使用 Stage116；
+Stage128/Stage132 sidecar 只能输出观察和诊断元数据，不能生成答案、进入验证上下文或替换主上下文。
+
+本步改动：
+
+- 新增 `src/ts_rag_agent/application/primeqa_hybrid_sidecar_agent_orchestrator.py`。
+- 新增 `src/ts_rag_agent/application/primeqa_hybrid_sidecar_agent_orchestrator_protocol.py`。
+- 新增 `scripts/freeze_primeqa_hybrid_sidecar_agent_orchestrator_protocol.py`。
+- 新增 `tests/test_primeqa_hybrid_sidecar_agent_orchestrator.py`。
+- 新增 `tests/test_primeqa_hybrid_sidecar_agent_orchestrator_protocol.py`。
+- 新增 `docs/primeqa_hybrid_sidecar_agent_orchestrator_protocol.md`。
+- 更新 Stage135 follow-up、data/evaluation strategy 和本 learning journal。
+
+工程实现：
+
+- `PrimeQAHybridSidecarAgentOrchestrator` 先调用 Stage135 adapter 构造双通道 bundle。
+- answer generator 只能接收 `answer_context_for_generation()` 返回的 Stage116 top10 主上下文。
+- answer verifier 只能接收 Stage116 prefix 中 rank 不超过 200 的候选。
+- sidecar observations 只进入 `PublicSafeSidecarAgentTrace`，不会传给 generator 或 verifier。
+- trace 只序列化数量、rank、score、signal、拒答状态和 verification reason 等公开安全元数据；
+  不写问题、答案、文档、文档标识、runtime handle、sample id、candidate rows、gold 或 test membership。
+- consumer policy 在构造时拒绝打开 answer generation、answer verification context、primary replacement、
+  runtime defaultization 或 fallback；effectiveness 只能保持 `diagnostic_only_unproven`。
+- 编排器拒绝重复 rank、非正 rank 和超出 top400 冻结边界的候选。
+- Stage136 守卫对缺失的零值字段 fail closed，缺失 violation/capture 字段不能再被 `or 0` 误判为通过。
+
+真实运行命令：
+
+```text
+python scripts\freeze_primeqa_hybrid_sidecar_agent_orchestrator_protocol.py --user-confirmed-protocol --confirmation-note "user confirmed Stage136 sidecar agent orchestrator implementation and public-safe trace protocol freeze after Stage135 validation; public-safe aggregate only; train/dev only; test locked; no final metrics; runtime defaults unchanged; no fallback strategies; citation-verification effectiveness unproven"
+```
+
+真实输入边界：
+
+```text
+source: Stage135 public-safe aggregate JSON only
+Stage135 guards: 30 / 30 passed
+Stage135 train rows represented by aggregate: 562
+Stage135 dev rows represented by aggregate: 121
+Stage135 train append opportunities / captures: 9 / 0
+Stage135 dev append opportunities / captures: 1 / 0
+split files loaded by Stage136: false
+corpus documents loaded by Stage136: false
+test split loaded: false
+final test metrics run: false
+```
+
+冻结的通道与 trace：
+
+```text
+orchestrator id: stage116_primary_plus_stage128_sidecar_agent_orchestrator_v1
+answer generation: stage116_primary_answer_context, depth 10
+answer verification: stage116_prefix_verification_context, max rank 200
+sidecar observation: stage128_stage132_sidecar_observation, max rank 400, slots 3
+sidecar selected for answer generation: false
+sidecar selected for answer verification: false
+public trace contains private fields: false
+runtime gold-free trace can label answer-document miss: false
+```
+
+结果：
+
+```text
+status: primeqa_hybrid_sidecar_agent_orchestrator_protocol_frozen
+guard checks: 21 / 21 passed
+failed checks: []
+can run Stage137 train/dev validation now: true
+can claim citation-verification effectiveness: false
+can claim answer-quality improvement: false
+can claim retrieval improvement: false
+can open final test gate now: false
+can run final test metrics now: false
+can use test for tuning: false
+runtime defaultization allowed now: false
+fallback strategies enabled: false
+default runtime policy: unchanged
+public_safe_contract.forbidden_keys_found: []
+```
+
+可视化结果：
+
+```text
+artifacts\primeqa_hybrid_sidecar_agent_orchestrator_protocol_stage136_visuals\stage136_stage135_safety_counts.svg
+artifacts\primeqa_hybrid_sidecar_agent_orchestrator_protocol_stage136_visuals\stage136_sidecar_opportunity_capture.svg
+artifacts\primeqa_hybrid_sidecar_agent_orchestrator_protocol_stage136_visuals\stage136_channel_permission_flags.svg
+artifacts\primeqa_hybrid_sidecar_agent_orchestrator_protocol_stage136_visuals\stage136_decision_flags.svg
+artifacts\primeqa_hybrid_sidecar_agent_orchestrator_protocol_stage136_visuals\stage136_guard_check_status.svg
+```
+
+本步学到的东西：
+
+- agent 已经从“协议概念”进入可执行代码：generator、verifier、sidecar observer 的依赖和数据通道已经明确封装。
+- “可执行”不等于“有效”。Stage136 没有加载 train/dev 原始数据，也没有真实跑 per-row agent；因此不能报告
+  answer F1、citation 或 retrieval 改善。
+- Stage135 的关键负面事实必须继续保留：append 区域有 train 9 个、dev 1 个新增 gold 机会，但三槽 sidecar
+  捕获数仍为 0。Stage136 只能把 citation verification 标记为 diagnostic-only。
+- runtime trace 不带 gold，能解释 sidecar 为什么被选中、是否越界进入答案路径，但不能自行判断它是否漏掉
+  answer document；该分析只能在 Stage137 train/dev 离线标签边界内完成。
+- 对应为 0 的安全字段也必须验证“字段存在”，否则缺失值和真实零值会混淆。新增测试确认缺失字段会阻断协议。
+
+Verification:
+
+```text
+targeted ruff and format check: passed
+targeted pytest: 12 passed
+Stage136 real public-aggregate protocol freeze: passed
+Stage136 guard checks: 21 / 21 passed
+artifact ignore check: passed
+full ruff: passed
+full pytest: 400 passed
+git diff --check: passed
+```
+
+下一步：Stage137 运行固定 orchestrator 的 train 5 折分组交叉验证与 dev 单次只读验证。该阶段要真实比较
+Stage116 control 与 agent orchestrator 的生成答案、验证答案和 trace 隔离性，并报告 sidecar selection/miss
+诊断；dev 不参与选择或调参，test 继续锁定，runtime 默认策略不变，不加入兜底策略。

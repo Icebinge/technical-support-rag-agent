@@ -1026,3 +1026,17 @@ train and 1 dev incremental append-region gold opportunities. This result
 permits train/dev agent-interface implementation, but it is not evidence of
 answer-quality improvement, citation-verification effectiveness, runtime
 defaultization, or readiness to open the final-test gate.
+
+The current Stage 136 Stage116-primary plus Stage128-sidecar agent orchestrator
+and public-safe trace protocol freeze is recorded in:
+
+```text
+docs/primeqa_hybrid_sidecar_agent_orchestrator_protocol.md
+```
+
+Stage136 is an implementation and protocol-freeze result, not an evaluation
+result. Its 21/21 guards confirm the answer/verification channel routing,
+sidecar isolation policy, public-safe trace schema, inherited Stage135 safety
+facts, and locked test/default/fallback boundaries. Stage137 is frozen as train
+five-fold grouped-CV integrity validation followed by one dev report-only pass;
+dev cannot select or retune the orchestrator.

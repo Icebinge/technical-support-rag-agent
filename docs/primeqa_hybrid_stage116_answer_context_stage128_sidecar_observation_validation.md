@@ -235,13 +235,13 @@ and 0/1 dev opportunity capture is:
 current sidecar evidence-recovery effectiveness demonstrated: false
 ```
 
-## Next Step
+## Follow-Up
 
-Stage136 should implement the train/dev-only Stage116-primary plus
-Stage128-sidecar agent orchestrator and public-safe trace contract. It should
-render the sidecar as observation metadata and preserve the current answer
-path exactly. Because the current three-slot selector captured none of the
-known append-region gold opportunities, Stage136 must keep citation
-verification in diagnostic status and include explicit trace evidence for
-sidecar selection/miss analysis. Test remains locked, runtime defaults remain
+Stage136 completed the train/dev-only Stage116-primary plus Stage128-sidecar
+agent orchestrator and public-safe trace protocol freeze. The implementation
+preserves the current answer path, keeps citation verification diagnostic, and
+retains the Stage135 0/9 train and 0/1 dev sidecar-capture boundary.
+
+The next step is Stage137 real train five-fold grouped-CV plus dev report-only
+orchestrator validation. Test remains locked, runtime defaults remain
 unchanged, and fallback strategies remain disabled.
