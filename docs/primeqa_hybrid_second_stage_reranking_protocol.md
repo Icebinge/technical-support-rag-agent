@@ -161,8 +161,24 @@ recommended_next_direction: run_second_stage_reranking_train_cv_dev_validation
 can_run_second_stage_reranking_now: true
 ```
 
+## Stage118 Result
+
+Stage118 ran the frozen second-stage reranking train-CV/dev validation over the
+fixed Stage116 top200 candidate pool:
+
+```text
+report: artifacts\primeqa_hybrid_second_stage_reranking_validation_stage118.json
+doc: docs\primeqa_hybrid_second_stage_reranking_validation.md
+selectable_config_count: 0 / 8
+status: primeqa_hybrid_second_stage_reranking_completed_no_train_cv_selectable_config
+recommended_next_direction: record_second_stage_reranking_stop_decision
+```
+
+Stage118 kept test locked, did not use dev for selection or retuning, did not
+change runtime defaults, and did not add fallback strategies.
+
 ## Next Step
 
-Stage118 should run the frozen second-stage reranking train-CV/dev validation
-over the fixed Stage116 top200 candidate pool. It must keep test locked, avoid
-dev tuning, avoid runtime/default changes, and avoid fallback strategies.
+Stage119 should record the second-stage reranking stop decision. It should keep
+test locked, avoid final metrics, avoid runtime/default changes, and avoid
+fallback strategies.

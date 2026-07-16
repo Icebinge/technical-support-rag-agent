@@ -28394,3 +28394,191 @@ dev report-only, no retuning
 runtime defaults unchanged
 no fallback strategies
 ```
+## 2026-07-16 - Stage 118 second-stage reranking train-CV/dev validation
+
+### 本阶段目标
+
+按照 Stage117 冻结协议，在固定的 Stage116 top200 candidate pool 上运行第二阶段 reranking train-CV/dev 验证。
+
+本阶段继续保持：
+
+```text
+test locked
+train/dev only
+no final metrics
+dev report-only, no retuning
+runtime defaults unchanged
+no fallback strategies
+```
+
+### 新增内容
+
+代码：
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_second_stage_reranking_validation.py
+scripts/run_primeqa_hybrid_second_stage_reranking_validation.py
+tests/test_primeqa_hybrid_second_stage_reranking_validation.py
+```
+
+文档：
+
+```text
+docs/primeqa_hybrid_second_stage_reranking_validation.md
+docs/primeqa_hybrid_second_stage_reranking_protocol.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+```
+
+产物：
+
+```text
+artifacts/primeqa_hybrid_second_stage_reranking_validation_stage118.json
+artifacts/primeqa_hybrid_second_stage_reranking_validation_stage118_visuals/
+```
+
+### 真实运行
+
+命令：
+
+```text
+python scripts\run_primeqa_hybrid_second_stage_reranking_validation.py --user-confirmed-validation --confirmation-note "user confirmed Stage118 train-CV/dev second-stage reranking validation in current turn; test locked; dev report-only; runtime defaults unchanged; no fallback strategies"
+```
+
+结果：
+
+```text
+status: primeqa_hybrid_second_stage_reranking_completed_no_train_cv_selectable_config
+recommended_next_direction: record_second_stage_reranking_stop_decision
+selectable_config_count: 0 / 8
+guard checks: 16 / 16 passed
+public_safe_contract.forbidden_keys_found: []
+```
+
+Stage116 top200 pool 复现结果：
+
+```text
+train answerable: 370
+train top200 gold present: 345 / 370 = 0.9324
+
+dev answerable: 76
+dev top200 gold present: 69 / 76 = 0.9079
+```
+
+baseline order：
+
+```text
+train hit@10: 0.6892
+train hit@20: 0.7541
+train hit@200: 0.9324
+train mrr@20: 0.5062
+
+dev hit@10: 0.7237
+dev hit@20: 0.8026
+dev hit@200: 0.9079
+dev mrr@20: 0.5588
+```
+
+### 主要实验结论
+
+8 个冻结 reranking config 都没有通过 train-CV selection guard，因此不能进入 runtime/default，也不能打开 final test gate。
+
+最接近的 config：
+
+```text
+crf_lexical_routes_first_v1:
+  objective: -0.0229
+  train mrr@20 delta: +0.0102
+  train hit@10 delta: -0.0162
+  train hit@20 delta: -0.0190
+  train hit@200 delta: +0.0000
+  failed guards:
+    hit@20 regression rate: 0.0324 > 0.02
+    top10 regression count: 15 > 3
+```
+
+另一个看起来有 top20 收益但仍失败的 config：
+
+```text
+crf_route_agreement_best_rank_v1:
+  objective: -5.9883
+  train mrr@20 delta: +0.0018
+  train hit@10 delta: +0.0000
+  train hit@20 delta: +0.0081
+  train hit@200 delta: +0.0000
+  failed guards:
+    BM25 top10 gold demotions to below 50: 3 > 0
+    hit@20 regression rate: 0.0243 > 0.02
+    top10 regression count: 21 > 3
+```
+
+关键结论：本阶段没有丢 top200 recall，问题是 reranking 把太多原本 top10/top20 的好案例向后移动。
+
+### 可视化结果
+
+已生成：
+
+```text
+artifacts\primeqa_hybrid_second_stage_reranking_validation_stage118_visuals\stage118_train_cv_objective_scores.svg
+artifacts\primeqa_hybrid_second_stage_reranking_validation_stage118_visuals\stage118_train_cv_mrr_at_20_delta.svg
+artifacts\primeqa_hybrid_second_stage_reranking_validation_stage118_visuals\stage118_train_cv_hit_at_10_delta.svg
+artifacts\primeqa_hybrid_second_stage_reranking_validation_stage118_visuals\stage118_train_cv_guard_pass_counts.svg
+artifacts\primeqa_hybrid_second_stage_reranking_validation_stage118_visuals\stage118_dev_selected_config_deltas.svg
+artifacts\primeqa_hybrid_second_stage_reranking_validation_stage118_visuals\stage118_selection_decision_flags.svg
+artifacts\primeqa_hybrid_second_stage_reranking_validation_stage118_visuals\stage118_guard_check_status.svg
+```
+
+### 问题、原因与修正
+
+- 问题 1：Stage117 的一个特征名是 `bm25_top10_non_gold_indicator`，名字容易被误解为使用 gold label。
+  - 原因：协议命名不够严谨，但 runtime 不能使用 gold label。
+  - 修正：Stage118 显式记录别名：
+    `bm25_top10_non_gold_indicator -> bm25_top10_indicator`。
+    该特征只表示候选是否出现在 full-document BM25 top10，不读取 answer document label。
+
+- 问题 2：监督模型必须按 config 声明的 feature set 训练，不能把所有 feature 都喂给每个 supervised config。
+  - 原因：否则多个 supervised config 会变成同一个模型，协议失真。
+  - 修正：新增 feature projection，并保留特征别名映射。
+
+- 问题 3：小样本单测中某些 train-CV fold 可能只有单类 label，logistic 无法训练。
+  - 原因：fixture 太小，而真实数据中候选池有大量负例。
+  - 修正：配置训练失败时记录为该 config 的 `training_status: failed` 和不可入选，不把它兜底成其他 reranker，也不伪造成功。
+
+### 验证
+
+目标验证：
+
+```text
+python -m ruff check src\ts_rag_agent\application\primeqa_hybrid_second_stage_reranking_validation.py scripts\run_primeqa_hybrid_second_stage_reranking_validation.py tests\test_primeqa_hybrid_second_stage_reranking_validation.py
+pytest -q tests\test_primeqa_hybrid_second_stage_reranking_validation.py
+python scripts\run_primeqa_hybrid_second_stage_reranking_validation.py --user-confirmed-validation ...
+```
+
+结果：
+
+```text
+targeted ruff: passed
+targeted pytest: 2 passed
+Stage118 real run: passed
+guard checks: 16 / 16 passed
+```
+
+### 我学到了
+
+- 两阶段设计的第一阶段 top200 recall 已经足够稳定复现，但第二阶段不能只追求平均 MRR，小范围 reranking 很容易牺牲已在 top10/top20 的好案例。
+- 当前 reranking 家族的主要失败模式不是召回缺失，而是排序回退风险过大；尤其 top10 regression count 是硬伤。
+- 第二阶段 precision/reranking 需要更保守的 rerank window 或只重排低置信候选，不能全量重排 top200。
+
+### 下一步
+
+Stage119：记录 second-stage reranking stop decision。
+
+继续保持：
+
+```text
+test locked
+no final metrics
+runtime defaults unchanged
+no fallback strategies
+```
+

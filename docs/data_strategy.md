@@ -622,6 +622,17 @@ recorded in:
 docs/primeqa_hybrid_second_stage_reranking_protocol.md
 ```
 
+The current PrimeQA/TechQA hybrid second-stage reranking train-CV/dev
+validation is recorded in:
+
+```text
+docs/primeqa_hybrid_second_stage_reranking_validation.md
+```
+
+Stage118 rebuilt 74,000 train and 15,200 dev candidate records in memory only.
+It did not write raw candidate rows, raw question text, raw answer text, raw
+document text, or raw document IDs.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

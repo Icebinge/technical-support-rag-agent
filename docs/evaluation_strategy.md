@@ -886,3 +886,10 @@ The current Stage 117 second-stage reranking protocol freeze is recorded in:
 ```text
 docs/primeqa_hybrid_second_stage_reranking_protocol.md
 ```
+
+The current Stage 118 second-stage reranking train-CV/dev validation is
+recorded in:
+
+```text
+docs/primeqa_hybrid_second_stage_reranking_validation.md
+```
