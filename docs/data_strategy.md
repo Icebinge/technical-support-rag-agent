@@ -716,6 +716,19 @@ split files, corpus documents, candidate rows, model outputs, or test data. It
 freezes a train/dev-only append-only protocol and writes only public-safe
 configuration summaries.
 
+The current PrimeQA/TechQA hybrid Stage116 prefix-preserving recall expansion
+train-CV/dev validation is recorded in:
+
+```text
+docs/primeqa_hybrid_prefix_preserving_recall_expansion_validation.md
+```
+
+Stage126 loads only train/dev split files, the public Stage125 protocol, local
+corpus documents, and existing local dense cache metadata. It does not load the
+test split, does not run final test metrics, and does not write raw candidate
+rows, raw question text, raw answer text, raw document text, raw document IDs,
+or raw sample IDs.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

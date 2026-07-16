@@ -212,8 +212,15 @@ fallback_strategies_enabled: false
 default_runtime_policy: unchanged
 ```
 
-## Next Step
+## Follow-Up
 
-Stage126 should run the frozen prefix-preserving recall expansion protocol on
-train grouped cross-validation and dev report-only validation. Test remains
-locked.
+Stage126 ran the frozen prefix-preserving recall expansion protocol on train
+grouped cross-validation and dev report-only validation. The result is recorded
+in:
+
+```text
+docs/primeqa_hybrid_prefix_preserving_recall_expansion_validation.md
+```
+
+The selected train-CV config is `prefix_existing_dense_broad_append200_v1`.
+Test remains locked.

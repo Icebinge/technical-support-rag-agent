@@ -29283,3 +29283,135 @@ artifact ignore check: passed
 Next step: Stage126 should run the frozen prefix-preserving recall expansion
 train-CV/dev validation and report whether appended candidates add recall while
 the Stage116 top200 boundary remains unchanged. Test remains locked.
+
+## 2026-07-16 - Stage 126 Stage116 prefix-preserving recall expansion validation
+
+Goal: run the frozen Stage125 append-only protocol on train grouped
+cross-validation and dev report-only validation.
+
+What changed:
+
+- Added `src/ts_rag_agent/application/primeqa_hybrid_prefix_preserving_recall_expansion_validation.py`.
+- Added `scripts/run_primeqa_hybrid_prefix_preserving_recall_expansion_validation.py`.
+- Added `tests/test_primeqa_hybrid_prefix_preserving_recall_expansion_validation.py`.
+- Added `docs/primeqa_hybrid_prefix_preserving_recall_expansion_validation.md`.
+- Updated data/evaluation strategy docs and the Stage125 follow-up notes.
+
+Final real run:
+
+```text
+python scripts\run_primeqa_hybrid_prefix_preserving_recall_expansion_validation.py --user-confirmed-validation --confirmation-note "user confirmed Stage126 Stage116 prefix-preserving recall expansion train-CV/dev validation after Stage125 protocol freeze; train/dev only; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+Baseline reproduced:
+
+```text
+train Stage116 top200: 345 / 370 = 0.9324
+dev Stage116 top200: 69 / 76 = 0.9079
+```
+
+Result:
+
+```text
+status: primeqa_hybrid_stage116_prefix_preserving_recall_expansion_validation_completed
+selected_config_id: prefix_existing_dense_broad_append200_v1
+selected_family_id: stage116_prefix_existing_dense_append_family_v1
+eligible_config_count: 6 / 6
+recommended_next_direction: review_stage116_prefix_preserving_recall_expansion_selected_config
+guard checks: 21 / 21 passed
+```
+
+Selected train-CV summary:
+
+```text
+target_pool_depth: 400
+append_budget: 200
+baseline hit@200: 345 / 370 = 0.9324
+target-depth hit@400: 354 / 370 = 0.9568
+target-depth gain: +9
+appended gold recovery: 9
+hit@200 delta vs Stage116 prefix: 0
+hit@200 loss count: 0
+prefix identity violation count: 0
+```
+
+Selected dev report-only summary:
+
+```text
+baseline hit@200: 69 / 76 = 0.9079
+target-depth hit@400: 70 / 76 = 0.9211
+target-depth gain: +1
+appended gold recovery: 1
+hit@200 delta vs Stage116 prefix: 0
+hit@200 loss count: 0
+prefix identity violation count: 0
+```
+
+Config ranking:
+
+```text
+prefix_existing_dense_broad_append200_v1:
+  train gain: +9
+  dev gain: +1
+  train/dev hit@200 losses: 0 / 0
+  train/dev prefix violations: 0 / 0
+
+prefix_rrf_same_routes_append200_k60_v1:
+  train gain: +9
+  dev gain: +1
+  train/dev hit@200 losses: 0 / 0
+  train/dev prefix violations: 0 / 0
+
+prefix_query_variant_append100_v1:
+  train gain: +7
+  dev gain: +5
+  train/dev hit@200 losses: 0 / 0
+  train/dev prefix violations: 0 / 0
+
+prefix_rrf_same_routes_append100_k60_v1:
+  train gain: +7
+  dev gain: +0
+  train/dev hit@200 losses: 0 / 0
+  train/dev prefix violations: 0 / 0
+
+prefix_route_balanced_append200_v1:
+  train gain: +7
+  dev gain: +2
+  train/dev hit@200 losses: 0 / 0
+  train/dev prefix violations: 0 / 0
+
+prefix_rrf_same_routes_append100_k80_v1:
+  train gain: +4
+  dev gain: +0
+  train/dev hit@200 losses: 0 / 0
+  train/dev prefix violations: 0 / 0
+```
+
+What I learned:
+
+- The Stage125 hypothesis worked on train/dev: preserving ranks 1-200 removes
+  the Stage124 hit@200 regression problem while preserving the extra
+  target-depth recall signal.
+- All 6 append-only configs passed the train guard; this is the first
+  recall-expansion stage where the broader-pool signal survives the no-loss
+  boundary.
+- Dev was not used for selection. The query-variant append100 config has the
+  largest dev gain (+5), but the selected config remains the train-CV winner:
+  `prefix_existing_dense_broad_append200_v1`.
+- This still should not be made a runtime default automatically. The next step
+  should review how the agent will use a fixed top200 prefix plus optional
+  201-400 expansion before changing runtime behavior.
+
+Verification:
+
+```text
+targeted ruff: passed
+targeted pytest: 3 passed
+Stage126 real validation: passed
+full ruff: passed
+full pytest: 344 passed
+artifact ignore check: passed
+```
+
+Next step: Stage127 should review the selected prefix-preserving expansion
+config against the agent retrieval design. Test remains locked.
