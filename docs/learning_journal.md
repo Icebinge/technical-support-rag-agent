@@ -29415,3 +29415,116 @@ artifact ignore check: passed
 
 Next step: Stage127 should review the selected prefix-preserving expansion
 config against the agent retrieval design. Test remains locked.
+
+## 2026-07-16 - Stage 127 prefix-preserving expansion selected-config review
+
+Goal: review the Stage126 selected config before freezing an agent-facing
+retrieval integration protocol.
+
+What changed:
+
+- Added `src/ts_rag_agent/application/primeqa_hybrid_prefix_preserving_recall_expansion_selected_config_review.py`.
+- Added `scripts/review_primeqa_hybrid_prefix_preserving_recall_expansion_selected_config.py`.
+- Added `tests/test_primeqa_hybrid_prefix_preserving_recall_expansion_selected_config_review.py`.
+- Added `docs/primeqa_hybrid_prefix_preserving_recall_expansion_selected_config_review.md`.
+- Updated data/evaluation strategy docs and the Stage126 follow-up notes.
+
+Final real run:
+
+```text
+python scripts\review_primeqa_hybrid_prefix_preserving_recall_expansion_selected_config.py --user-confirmed-review --confirmation-note "user confirmed Stage127 selected-config review after Stage126 selected prefix_existing_dense_broad_append200_v1; train/dev only; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+Source Stage126 facts:
+
+```text
+status: primeqa_hybrid_stage116_prefix_preserving_recall_expansion_validation_completed
+recommended_next_direction: review_stage116_prefix_preserving_recall_expansion_selected_config
+selected_config_id: prefix_existing_dense_broad_append200_v1
+selected_family_id: stage116_prefix_existing_dense_append_family_v1
+eligible_config_count: 6 / 6
+guard checks: 21 / 21 passed
+```
+
+Selected config review:
+
+```text
+config_id: prefix_existing_dense_broad_append200_v1
+source Stage124 config: existing_dense_cache_broad_union_top400_v1
+append source algorithm: cached_dense_plus_lexical_rrf
+route set: stage116_lexical_routes_plus_existing_dense_cache_routes
+channel_top_k: 400
+append_budget: 200
+target_pool_depth: 400
+```
+
+Observed value:
+
+```text
+train incremental recall gain: +9 / 370 = 0.0243
+dev incremental recall gain: +1 / 76 = 0.0132
+train/dev hit@200 losses: 0 / 0
+train/dev prefix identity violations: 0 / 0
+```
+
+Agent integration contract reviewed:
+
+```text
+ranks 1-200: preserve Stage116 immutable prefix
+ranks 201-400: append deduplicated recall candidates
+candidate depth multiplier vs Stage116: 2.0
+additional candidates per query: 200
+runtime defaultization allowed now: false
+final test gate allowed now: false
+```
+
+Risk review:
+
+```text
+dev gain is smaller than train gain: true
+best dev config differs from train-selected config: true
+best dev config: prefix_query_variant_append100_v1
+best dev target-depth gain: +5
+answer quality measured: false
+final test run: false
+```
+
+Result:
+
+```text
+status: primeqa_hybrid_stage116_prefix_preserving_recall_expansion_selected_config_review_completed
+recommended_next_direction: freeze_agent_retrieval_integration_protocol_for_selected_prefix_expansion
+selected_config_supported_for_agent_protocol_design: true
+guard checks: 15 / 15 passed
+runtime_defaultization_allowed_now: false
+fallback_strategies_enabled: false
+default_runtime_policy: unchanged
+```
+
+What I learned:
+
+- The selected Stage126 config is strong enough to design an agent integration
+  protocol around it, because it has train-CV positive recall and preserves the
+  Stage116 top200 boundary.
+- The 400-depth output must be treated as a candidate pool, not automatically as
+  final answer context. Otherwise the extra 200 candidates could add cost and
+  noise without a validated evidence-selection layer.
+- The dev-only stronger query-variant signal is real but non-adoptable at this
+  point because dev remained report-only and was not used for selection.
+- The next stage should freeze the agent retrieval integration protocol while
+  keeping test locked, runtime defaults unchanged, and fallback strategies
+  disabled.
+
+Verification:
+
+```text
+targeted ruff: passed
+targeted pytest: 3 passed
+Stage127 real review: passed
+full ruff: passed
+full pytest: 347 passed
+artifact ignore check: passed
+```
+
+Next step: Stage128 should freeze the agent retrieval integration protocol for
+the selected prefix-preserving expansion. Test remains locked.

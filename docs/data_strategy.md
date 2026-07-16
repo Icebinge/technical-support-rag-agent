@@ -729,6 +729,18 @@ test split, does not run final test metrics, and does not write raw candidate
 rows, raw question text, raw answer text, raw document text, raw document IDs,
 or raw sample IDs.
 
+The current PrimeQA/TechQA hybrid Stage116 prefix-preserving recall expansion
+selected-config review is recorded in:
+
+```text
+docs/primeqa_hybrid_prefix_preserving_recall_expansion_selected_config_review.md
+```
+
+Stage127 reads only the public-safe Stage126 validation report. It does not load
+split files, corpus documents, candidate rows, model outputs, or test data. It
+keeps runtime defaults unchanged and writes only public-safe selected-config and
+agent-integration summaries.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

@@ -207,9 +207,15 @@ artifacts\primeqa_hybrid_prefix_preserving_recall_expansion_validation_stage126_
 artifacts\primeqa_hybrid_prefix_preserving_recall_expansion_validation_stage126_visuals\stage126_guard_check_status.svg
 ```
 
-## Next Step
+## Follow-Up
 
-Stage127 should review the selected config against the broader agent design
-before any runtime defaultization. The obvious question is whether the agent
-should consume a fixed top200 retrieval context plus an optional 201-400
-candidate expansion for second-stage evidence selection. Test remains locked.
+Stage127 reviewed the selected config against the broader agent retrieval
+design. The result is recorded in:
+
+```text
+docs/primeqa_hybrid_prefix_preserving_recall_expansion_selected_config_review.md
+```
+
+The review supports freezing an agent retrieval integration protocol for the
+selected prefix-preserving expansion, but it does not allow runtime
+defaultization yet. Test remains locked.

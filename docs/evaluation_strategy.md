@@ -954,3 +954,10 @@ validation is recorded in:
 ```text
 docs/primeqa_hybrid_prefix_preserving_recall_expansion_validation.md
 ```
+
+The current Stage 127 selected-config review for the Stage116
+prefix-preserving recall expansion is recorded in:
+
+```text
+docs/primeqa_hybrid_prefix_preserving_recall_expansion_selected_config_review.md
+```
