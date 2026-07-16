@@ -860,3 +860,10 @@ The current Stage 113 retrieval/index redesign protocol freeze is recorded in:
 ```text
 docs/primeqa_hybrid_retrieval_index_redesign_protocol.md
 ```
+
+The current Stage 114 retrieval/index redesign train-CV/dev comparison is
+recorded in:
+
+```text
+docs/primeqa_hybrid_retrieval_index_redesign_comparison.md
+```

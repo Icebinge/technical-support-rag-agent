@@ -594,6 +594,13 @@ recorded in:
 docs/primeqa_hybrid_retrieval_index_redesign_protocol.md
 ```
 
+The current PrimeQA/TechQA hybrid retrieval/index redesign train-CV/dev
+comparison is recorded in:
+
+```text
+docs/primeqa_hybrid_retrieval_index_redesign_comparison.md
+```
+
 ## Leakage Checks
 
 Before reporting evaluation results:

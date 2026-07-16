@@ -27626,3 +27626,214 @@ no threshold tuning
 runtime defaults unchanged
 no fallback strategies
 ```
+
+## 2026-07-16 - Stage 114 retrieval/index redesign train-CV/dev comparison
+
+### 本阶段目标
+
+在 Stage113 已冻结的 retrieval/index redesign protocol 下，真正运行 8 个候选
+config：先用 train grouped-CV 做选择，再对 dev 做一次 report-only validation。
+
+继续保持：
+
+```text
+test locked
+no final metrics
+no dev-only selection
+no threshold tuning
+runtime defaults unchanged
+no fallback strategies
+```
+
+### 新增内容
+
+代码：
+
+```text
+src/ts_rag_agent/application/primeqa_hybrid_retrieval_index_redesign_comparison.py
+scripts/run_primeqa_hybrid_retrieval_index_redesign_comparison.py
+tests/test_primeqa_hybrid_retrieval_index_redesign_comparison.py
+```
+
+文档：
+
+```text
+docs/primeqa_hybrid_retrieval_index_redesign_comparison.md
+docs/evaluation_strategy.md
+docs/data_strategy.md
+```
+
+产物：
+
+```text
+artifacts/primeqa_hybrid_retrieval_index_redesign_comparison_stage114.json
+artifacts/primeqa_hybrid_retrieval_index_redesign_comparison_stage114_visuals/
+```
+
+### 实现口径
+
+Stage114 实现了 Stage113 冻结的 8 个 retrieval/index 候选：
+
+```text
+thw_title2_heading2_body1_doc_bm25_v1
+thw_title3_heading2_body1_doc_bm25_v1
+thw_title_heading_query_view_rrf_v1
+slr_section_top1_doc_rollup_v1
+slr_section_top3_rrf_doc_rollup_v1
+slr_heading_section_title_rollup_v1
+evc_special_token_exact_boost_v1
+evc_special_token_title_heading_boost_v1
+```
+
+其中：
+
+- title/heading weighted BM25 用加权索引文本实现，返回原始文档用于回答。
+- section top1 用 section BM25 后按父文档最大 section score rollup。
+- section top3 RRF 先按 section 排名聚合到文档，再与文档 BM25 做 RRF。
+- special-token 候选只使用运行时可见的问题文本、标题、section heading、正文中的特殊 token。
+- 所有候选都不使用 gold document id、gold answer span、test label。
+
+### 真实运行结果
+
+命令：
+
+```text
+python scripts\run_primeqa_hybrid_retrieval_index_redesign_comparison.py --user-confirmed-comparison --confirmation-note "user confirmed Stage114 train grouped-CV retrieval/index redesign comparison on 2026-07-16; train selection only; one dev report; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+数据：
+
+```text
+documents: 28482
+sections: 216648
+train rows: 562
+train answerable: 370
+dev rows: 121
+dev answerable: 76
+train grouped-CV folds: 5
+```
+
+baseline：
+
+```text
+train-CV gold doc hit: 245 / 370
+train-CV gold doc miss: 125 / 370
+train-CV gold doc recall@10: 0.6622
+train-CV verified F1: 0.2017
+train-CV gold citation rate: 0.4958
+
+dev gold doc hit: 53 / 76
+dev gold doc miss: 23 / 76
+dev gold doc recall@10: 0.6974
+dev verified F1: 0.2040
+dev gold citation rate: 0.6029
+```
+
+Stage114 selection：
+
+```text
+selectable configs: 0 / 8
+decision status: primeqa_hybrid_retrieval_index_redesign_completed_no_train_cv_selectable_config
+```
+
+最佳 train-CV retrieval movement：
+
+```text
+evc_special_token_title_heading_boost_v1:
+  retrieval_context_miss delta: -4
+  gold doc recall@10 delta: +0.0108
+  changed answer rate: 0.7278
+  failed guards: evidence_selection_miss, gold_span_beats_selected_answer, changed_answer_rate
+
+evc_special_token_exact_boost_v1:
+  retrieval_context_miss delta: -4
+  gold doc recall@10 delta: +0.0108
+  changed answer rate: 0.1833
+  failed guards: answerability_false_answer, evidence_selection_miss
+```
+
+Section-level candidates 在本实现下没有通过：
+
+```text
+slr_section_top3_rrf_doc_rollup_v1:
+  retrieval_context_miss delta: +9
+  recall@10 delta: -0.0244
+
+slr_section_top1_doc_rollup_v1:
+  retrieval_context_miss delta: +26
+  recall@10 delta: -0.0703
+```
+
+### 可视化结果
+
+已生成：
+
+```text
+artifacts\primeqa_hybrid_retrieval_index_redesign_comparison_stage114_visuals\stage114_train_cv_retrieval_context_miss_delta.svg
+artifacts\primeqa_hybrid_retrieval_index_redesign_comparison_stage114_visuals\stage114_train_cv_gold_doc_recall_delta.svg
+artifacts\primeqa_hybrid_retrieval_index_redesign_comparison_stage114_visuals\stage114_train_cv_average_token_f1_delta.svg
+artifacts\primeqa_hybrid_retrieval_index_redesign_comparison_stage114_visuals\stage114_train_cv_selectability.svg
+artifacts\primeqa_hybrid_retrieval_index_redesign_comparison_stage114_visuals\stage114_dev_retrieval_context_miss_delta.svg
+artifacts\primeqa_hybrid_retrieval_index_redesign_comparison_stage114_visuals\stage114_dev_gold_doc_recall_delta.svg
+artifacts\primeqa_hybrid_retrieval_index_redesign_comparison_stage114_visuals\stage114_decision_flags.svg
+artifacts\primeqa_hybrid_retrieval_index_redesign_comparison_stage114_visuals\stage114_guard_check_status.svg
+```
+
+### 问题、原因与修正
+
+- 问题 1：测试里的 synthetic grouped-CV 样本最初都落到同一个 fold。
+  - 原因：测试样本使用了完全相同的 normalized question + answer document 分组键。
+  - 修正：测试样本 question text 加入 scenario 序号，让 5 个 train 样本形成 5 个组。
+- 问题 2：Stage114 guard 需要确认 raw group values 没有写入，但 public result 最初没有显式字段。
+  - 原因：只有 data_summary 有 fold public-safe 摘要，baseline public result 里没有 mirror 字段。
+  - 修正：在 public result 中加入 `train_cv_group_values_written: false`。
+- 问题 3：dev 没有 Stage113 冻结的 pass/fail 阈值。
+  - 原因：Stage113 只冻结了 dev report-only、no selection、no retuning。
+  - 修正：Stage114 报告中把 `dev_gate_status` 写成 `report_only_no_frozen_pass_threshold`，
+    不伪造 dev passed/failed。
+
+### 验证
+
+目标验证：
+
+```text
+python -m ruff check src\ts_rag_agent\application\primeqa_hybrid_retrieval_index_redesign_comparison.py scripts\run_primeqa_hybrid_retrieval_index_redesign_comparison.py tests\test_primeqa_hybrid_retrieval_index_redesign_comparison.py
+python -m pytest tests\test_primeqa_hybrid_retrieval_index_redesign_comparison.py -q
+python scripts\run_primeqa_hybrid_retrieval_index_redesign_comparison.py --user-confirmed-comparison ...
+```
+
+结果：
+
+```text
+targeted ruff: passed
+targeted pytest: 2 passed
+Stage114 run: passed
+guard checks: 16 / 16 passed
+```
+
+真实 Stage114 run 用时：
+
+```text
+total: 3199.058 seconds
+```
+
+### 我学到了
+
+- 这批 retrieval/index 候选确实能在少量 train-CV 样本上移动召回，但收益很小。
+- 只提升 retrieval_context_miss 不够；召回变化会传导到 evidence selection、answerability false answer 和 changed-answer risk。
+- `evc_special_token_exact_boost_v1` 是这一批里风险最低的线索，但仍然违反 false-answer 和 evidence-miss guard。
+- section-level rollup 在当前实现和当前答案流水线下不是可推进方向，召回和 changed-answer 行为都变差。
+- dev 这一步只能作为 report-only 观察，不能反向挑选候选。
+
+### 下一步
+
+Stage115：记录 frozen Stage113 retrieval/index redesign family 的 stop decision。
+
+继续保持：
+
+```text
+test locked
+no final metrics
+runtime defaults unchanged
+no fallback strategies
+```
