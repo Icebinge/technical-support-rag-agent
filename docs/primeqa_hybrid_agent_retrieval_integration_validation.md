@@ -216,3 +216,12 @@ Stage130 should review Stage129 agent-integration failure patterns before any
 new runtime or final-test gate. The review should focus on the 221 train-CV
 changed verified answers versus Stage116 control and the -1 train-CV gold
 citation regression.
+
+Stage130 completed this review in:
+
+```text
+docs/primeqa_hybrid_agent_integration_failure_review.md
+```
+
+The review blocks the direct Stage128 agent-integration path and recommends a
+new append-candidate evidence shortlist redesign protocol.

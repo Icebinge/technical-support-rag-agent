@@ -29788,3 +29788,133 @@ full pytest: 356 passed
 Next step: Stage130 should review Stage129 agent-integration failure patterns
 before any runtime or final-test gate. Test remains locked, runtime defaults
 remain unchanged, and fallback strategies remain disabled.
+
+## 2026-07-16 - Stage 130 Stage129 agent-integration failure-pattern review
+
+目标：只读取 Stage129 public-safe aggregate artifact，解释为什么 Stage128
+top400 agent integration validation 被 guard 阻断，并冻结下一步边界。
+
+本步改动：
+
+- 新增 `src/ts_rag_agent/application/primeqa_hybrid_agent_integration_failure_review.py`。
+- 新增 `scripts/review_primeqa_hybrid_agent_integration_failure_patterns.py`。
+- 新增 `tests/test_primeqa_hybrid_agent_integration_failure_review.py`。
+- 新增 `docs/primeqa_hybrid_agent_integration_failure_review.md`。
+- 更新 Stage129 follow-up、data/evaluation strategy 和本 learning journal。
+
+真实运行命令：
+
+```text
+python scripts\review_primeqa_hybrid_agent_integration_failure_patterns.py --user-confirmed-review --confirmation-note "user confirmed Stage130 agent integration failure-pattern review after Stage129 validation blocked; public-safe aggregate only; train/dev only; test locked; no final metrics; runtime defaults unchanged; no fallback strategies"
+```
+
+Stage129 来源事实：
+
+```text
+source status: primeqa_hybrid_agent_retrieval_integration_validation_blocked_or_failed
+source next direction: review_stage129_agent_integration_failure_patterns
+source guard checks: 20 / 21 passed
+source failed guard: stage129_agent_answer_quality_train_cv_guard
+source failed sub-check: gold_citation_count_delta_vs_stage116_non_negative
+```
+
+Train-CV 失败信号：
+
+```text
+Stage128 top400 vs Stage116 top200 control:
+verified F1 delta: +0.0003
+gold citation rate delta: -0.0027
+gold citation count delta: -1
+answerable refusal rate delta: +0.0000
+unanswerable refusal rate delta: +0.0000
+gold hit count at profile depth delta: +9
+gold hit rate at profile depth delta: +0.0244
+changed verified answers: 221 / 562 = 0.3932
+```
+
+Train-CV selected citation region shift:
+
+```text
+rank 1-10 delta: -16
+Stage116 prefix ranks 11-200 delta: -26
+Stage128 append ranks 201-400 delta: +42
+prefix-like selected citation delta: -42
+append selected citations: 42
+```
+
+Dev report-only signal:
+
+```text
+verified F1 delta: -0.0036
+gold citation count delta: -2
+gold hit count at profile depth delta: +1
+changed verified answers: 50 / 121 = 0.4132
+append selected citations: 12
+```
+
+Failure patterns:
+
+```text
+recall_gain_not_citation_safe:
+  basis: direct_metric
+  severity: blocking
+
+append_region_displaces_prefix_evidence:
+  basis: aggregate_region_mix_inference
+  severity: high
+
+changed_answer_churn_too_high:
+  basis: direct_metric
+  severity: high
+
+dev_report_confirms_risk_direction:
+  basis: dev_report_only_metric
+  severity: medium
+```
+
+结果：
+
+```text
+status: primeqa_hybrid_stage129_agent_integration_failure_review_completed
+guard checks: 12 / 12 passed
+stage128_direct_agent_integration_path_blocked: true
+recommended_next_direction: freeze_append_candidate_evidence_shortlist_redesign_protocol
+can_open_final_test_gate_now: false
+can_run_final_test_metrics_now: false
+can_use_test_for_tuning: false
+runtime_defaultization_allowed_now: false
+fallback_strategies_enabled: false
+default_runtime_policy: unchanged
+public_safe_contract.forbidden_keys_found: []
+```
+
+本步学到的东西：
+
+- 失败的根因不是 candidate pool 没召回到 gold；相反，Stage128 多召回了 9 个
+  train gold doc，但 evidence shortlist 没把这些召回转化成 gold-citation-safe answer。
+- append 区域确实进入了 selected citations：train 42 个、dev 12 个。
+  但聚合 region mix 显示它等量挤掉了 prefix-like citations。
+- changed-answer churn 很高：train-CV 39.32%，dev 41.32%。在 gold citation
+  guard 已失败的情况下，这个 churn 不能接受。
+- Stage128 top400 可以保留为 recall candidate pool，但直接作为当前 agent
+  integration route 必须阻断。
+- 下一步应冻结一个 append-candidate evidence shortlist redesign protocol：
+  Stage116 evidence 保持稳定，append candidates 只能作为补充证据接受验证，
+  不能无限制替换稳定 prefix evidence。
+- 本步没有打开测试集，没有运行 final test metrics，没有修改 runtime 默认策略，
+  也没有加入任何兜底策略。
+
+Verification:
+
+```text
+targeted ruff: passed
+targeted pytest: 6 passed
+Stage130 real review: passed
+artifact ignore check: passed
+full ruff: passed
+full pytest: 362 passed
+```
+
+Next step: Stage131 should freeze a train/dev-only append-candidate evidence
+shortlist redesign protocol. Test remains locked, runtime defaults remain
+unchanged, and fallback strategies remain disabled.

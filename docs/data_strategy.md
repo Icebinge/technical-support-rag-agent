@@ -770,6 +770,18 @@ candidate-pool, guard, and visualization summaries. It does not write raw
 candidate rows, raw question text, raw answer text, raw document text, raw
 document IDs, or raw sample IDs.
 
+The current PrimeQA/TechQA hybrid Stage130 Stage129 agent-integration
+failure-pattern review is recorded in:
+
+```text
+docs/primeqa_hybrid_agent_integration_failure_review.md
+```
+
+Stage130 reads only the public-safe Stage129 aggregate report. It does not load
+split files, corpus documents, candidate rows, model outputs, or test data. It
+writes only aggregate public-safe failure-pattern, action-boundary, guard, and
+visualization summaries.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

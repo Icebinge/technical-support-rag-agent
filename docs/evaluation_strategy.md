@@ -975,3 +975,10 @@ recorded in:
 ```text
 docs/primeqa_hybrid_agent_retrieval_integration_validation.md
 ```
+
+The current Stage 130 Stage129 agent-integration failure-pattern review is
+recorded in:
+
+```text
+docs/primeqa_hybrid_agent_integration_failure_review.md
+```
