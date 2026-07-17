@@ -16,7 +16,7 @@ No downloaded dataset files are committed to this repository.
 
 ## Current Status
 
-Stage 149: strict local HTTP transport protocol frozen and validated.
+Stage 150: disabled local FastAPI Agent transport implemented and validated.
 
 Implemented:
 
@@ -37,12 +37,14 @@ Implemented:
 - label-free runtime query and transport-neutral Agent request facade
 - typed capacity/lifecycle errors and natural no-timeout shutdown
 - executable local-loopback HTTP transport protocol with strict size and error guards
+- disabled-by-default loopback-only FastAPI adapter with exact ASGI schemas
+- real HTTP/1.1 socket, overload, disconnect, readiness, and shutdown validation
 
 Not implemented yet:
 
 - LangGraph workflow
-- FastAPI service
-- network serving
+- persistent local service entrypoint
+- remote network serving
 - runtime defaultization and final locked-test evaluation
 
 The optional single-request runtime remains disabled unless
@@ -55,7 +57,13 @@ exclusive with the single-request runtime flag. Neither runtime is registered
 as the default. Stage148 adds a transport-neutral facade over the eligible
 concurrent runtime, but it is still not a network service and is not registered
 as the default. Stage149 freezes the exact local HTTP surface around that
-facade, but it does not yet implement or start FastAPI.
+facade. Stage150 implements the FastAPI adapter and validates it with
+in-process ASGI calls plus a temporary real loopback socket. The adapter is
+still disabled by default, no persistent service entrypoint has been defined,
+and no network service remains running after validation.
+
+The Stage150 implementation and formal evidence are recorded in
+[docs/primeqa_hybrid_agent_http_transport_validation.md](docs/primeqa_hybrid_agent_http_transport_validation.md).
 
 ## Quickstart
 
@@ -66,7 +74,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
 pip install -U pip
-pip install -e ".[dev,data]"
+pip install -e ".[app,dev,data]"
 ```
 
 Download the lightweight RAG evaluation dataset:

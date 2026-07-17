@@ -1278,3 +1278,28 @@ case is eligible and five unsafe cases are rejected. No split, question,
 document, model, index, candidate pool, network service, or port is opened.
 FastAPI implementation is authorized next, but remote serving,
 defaultization, test, queues, retries, and fallback remain closed.
+
+The current Stage 150 disabled local FastAPI Agent transport validation is
+recorded in:
+
+```text
+docs/primeqa_hybrid_agent_http_transport_validation.md
+```
+
+Stage150 implements the exact Stage149 loopback-only HTTP/1.1 adapter behind a
+new strict setting that remains false by default and requires an eligible
+concurrent-runtime bootstrap. The surface has exactly three routes, strict JSON
+without coercion, a 32 KiB pre-parse body cap, stable status/error mapping, and
+an 18-field public log allowlist. Synchronous facade work runs off the event
+loop with four nonblocking admission permits and no application waiting queue.
+
+The formal synthetic/ASGI plus real-loopback run passes `37/37` guards in
+`0.300549s`. Four blocked calls complete and the fifth is immediately rejected
+with 503; application waiting, queue, retry, and fallback counts remain zero. A
+known pre-dispatch disconnect sends zero ASGI frames and makes zero runtime
+calls. Natural shutdown observes draining, rejects new work, waits for the
+in-flight call, and closes without timeout or force cancellation. The temporary
+HTTP/1.1 server stops and its port can be rebound. No split, model, index, or
+candidate pool is loaded; test remains locked. The next authorized direction
+is a local service-entrypoint composition protocol, not persistent or remote
+serving yet.

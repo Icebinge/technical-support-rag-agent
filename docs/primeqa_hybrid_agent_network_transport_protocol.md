@@ -191,9 +191,11 @@ stage149_guard_check_status.svg
 
 ## Next Step
 
-Stage150 may implement the disabled-by-default, loopback-only FastAPI adapter
-and validate it with in-process ASGI integration tests plus a real local socket
-smoke test. It must prove the exact body limit, schema/status mapping,
-pre-dispatch disconnect behavior, no hidden application queue, readiness
-transitions, natural shutdown, and allowlisted logging. Remote deployment,
-runtime defaultization, test evaluation, retries, and fallback remain closed.
+Stage150 completed the disabled-by-default, loopback-only FastAPI adapter and
+validated it with in-process ASGI integration plus a real local HTTP/1.1 socket
+smoke test. The result is recorded in
+`docs/primeqa_hybrid_agent_http_transport_validation.md`.
+
+Stage151 may now freeze the local service-entrypoint composition protocol. The
+adapter is not yet a persistent service; remote deployment, runtime
+defaultization, test evaluation, retries, and fallback remain closed.

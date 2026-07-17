@@ -32473,3 +32473,105 @@ formal / preflight artifact ignore checks: passed
 - 框架默认 access log 也属于公开边界。即使应用 logger 不写内容，默认 client/path/header 行为仍可能突破 allowlist。
 
 下一步：Stage150 实现 disabled-by-default、loopback-only FastAPI adapter。用 in-process ASGI integration 与真实本地 socket smoke test 验证 body cap、严格 schema、完整状态映射、disconnect 边界、无 application waiting queue、readiness 状态变化、自然 shutdown 和日志 allowlist。remote deployment、默认化、test、重试与兜底继续关闭。
+
+## 2026-07-18 - Stage 150 本地 FastAPI Agent transport 实现与真实 socket 验证
+
+目标：按照 Stage149 已冻结协议实现真正可调用的 FastAPI adapter，但仍保持默认关闭、仅允许 `127.0.0.1` 和 HTTP/1.1。正式验证必须同时覆盖 in-process ASGI 与真实本地 socket，不加载 train/dev/test、问题、文档、模型、索引或候选池，不注册默认 runtime，也不添加排队、重试、兜底、请求 timeout、强制 shutdown 或 hard cancellation。
+
+### 实现边界
+
+- 新增严格配置 `TS_RAG_ENABLE_LOCAL_AGENT_HTTP_TRANSPORT`，默认 `false`；只有显式 true/false 可用，且 transport 开启时 concurrent sidecar runtime 也必须显式开启。
+- FastAPI app 精确注册 3 条路由：`POST /v1/agent/answers`、`GET /health/live`、`GET /health/ready`；关闭 OpenAPI/docs 路由。
+- Uvicorn 固定为 `127.0.0.1`、h11 HTTP/1.1、单 worker、无 WebSocket、无 proxy headers、无 server header、无默认 access log。
+- request 只允许 handle/title/text，严格拒绝 unknown field、类型 coercion、重复 JSON key、非 UTF-8 JSON 和不支持的 Content-Type。
+- 原始 body 在解析前执行 32,768 bytes 硬上限，同时检查声明长度与真实流；字段上限保持 128/512/24,576 characters。
+- verified complete/refusal 均为 200；输入错误、body 超限、media、schema、capacity/lifecycle、unknown error、404/405 使用冻结的独立状态和稳定错误 envelope。unknown exception 文本不泄露。
+- 同步 facade 在 4-worker executor 运行；4 个 permit 在提交前非阻塞获取，因此 executor 内没有第五个 application waiting request。第五个请求直接 503，queue/retry/fallback 计数始终为 0。
+- FastAPI lifespan 启停 transport facade；shutdown 进入 draining、拒绝新请求、等待在途工作自然结束，再关闭 executor。没有 application timeout、force-cancel 或 runtime resource 重复销毁。
+- public transport event 精确为 18 字段；handle、正文、答案、citation、文档引用、header/cookie/client address/user-agent 和 exception text 均不进入公开日志与正式报告。
+
+### Disconnect 与并发验证
+
+```text
+overload attempts / completed / rejected: 5 / 4 / 1
+max in-flight / application waiting: 4 / 0
+queue / retry / fallback: 0 / 0 / 0
+predispatch disconnect response frames: 0
+predispatch disconnect runtime calls: 0
+facade cooperative cancellation: 1
+shutdown draining / waited / natural completion / closed: true / true / true / true
+closed request: 503 facade_closed
+```
+
+body 读完和 schema 验证后、同步 dispatch 前检查 ASGI disconnect。已知断连时不发送伪造 response；可用 permit 下通过 facade cooperative signal 形成 1 次 pre-dispatch cancellation，runtime call 为 0。仍然没有声称消除 check-to-dispatch race，也没有声称同步 in-flight 工作可 hard-cancel。
+
+提交前并发语义审计发现：初版在 transport permit 已获取、但 future 尚未提交 executor 的极短窗口里，shutdown 理论上可能先关闭 executor，使生命周期拒绝变成 generic 500。这个问题没有在第一版正式观测中出现，但违反冻结协议。最终实现把 transport 状态检查、permit 获取和 executor submission 放进同一同步边界；shutdown 先把 transport 置为 draining，之后不再接受新 submission。新增关闭后请求回归与第 37 个 formal guard，稳定观察为 `503 facade_closed`。先前 36-guard artifacts 被重新生成，不作为最终证据。
+
+### 真实 loopback socket
+
+正式验证预先绑定系统分配的 `127.0.0.1:0` listener，再把 listener 交给 Uvicorn。启动与关闭均自然等待，没有应用监控时长、请求 timeout、强制终止或重启。
+
+```text
+HTTP version: HTTP/1.1
+live / ready / answer / unsupported media: 200 / 200 / 200 / 415
+real-socket runtime calls: 1
+access log / server header / proxy headers: false / false / false
+server stopped / transport closed / same port rebound: true / true / true
+persistent service / persisted port value: false / false
+```
+
+验证结束后 socket 已关闭，同一端口可被新 socket 重新绑定；端口数值没有写进公开 artifact，也没有留下常驻服务。
+
+### Source gate 与正式结果
+
+未确认 preflight 使用真实 Stage149 artifact，只因 `stage150_user_confirmed` 失败；in-process 和 socket validation 都没有执行。用户本轮“好下一大步吧”作为正式确认后，最终重跑结果为：
+
+```text
+Stage149 source guards: 39 / 39
+Stage150 guards: 37 / 37
+source unchanged: true
+formal in-process / loopback socket: true / true
+formal time: 0.300549s
+train / dev / test loaded: false / false / false
+questions / documents / models / indexes / candidate pools: false
+runtime default / remote exposure / persistent service: false / false / false
+test metrics run: false
+public private keys: []
+SVG XML parse: 10 / 10
+```
+
+Stage149 source SHA-256：`d25d5867c325f719a0a22c22d25e1a63a38b88d3af198cc9dab469584baa3197`。
+
+最终 Stage150 artifact SHA-256：`0f380553bc8602c679b56568ed939b051badc84ee3cd0a468ba1be85611e1403`。
+
+### 真实执行、失败与修正记录
+
+- 第一次 `pip install -e ".[app,dev]"` 被 shell runner 的短默认执行额度提前截断，不能算安装结果。随后给 shell 足够执行空间并自然等待完成；最终本机版本为 FastAPI 0.139.2、Starlette 1.3.1、Uvicorn 0.51.0、HTTPX 0.28.1、Pydantic 2.13.4。
+- 初版并发测试错误地让 4 个 OS thread 共享 1 个同步 `TestClient` portal。18 个普通测试和直接 ASGI disconnect 测试已完成，但两个 pytest invocation 都在同一 overload case 停止 CPU 进展。这是测试拓扑死锁，不是长模型进程。确认两个进程都是本阶段 pytest 且持续无进展后，只终止了这两个 orphan pytest process；没有停止、重启或缩短任何合法实验。
+- overload/shutdown 测试改为 `httpx.AsyncClient + ASGITransport` 并发 task，阻塞 runtime 仍由 `Event.wait()` 自然释放。没有改变生产阈值或验收条件。第一轮得到 `21 passed`，但同一命令中的 Ruff 真实报告 1 个 unused import；删除后通过。
+- 加入 validator 测试后定向为 `26 passed`。并发语义审计修复 lifecycle/submission race、增加关闭后 503 回归后，最终定向为 `27 passed`。
+- 当前 FastAPI `TestClient` import 会发出 `StarletteDeprecationWarning`，建议未来迁移到 `httpx2`。本阶段保留警告记录，没有隐藏，也没有未经确认引入新客户端体系；该警告不改变本次实际响应和 formal decision。
+- 第一版正式结果为 36/36；race 修复后重跑仍为 36/36；新增明确 formal guard 后最终为 37/37。只有最后一次 artifact 是最终证据，前两次是如实保留的过程结果。
+- 第一次全仓验收命令用 PowerShell 动态拼 changed-Python 参数时，把多个文件路径组合成了一个不存在的路径；Ruff format 子检查因此真实失败。后续 Ruff lint 和 `613 passed` 仍然完成，但整条命令的最终退出码不能反向证明前面的 format。随后用 6 个显式文件参数单独重跑，结果为 6 files already formatted；没有把错误命令写成全绿。
+
+最终验收：
+
+```text
+targeted Stage150 tests: 27 passed, 1 dependency deprecation warning
+Stage150 Python format check: 6 files already formatted
+full repository Ruff: passed
+full repository pytest: 613 passed, 1 dependency deprecation warning in 11.82s
+git diff --check: passed（有 CRLF 将在 Git 下次写入时转 LF 的信息提示）
+formal Stage150 guards: 37 / 37
+formal / preflight SVG XML parse: 10 / 10 and 10 / 10
+formal / preflight artifact ignore checks: passed
+```
+
+### 本步学到
+
+- “线程池有 4 个 worker”本身不能证明没有等待队列；必须在 `executor.submit` 之前用非阻塞 admission permit 限制 outstanding futures，才能证明第五个请求没有进入 executor 内部队列。
+- transport admission 与 shutdown 之间需要明确线性化点。只给 facade 做 draining 不够；permit 已拿到但尚未 submit 的请求也必须被 shutdown 正确接管。
+- ASGI in-process 测试和真实 socket smoke 证明的是不同层次：前者适合精确制造 body stream、disconnect 和并发状态，后者才能证明真实 listener、HTTP/1.1、Uvicorn lifespan 与端口释放。
+- adapter 已实现不等于 service 已部署。当前只有 app/config factory 与临时 socket 验证，没有冻结资源 composition、启动 CLI、持久端口或进程退出协议，因此必须客观记录为“transport implemented, persistent service not running”。
+
+下一步：Stage151 冻结本地 service-entrypoint composition protocol，明确允许读取的公开 aggregate、bootstrap 与 transport 资源 ownership、local port 输入边界、启动失败语义、进程退出与自然 shutdown。协议通过前不实现常驻 entrypoint；remote、runtime 默认化、test、排队、重试和兜底继续关闭。

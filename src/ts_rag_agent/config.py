@@ -15,6 +15,7 @@ class ProjectSettings(BaseSettings):
     train_repo: str = "PrimeQA/TechQA"
     enable_optional_sidecar_agent: bool = False
     enable_concurrent_sidecar_agent: bool = False
+    enable_local_agent_http_transport: bool = False
 
     @field_validator("enable_optional_sidecar_agent", mode="before")
     @classmethod
@@ -38,12 +39,25 @@ class ProjectSettings(BaseSettings):
             return value.strip().lower() == "true"
         raise ValueError("TS_RAG_ENABLE_CONCURRENT_SIDECAR_AGENT must be explicit true or false")
 
+    @field_validator("enable_local_agent_http_transport", mode="before")
+    @classmethod
+    def validate_explicit_local_http_transport_flag(cls, value: object) -> object:
+        """Accept only explicit true/false values for the local HTTP adapter."""
+
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.strip().lower() in {"true", "false"}:
+            return value.strip().lower() == "true"
+        raise ValueError("TS_RAG_ENABLE_LOCAL_AGENT_HTTP_TRANSPORT must be explicit true or false")
+
     @model_validator(mode="after")
     def validate_runtime_modes_are_mutually_exclusive(self) -> "ProjectSettings":
         """Prevent two process-owned runtime graphs from being requested together."""
 
         if self.enable_optional_sidecar_agent and self.enable_concurrent_sidecar_agent:
             raise ValueError("optional and concurrent sidecar runtime flags are mutually exclusive")
+        if self.enable_local_agent_http_transport and not self.enable_concurrent_sidecar_agent:
+            raise ValueError("local Agent HTTP transport requires the concurrent sidecar runtime")
         return self
 
     @property
