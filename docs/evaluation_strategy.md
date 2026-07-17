@@ -1086,3 +1086,19 @@ exactly. Therefore the implementation and runtime action order are validated
 for an explicit future non-default activation path. This does not authorize
 runtime defaultization, final-test evaluation, retries, fallback strategies, or
 claims of sidecar effectiveness.
+
+The current Stage 140 online candidate-pool performance and exact-identity
+validation is recorded in:
+
+```text
+docs/primeqa_hybrid_online_candidate_pool_performance_validation.md
+```
+
+Stage140 postpones runtime activation and treats latency as an independent
+engineering gate. It vectorizes the unchanged BM25 formulas, reuses the
+full-document result for the derived special-token route, and moves index/model
+ownership outside the request path. All 683 online candidate pools exactly
+match the legacy sequence, and train/dev Recall@10/50/100/200/400 exactly match
+Stage127. The observed train/dev P95 latency is 0.450798/0.293909 seconds. Dev is
+report-only, test remains locked, and no product latency SLO is inferred from
+these measurements.

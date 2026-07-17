@@ -31191,3 +31191,179 @@ Stage139 新增的 5 个 Python 文件均通过独立 format check。
 下一步：Stage140 冻结显式、非默认的 agent runtime activation protocol，明确用户可见 runtime flag、生产 retrieval
 port 所有权、默认关闭行为、拒绝输出和公开 trace 合同、激活 guards。test 继续锁定，不允许 runtime 默认化，
 不加入重试或兜底策略。
+
+## 2026-07-17 - Stage 140 在线候选池性能拆解、等价优化与 train-CV/dev 验证
+
+目标：纠正 Stage139 在候选池性能尚未达标时就准备进入 runtime activation protocol 的过早交接。Stage139 构建
+683 条 train/dev 候选池耗时 `7600.407s`，批量平均 `11.127975s/题`，完全不适合作为在线实现。本步先拆解真实
+瓶颈，再实现长驻索引的单问题候选池检索器；只有候选池全序列、Stage127 Recall@10/50/100/200/400、Agent
+答案路径和公开安全边界全部保持，才允许把性能优化记为通过。test 继续锁定，runtime 默认不变，不加入重试或兜底。
+
+本步改动：
+
+- `BM25Retriever` 把 posting、文档长度和 BM25 打分改为 NumPy 数组与向量化计算；公式、重复 query term 语义和
+  `score desc + document id` tie-break 不变。
+- `SectionBM25Retriever` 向量化 section 打分，并用 `numpy.maximum.at` 聚合父文档最高 section 分数；不改变
+  max-section rollup 定义。
+- `pyproject.toml` 显式加入 `numpy>=1.26`，因为向量化词法检索和已有 dense retriever 都直接依赖 NumPy。
+- `_SpecialTokenBoostRetriever` 新增基于已有 full-document BM25 结果做 boost 的方法，不再在在线依赖图中重复执行
+  相同全文检索。
+- 新增 `primeqa_hybrid_online_candidate_pool_retriever.py`：用独立通道和派生通道多态封装 7 条冻结 route；模型、
+  dense cache 和 lexical index 由请求外部持有，每个问题只执行查询相关检索与融合。
+- 检索器明确实现两层冻结语义：各通道 Top200 单独融合为 Stage116 prefix，各通道 Top400 融合为 Stage128
+  append source，再保持前 200 位不变并追加到 400 位。
+- 新增 Stage140 验证器、CLI、公开安全聚合 JSON 和 5 张 SVG；逐题 latency 只保留聚合分布，不写 question、
+  sample id、document id、gold label 或候选行。
+- 新增标量 BM25/section-BM25 等价测试、online retriever 依赖顺序与两层融合测试、性能 guard 和可视化测试。
+- 更新 Stage139 后续说明、data strategy、evaluation strategy 和独立 Stage140 结果文档。
+
+性能瓶颈实测：
+
+首次使用固定 10 条 train 查询逐通道测量原实现：
+
+```text
+original seven-channel query P50 / P95 / max: 12.3060s / 65.1190s / 101.9718s
+full-document BM25 P50 / P95: 0.8595s / 2.7012s
+section BM25 P50 / P95 / max: 5.8998s / 52.9634s / 89.6734s
+title-heading-body BM25 P50 / P95: 3.1801s / 4.8381s
+special-token BM25 P50 / P95: 2.0762s / 4.0376s
+E5-small dense P50 / P95: 0.5352s / 0.8913s
+MiniLM dense P50 / P95: 0.1729s / 0.5126s
+```
+
+根因不是 Dense，而是 Python 循环处理大 posting，特别是 216648 个 section 上的 section BM25；此外 Stage139
+无条件计算了当前选中配置不使用的 4 条 query-variant route，special-token route 还重复执行全文 BM25。
+
+向量化后，同一组 10 条查询的初步结果：
+
+```text
+optimized seven-channel query P50 / P95 / max: 0.3794s / 1.0585s / 1.5468s
+section BM25 P50 / P95: 0.1000s / 0.1714s
+```
+
+真实运行中遇到的问题、原因和修正：
+
+- 第一次完整 Stage140 计算已执行完候选池比较，但在报告组装时调用 split summarizer 传入了单个 list，而接口要求
+  整个 split mapping。进程在 `509.1s` 后失败，没有生成 Stage140 报告，不能记为完成。修正参数形状后从头重跑，
+  未复用未落盘结果。
+- 第二次完整运行成功写出 blocked 报告：train/dev 候选池 identity violations 为 `562/121`，浅层 recall 也有
+  小幅变化，只有 Recall@400 保持。根因不是向量化排序漂移，而是在线检索器错误地直接融合各通道 Top400；冻结
+  Stage116 prefix 实际要求先截断每通道 Top200 后独立 RRF。该运行被 guard 正确阻断，runtime activation 始终为
+  false。
+- 修正为 `Top200 prefix RRF + Top400 append RRF + prefix preserving append` 后，第三次完整运行重新加载模型、
+  重建索引并逐题执行，未复用 blocked pool，最终通过。
+- 公开安全检查最初把聚合键 `unique_answer_doc_ids` 误判为私有 `answer_doc_id`。修正为递归检查 exact key，保留
+  聚合计数并继续禁止逐条 gold label。
+
+最终完整 train-CV/dev 结果：
+
+```text
+status: primeqa_hybrid_online_candidate_pool_performance_validation_passed
+guard checks: 21 / 21 passed
+failed checks: []
+train/dev rows: 562 / 121
+train/dev answerable rows: 370 / 76
+train/dev exact candidate-pool identity violations: 0 / 0
+candidate-pool depth: 400 / 400
+test split loaded: false
+runtime activation allowed now: false
+runtime defaultization allowed now: false
+retry actions enabled: false
+fallback strategies enabled: false
+public-safe forbidden keys: []
+```
+
+Recall 精确保持 Stage127：
+
+```text
+train Recall@10/50/100/200/400: 0.6892 / 0.8189 / 0.8973 / 0.9324 / 0.9568
+dev Recall@10/50/100/200/400:   0.7237 / 0.8421 / 0.8684 / 0.9079 / 0.9211
+train hit counts: 255 / 303 / 332 / 345 / 354
+dev hit counts:    55 /  64 /  66 /  69 /  70
+```
+
+在线候选池延迟：
+
+```text
+train average / P50 / P95 / max: 0.296455s / 0.222661s / 0.450798s / 5.051437s
+dev average / P50 / P95 / max:   0.234170s / 0.185714s / 0.293909s / 2.751323s
+weighted train/dev mean: 0.285421s
+all 683 online retrieval wall time: 195.427s
+Stage139 source candidate-pool wall time: 7600.407s
+online batch speedup: 38.89x
+```
+
+启动/刷新成本与请求成本已分开：
+
+```text
+load dense models and cached embeddings: 29.036s
+build long-lived lexical indexes: 100.816s
+```
+
+这些成本不在每个请求中重复执行。每个新问题仍会构建自己的 query-specific candidate pool，但只执行长驻索引上的
+检索、两层 RRF、去重和 materialization。
+
+Stage139 Agent 全链路回归：
+
+```text
+Stage139 regression guards: 45 / 45 passed
+Stage137 saved aggregate parity: true
+train/dev candidate-pool identity violations: 0 / 0
+train/dev exact five-transition trace rate: 1.0000 / 1.0000
+train/dev verified F1: 0.1946 / 0.1873
+train/dev verified gold citations: 151 / 33
+retry/fallback actions: 0 / 0
+optimized legacy candidate-pool build: 682.299s
+optimized Stage139 total: 959.343s
+```
+
+可视化结果：
+
+```text
+stage140_candidate_pool_wall_time.svg
+stage140_online_latency_distribution.svg
+stage140_train_channel_p95_latency.svg
+stage140_recall_at_k.svg
+stage140_guard_check_status.svg
+```
+
+阶段内验证：
+
+```text
+targeted ruff: passed
+targeted pytest: 39 passed
+new/fully formatted Stage140 Python files: 10 files already formatted
+historical high-recall module format baseline: not clean; Ruff would reformat the existing file
+Stage140 full train-CV/dev validation: passed
+Stage140 guard checks: 21 / 21 passed
+Stage139 full regression validation: passed
+Stage139 regression guards: 45 / 45 passed
+artifact ignore check: passed
+SVG XML parse check: 5 / 5 passed
+```
+
+全仓库验证：
+
+```text
+full repository ruff check: passed
+full repository pytest: 452 passed
+git diff --check: passed
+```
+
+`primeqa_hybrid_high_recall_union_comparison.py` 只新增了复用已有 BM25 结果的方法，没有接受 Ruff 对该历史文件其余
+区域的批量重排；因此本步没有把该项误写成 format pass，也没有为追求表面全绿制造无关 diff。
+
+本步学到：
+
+- 高召回候选池慢不代表必须减少通道或牺牲 recall。先做逐通道 profiling，才能区分模型推理、倒排打分、重复 route
+  和融合开销；本次真实主因是 section posting 的 Python 循环。
+- 性能等价不能只看 Recall@400。直接 Top400 融合虽然保住最终 recall，却改变了 frozen Top200 prefix 和答案路径；
+  必须比较 683 条候选池的完整有序序列。
+- 长驻索引解决的是“不要每题重建基础设施”，但每题 query-specific pool 仍然存在。正确的在线成本应只包含 query
+  encoding、索引查询、融合和 materialization。
+- P95 已明显改善，但少量 max latency spike 仍然存在；没有用户确认的产品 SLO，就不能擅自把测量结果写成生产验收
+  阈值，也不能据此自动激活 runtime。
+
+下一步：Stage141 冻结用户确认的 latency SLO 和显式、非默认 runtime activation protocol。协议需要明确模型、dense
+cache 和四个 lexical index 的启动所有权，默认关闭的用户可见 flag，warmup/concurrency 验证，单请求 latency/public
+trace 合同、拒绝行为和激活 guards。test 继续锁定，不允许 runtime 默认化，不加入重试或兜底策略。

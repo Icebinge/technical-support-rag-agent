@@ -64,7 +64,7 @@ _FORBIDDEN_PUBLIC_KEYS = frozenset(
 
 
 class CandidatePoolRetrieverPort(Protocol):
-    """Retrieve the frozen candidate pool for one entrypoint request."""
+    """Build or retrieve the frozen candidate pool for one entrypoint request."""
 
     def retrieve(self, question: PrimeQAQuestion) -> Sequence[RetrievalResult]: ...
 

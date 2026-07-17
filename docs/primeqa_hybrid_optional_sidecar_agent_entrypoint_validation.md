@@ -292,8 +292,18 @@ not eligible for defaultization or final-test evaluation.
 
 ## Next Step
 
-Stage140 should freeze the explicit non-default agent runtime activation
-protocol. It should define the user-facing runtime flag, production retrieval
-port ownership, disabled-by-default behavior, refusal and public-trace output
-contract, and activation guards. Test remains locked; runtime defaultization,
-retry actions, and fallback strategies remain disabled.
+This original handoff was superseded after the Stage139 candidate-pool timing
+was reviewed as unacceptable for online retrieval. Stage140 first had to
+diagnose and optimize candidate construction before any activation protocol.
+That work is recorded in:
+
+```text
+docs/primeqa_hybrid_online_candidate_pool_performance_validation.md
+```
+
+Stage140 preserved every candidate-pool sequence and frozen recall count while
+reducing the complete 683-row online retrieval pass from the Stage139 source
+time of 7600.407 seconds to 195.427 seconds. Stage141 is now the explicit
+non-default runtime activation protocol step, subject to a user-confirmed
+latency SLO. Test remains locked; runtime defaultization, retry actions, and
+fallback strategies remain disabled.

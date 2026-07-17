@@ -157,6 +157,23 @@ class _SpecialTokenBoostRetriever:
             query,
             top_k=max(top_k, self._component_depth),
         )
+        return self.search_from_base_results(
+            query,
+            base_results=base_results,
+            top_k=top_k,
+        )
+
+    def search_from_base_results(
+        self,
+        query: str,
+        *,
+        base_results: Sequence[RetrievalResult],
+        top_k: int = 10,
+    ) -> list[RetrievalResult]:
+        """Apply the exact-token boost to an already-resolved baseline search."""
+
+        if top_k <= 0:
+            raise ValueError("top_k must be positive")
         scores: dict[str, float] = {
             result.document.id: result.score for result in base_results
         }

@@ -906,6 +906,20 @@ pools, control/entrypoint executions, dependency contexts, answers, and action
 traces remain in memory. The saved report is aggregate-only and test remains
 unloaded.
 
+The current PrimeQA/TechQA hybrid Stage140 online candidate-pool performance
+validation is recorded in:
+
+```text
+docs/primeqa_hybrid_online_candidate_pool_performance_validation.md
+```
+
+Stage140 uses only the same frozen train/dev split files, local training/dev
+corpus, local dense caches, and public-safe Stage125/127/128/139 artifacts. It
+builds long-lived indexes once, constructs one query-specific pool per train/dev
+row, and writes only aggregate latency, recall, identity, and guard summaries.
+It does not load the test split or write per-row question, document, label, or
+candidate data.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

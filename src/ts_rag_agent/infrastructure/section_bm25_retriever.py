@@ -4,6 +4,8 @@ import math
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 
+import numpy as np
+
 from ts_rag_agent.domain.dataset import PrimeQADocument, PrimeQADocumentSection
 from ts_rag_agent.domain.retrieval import RetrievalResult
 from ts_rag_agent.infrastructure.bm25_retriever import tokenize_text
@@ -21,11 +23,14 @@ class SectionBM25Retriever:
         self._k1 = k1
         self._b = b
         self._documents: dict[str, PrimeQADocument] = {}
+        self._document_ids: list[str] = []
+        self._document_indices: dict[str, int] = {}
         self._sections: list[PrimeQADocumentSection] = []
-        self._section_lengths: list[int] = []
+        self._section_lengths = np.empty(0, dtype=np.float64)
+        self._section_document_indices = np.empty(0, dtype=np.int32)
         self._avg_section_length = 0.0
         self._idf: dict[str, float] = {}
-        self._postings: dict[str, list[tuple[int, int]]] = {}
+        self._postings: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         self._is_fitted = False
 
     def fit(
@@ -36,31 +41,46 @@ class SectionBM25Retriever:
         """构建 section 级 BM25 倒排索引。"""
 
         self._documents = {document.id: document for document in documents}
+        self._document_ids = list(self._documents)
+        self._document_indices = {
+            document_id: index for index, document_id in enumerate(self._document_ids)
+        }
         self._sections = [
             section
             for document_id in self._documents
             for section in sections_by_document.get(document_id, [])
             if section.text.strip()
         ]
-        self._section_lengths = []
+        section_lengths = []
         postings: dict[str, list[tuple[int, int]]] = defaultdict(list)
 
         for section_index, section in enumerate(self._sections):
             document = self._documents[section.document_id]
             tokens = tokenize_text(_section_search_text(document, section))
             term_counts = Counter(tokens)
-            self._section_lengths.append(len(tokens))
+            section_lengths.append(len(tokens))
 
             for term, term_frequency in term_counts.items():
                 postings[term].append((section_index, term_frequency))
 
         section_count = len(self._sections)
-        total_length = sum(self._section_lengths)
+        self._section_lengths = np.asarray(section_lengths, dtype=np.float64)
+        self._section_document_indices = np.asarray(
+            [self._document_indices[section.document_id] for section in self._sections],
+            dtype=np.int32,
+        )
+        total_length = float(self._section_lengths.sum())
         self._avg_section_length = total_length / section_count if section_count else 0.0
-        self._postings = dict(postings)
+        self._postings = {
+            term: (
+                np.fromiter((item[0] for item in term_postings), dtype=np.int32),
+                np.fromiter((item[1] for item in term_postings), dtype=np.float64),
+            )
+            for term, term_postings in postings.items()
+        }
         self._idf = {
             term: _compute_idf(section_count, len(term_postings))
-            for term, term_postings in self._postings.items()
+            for term, term_postings in postings.items()
         }
         self._is_fitted = True
 
@@ -76,46 +96,58 @@ class SectionBM25Retriever:
         if not query_terms or not self._sections:
             return []
 
-        section_scores: dict[int, float] = defaultdict(float)
+        section_scores = np.zeros(len(self._sections), dtype=np.float64)
+        touched_sections = np.zeros(len(self._sections), dtype=np.bool_)
         for term in query_terms:
             idf = self._idf.get(term)
             if idf is None:
                 continue
 
-            for section_index, term_frequency in self._postings[term]:
-                section_scores[section_index] += self._score_term(
-                    idf,
-                    term_frequency,
-                    self._section_lengths[section_index],
-                )
+            section_indices, term_frequencies = self._postings[term]
+            section_scores[section_indices] += self._score_terms(
+                idf,
+                term_frequencies,
+                self._section_lengths[section_indices],
+            )
+            touched_sections[section_indices] = True
 
-        document_scores: dict[str, float] = {}
-        for section_index, section_score in section_scores.items():
-            section = self._sections[section_index]
-            current_score = document_scores.get(section.document_id)
-            if current_score is None or section_score > current_score:
-                document_scores[section.document_id] = section_score
-
-        ranked_doc_ids = sorted(
-            document_scores,
-            key=lambda doc_id: (-document_scores[doc_id], doc_id),
+        touched_section_indices = np.flatnonzero(touched_sections)
+        document_scores = np.full(len(self._document_ids), -np.inf, dtype=np.float64)
+        if touched_section_indices.size:
+            np.maximum.at(
+                document_scores,
+                self._section_document_indices[touched_section_indices],
+                section_scores[touched_section_indices],
+            )
+        touched_document_indices = np.flatnonzero(np.isfinite(document_scores))
+        ranked_document_indices = sorted(
+            touched_document_indices,
+            key=lambda index: (-float(document_scores[index]), self._document_ids[int(index)]),
         )
         return [
             RetrievalResult(
-                document=self._documents[doc_id],
-                score=document_scores[doc_id],
+                document=self._documents[self._document_ids[int(document_index)]],
+                score=float(document_scores[document_index]),
                 rank=rank,
             )
-            for rank, doc_id in enumerate(ranked_doc_ids[:top_k], start=1)
+            for rank, document_index in enumerate(
+                ranked_document_indices[:top_k],
+                start=1,
+            )
         ]
 
-    def _score_term(self, idf: float, term_frequency: int, section_length: int) -> float:
+    def _score_terms(
+        self,
+        idf: float,
+        term_frequencies: np.ndarray,
+        section_lengths: np.ndarray,
+    ) -> np.ndarray:
         length_normalizer = 1 - self._b
         if self._avg_section_length:
-            length_normalizer += self._b * section_length / self._avg_section_length
+            length_normalizer += self._b * section_lengths / self._avg_section_length
 
-        numerator = term_frequency * (self._k1 + 1)
-        denominator = term_frequency + self._k1 * length_normalizer
+        numerator = term_frequencies * (self._k1 + 1)
+        denominator = term_frequencies + self._k1 * length_normalizer
         return idf * numerator / denominator
 
 

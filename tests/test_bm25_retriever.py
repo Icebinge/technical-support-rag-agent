@@ -1,3 +1,8 @@
+import math
+from collections import Counter, defaultdict
+
+import pytest
+
 from ts_rag_agent.application.retrieval_evaluation import evaluate_retrieval
 from ts_rag_agent.domain.dataset import PrimeQADocument, PrimeQAQuestion
 from ts_rag_agent.infrastructure.bm25_retriever import (
@@ -105,3 +110,74 @@ def test_tokenize_text_keeps_common_technical_tokens():
     assert "7.0.1.5" in tokens
     assert "c++" in tokens
     assert "app-scan_source" in tokens
+
+
+def test_vectorized_bm25_matches_scalar_formula_and_tie_breaking():
+    documents = [
+        PrimeQADocument(
+            id="doc-c",
+            title="Adapter token guide",
+            text="adapter adapter token restart service",
+        ),
+        PrimeQADocument(
+            id="doc-a",
+            title="Adapter token guide",
+            text="adapter token service restart restart",
+        ),
+        PrimeQADocument(
+            id="doc-b",
+            title="Database guide",
+            text="database token package install",
+        ),
+        PrimeQADocument(id="doc-d", title="Unrelated", text="password rotation"),
+    ]
+    retriever = BM25Retriever(k1=1.5, b=0.75)
+    retriever.fit(documents)
+
+    for query in (
+        "adapter token restart",
+        "adapter adapter token",
+        "database package",
+        "missing-term",
+    ):
+        actual = retriever.search(query, top_k=4)
+        expected = _scalar_bm25_search(documents, query=query, top_k=4, k1=1.5, b=0.75)
+
+        assert [result.document.id for result in actual] == [row[0] for row in expected]
+        assert [result.score for result in actual] == pytest.approx(
+            [row[1] for row in expected],
+            rel=1e-12,
+            abs=1e-12,
+        )
+
+
+def _scalar_bm25_search(
+    documents: list[PrimeQADocument],
+    *,
+    query: str,
+    top_k: int,
+    k1: float,
+    b: float,
+) -> list[tuple[str, float]]:
+    document_tokens = [
+        tokenize_text(f"{document.title}\n\n{document.text}") for document in documents
+    ]
+    document_count = len(documents)
+    average_length = sum(map(len, document_tokens)) / document_count
+    document_frequency = Counter(term for tokens in document_tokens for term in set(tokens))
+    scores: dict[int, float] = defaultdict(float)
+    for term in tokenize_text(query):
+        frequency = document_frequency.get(term)
+        if frequency is None:
+            continue
+        idf = math.log(1 + (document_count - frequency + 0.5) / (frequency + 0.5))
+        for index, tokens in enumerate(document_tokens):
+            term_frequency = tokens.count(term)
+            if term_frequency == 0:
+                continue
+            length_normalizer = 1 - b + b * len(tokens) / average_length
+            scores[index] += (
+                idf * (term_frequency * (k1 + 1)) / (term_frequency + k1 * length_normalizer)
+            )
+    ranked = sorted(scores, key=lambda index: (-scores[index], documents[index].id))
+    return [(documents[index].id, scores[index]) for index in ranked[:top_k]]
