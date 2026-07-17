@@ -16,7 +16,7 @@ No downloaded dataset files are committed to this repository.
 
 ## Current Status
 
-Stage 150: disabled local FastAPI Agent transport implemented and validated.
+Stage 151: strict local Agent service-entrypoint composition protocol frozen.
 
 Implemented:
 
@@ -39,6 +39,7 @@ Implemented:
 - executable local-loopback HTTP transport protocol with strict size and error guards
 - disabled-by-default loopback-only FastAPI adapter with exact ASGI schemas
 - real HTTP/1.1 socket, overload, disconnect, readiness, and shutdown validation
+- executable local service-entrypoint composition and fail-closed startup protocol
 
 Not implemented yet:
 
@@ -64,6 +65,12 @@ and no network service remains running after validation.
 
 The Stage150 implementation and formal evidence are recorded in
 [docs/primeqa_hybrid_agent_http_transport_validation.md](docs/primeqa_hybrid_agent_http_transport_validation.md).
+Stage151 now freezes the future process entrypoint, explicit port, canonical
+source order, label-free synthetic warmup, single-worker socket ownership,
+Uvicorn signal behavior, shutdown ordering, startup exit codes, and public
+startup-event boundary. The entrypoint itself is not implemented yet. The
+Stage151 protocol is recorded in
+[docs/primeqa_hybrid_agent_service_entrypoint_protocol.md](docs/primeqa_hybrid_agent_service_entrypoint_protocol.md).
 
 ## Quickstart
 

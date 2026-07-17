@@ -1303,3 +1303,30 @@ HTTP/1.1 server stops and its port can be rebound. No split, model, index, or
 candidate pool is loaded; test remains locked. The next authorized direction
 is a local service-entrypoint composition protocol, not persistent or remote
 serving yet.
+
+The current Stage 151 strict local Agent service-entrypoint composition
+protocol is recorded in:
+
+```text
+docs/primeqa_hybrid_agent_service_entrypoint_protocol.md
+```
+
+Stage151 reads only the saved Stage150 public aggregate and freezes an exact
+future invocation: `python -m ts_rag_agent.local_agent_service --port <PORT>`.
+The port is mandatory, has no default, and is restricted to `1024..65535`;
+host/source/reload/worker overrides are forbidden. Stage150 authorization and
+both explicit activation flags precede Stage145 recomputation, one resource
+build, and one built-in label-free synthetic warmup. No train/dev/test question
+row may be used for service warmup.
+
+The protocol requires one prebound loopback listener with no bind retry or
+alternate-port fallback, one process/worker, Uvicorn signal ownership on the
+main thread, and no shutdown timeout or force cancellation. Its corrected
+shutdown order matches Uvicorn 0.51.0: stop accepting and wait HTTP tasks first,
+then run FastAPI lifespan to close the transport, then release process
+references. The final aggregate-only run passes `33/33` guards in `0.001723s`;
+one exact policy case is eligible and five unsafe cases are rejected. No split,
+document, model, index, candidate pool, signal handler, listener, or service is
+opened. Stage152 may implement the entrypoint after refactoring bootstrap
+warmup to `PrimeQARuntimeQuery`; remote serving, defaults, test, queues,
+retries, and fallback remain closed.

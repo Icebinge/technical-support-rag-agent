@@ -32575,3 +32575,120 @@ formal / preflight artifact ignore checks: passed
 - adapter 已实现不等于 service 已部署。当前只有 app/config factory 与临时 socket 验证，没有冻结资源 composition、启动 CLI、持久端口或进程退出协议，因此必须客观记录为“transport implemented, persistent service not running”。
 
 下一步：Stage151 冻结本地 service-entrypoint composition protocol，明确允许读取的公开 aggregate、bootstrap 与 transport 资源 ownership、local port 输入边界、启动失败语义、进程退出与自然 shutdown。协议通过前不实现常驻 entrypoint；remote、runtime 默认化、test、排队、重试和兜底继续关闭。
+
+## 2026-07-18 - Stage 151 本地 Agent service-entrypoint composition protocol 冻结
+
+目标：在实现真正的常驻本地服务入口前，把 process-level composition 冻结为可执行、fail-closed 的协议。Stage151 只读取保存的 Stage150 公开聚合报告并运行 synthetic policy cases；不加载 train/dev/test、问题、文档、模型、索引或候选池，不安装 signal handler，不绑定端口，也不实现或启动 service。
+
+### 冻结的调用面
+
+```text
+python -m ts_rag_agent.local_agent_service --port <PORT>
+port required: true
+port default: none
+allowed range: 1024..65535
+host: 127.0.0.1 fixed
+```
+
+- `--port` 是唯一允许的 CLI option；port 0、host override、reload、workers、UDS、fd、source path、encoder device/batch override 全部拒绝。
+- `1024..65535` 是 Stage151 的严格工程协议，不是生产流量或安全实测结论。要求 caller 明确知道持久本地服务地址，所以不允许 port 0。
+- canonical source root 来自 `ProjectSettings`，入口不能临时替换 Stage150/145/128/125/80 或 technote documents。
+
+### Source gate、资源与 warmup
+
+严格启动顺序先检查 Stage150，再检查两个显式 activation flags，然后重算 Stage145 evidence；这些 gate 通过前不得构建资源或绑定 socket。
+
+```text
+TS_RAG_ENABLE_CONCURRENT_SIDECAR_AGENT=true
+TS_RAG_ENABLE_LOCAL_AGENT_HTTP_TRANSPORT=true
+resource graph build count: 1
+warmup count: 1
+```
+
+审计现有代码发现 Stage146 bootstrap 的 warmup 参数仍标成含离线 label 的 `PrimeQAQuestion`。服务启动不能为了满足旧签名从 train/dev/test 读一题。Stage151 因此明确要求 Stage152 先把 warmup 类型收敛到 `PrimeQARuntimeQuery`，再使用内置 synthetic、label-free warmup；其中没有 answer、answerable、gold document 或 split membership，内容也不进入 public startup event。
+
+resource factory 由 entrypoint 持有，active runtime reference 由 bootstrap result 持有，transport 不拥有模型/索引。当前资源图没有显式 close interface，因此协议只声明 server 返回后释放进程引用，不伪造“模型已显式关闭”的能力。
+
+### Socket、signal 与 shutdown
+
+- resource build 和 warmup 成功后才创建 listener；固定预绑定 `127.0.0.1:<PORT>` 一次，再把同一 socket 交给 `uvicorn.Server.run`，避免 check-then-bind race。
+- bind 失败直接返回稳定失败，不重试、不自动换端口、不退回 port 0。
+- 一个 process、一个 worker、无 reload；`Server.run` 在主线程执行，由 Uvicorn 接管当前平台支持的 signal。entrypoint 不安装竞争性的自定义 signal handler。
+- 外部 signal 的 process exit code 由平台和 Uvicorn 决定，不伪造统一跨平台数值；第二次 signal 的 force-exit 行为也不覆盖成“自然关闭”。
+- shutdown 无 implicit timeout、无 force-cancel；HTTP in-flight 工作自然完成或抛错。
+
+最终冻结的真实顺序为：
+
+```text
+Uvicorn stops accepting and closes listener
+Uvicorn requests connection shutdown and waits HTTP tasks
+FastAPI lifespan shutdown runs
+transport drains/closes
+entrypoint finally confirms listener closed
+process references released
+```
+
+### Exit status 与公开事件
+
+协议为 Stage152 冻结 0..8 的 proposed stable startup exit statuses：clean return、unexpected composition、CLI invalid、Stage150 rejected、activation rejected、Stage145/runtime rejected、resource/warmup failure、socket failure、server/lifespan failure。它们是待实现的工程语义，不是 Stage151 实测进程退出码；startup failure retry count 为 0，external signal exit code 不归一化。
+
+public startup event 精确 18 字段，只公开 phase/outcome/exit、binding、source/activation/resource/warmup/listener/server/shutdown/transport 状态以及零 queue/retry/fallback 计数。request/response/warmup 内容、source path 和 exception message 不进入该 event。Uvicorn 自己的 framework error logging 是另一个 channel，没有被错误声称为这 18 字段 event。
+
+### Preflight 与最终 formal
+
+未确认 preflight 使用真实 Stage150 artifact；33 个 guard 中只有 `stage151_user_confirmed` 失败，service、port、resources 和 signal handler 均未打开。
+
+用户本轮“好下一大步”作为正式确认后的最终结果：
+
+```text
+Stage150 source guards: 37 / 37
+Stage151 guards: 33 / 33
+canonical policy cases: 1 eligible / 5 rejected
+source unchanged: true
+required / optional CLI options: 1 / 0
+resource build / warmup / bind attempts: 1 / 1 / 1
+bind retry / queue / retry / fallback: 0 / 0 / 0 / 0
+process / worker: 1 / 1
+public startup fields: 18
+formal time: 0.001723s
+train / dev / test loaded: false / false / false
+questions / documents / models / indexes / candidate pools: false
+service implemented / socket bound / signal handlers installed: false / false / false
+SVG XML formal / preflight: 10 / 10 and 10 / 10
+```
+
+Stage150 source SHA-256：`0f380553bc8602c679b56568ed939b051badc84ee3cd0a468ba1be85611e1403`。
+
+最终 Stage151 artifact SHA-256：`ccea1acbcc7afb0ebb874f79db432a93f32fe84fd55b515567e9edd0faf931da`。
+
+### 真实执行与修正记录
+
+- 先查阅 Uvicorn settings/server behavior 与 Python signal 官方文档，并检查本机 Uvicorn 0.51.0 的 `HANDLED_SIGNALS`、`capture_signals`、`handle_exit`、`Server.startup` 和 `Server.shutdown` 源码。正式 validator 本身没有联网。
+- protocol、CLI、tests 和 10 张 SVG 写入后，第一次 format 修改 2 个文件；Ruff 随后通过，定向测试第一次为 `28 passed in 0.17s`。
+- 未确认 preflight 的 Stage150 37 项来源检查全部通过，只有用户确认 guard 失败；正式运行第一次为 `33/33`。
+- 提交前对照真实 Uvicorn 源码发现首次协议把 shutdown 顺序写反：初版写成 transport drain 后再关 listener，但 Uvicorn 0.51.0 实际先关闭 servers/传入 sockets、等待 connection/tasks，之后才执行 lifespan shutdown。这是 protocol fact error，不是运行指标失败；虽然初版内部 guard 仍为 33/33，它不能作为最终证据。
+- 同时把“exception message 不进入 public startup event”与“Uvicorn framework error logger”分开，避免把前者过度声明成整个进程绝不会输出框架异常信息。
+- 修正 protocol、tests 和 shutdown visualization 后，定向测试再次为 `28 passed in 0.15s`；preflight 与 formal 都重新生成，最终仍为 `33/33`，但内容已匹配真实 Uvicorn 顺序。初版 artifacts 被覆盖，本段保留真实修正过程。
+- Stage151 全程只做毫秒级 aggregate/specification 运行，没有启动长实验；没有设置监控时长、停止合法进程、强制取消或重启。
+
+最终验收：
+
+```text
+targeted Stage151 tests: 28 passed
+Stage151 Python format check: 3 files already formatted
+full repository Ruff: passed
+full repository pytest: 641 passed, 1 dependency deprecation warning in 6.49s
+git diff --check: passed（有 CRLF 将在 Git 下次写入时转 LF 的信息提示）
+formal Stage151 guards: 33 / 33
+formal / preflight SVG XML parse: 10 / 10 and 10 / 10
+formal / preflight artifact ignore checks: passed
+```
+
+### 本步学到
+
+- 内部 guard 全绿不代表协议事实必然正确；guard 可能只是在验证一组彼此一致但与框架实现不一致的假设。涉及第三方生命周期时必须再对照官方说明和当前安装版本源码。
+- prebind socket 可以消除 check-port 与 real bind 之间的 TOCTOU，但它不意味着可以在端口冲突时自动选另一个端口；后者是新策略和兜底，必须明确禁止或另行确认。
+- 服务 warmup 属于 serving contract，不应依赖离线 evaluation sample。类型上改用 label-free query 比运行时把 gold 字段清空更可靠。
+- signal 的“触发 graceful shutdown”与“跨平台 exit code 一致”是两件事。让 Uvicorn 管理 signal 时不能同时声称自己归一化了 OS 退出语义。
+
+下一步：Stage152 实现 non-default local service entrypoint。先把 concurrent bootstrap warmup 改为 `PrimeQARuntimeQuery`，再实现严格 CLI/source gate/startup event/exit mapping/prebound listener/main-thread Uvicorn composition；先用 synthetic resource factory 验证全部失败路径，最后只做一次真实本地 resource lifecycle。remote、默认化、test、排队、重试和兜底继续关闭。

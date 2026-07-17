@@ -228,8 +228,8 @@ The disabled local FastAPI transport is implemented and validated. It is not a
 persistent service and is not authorized for remote exposure, runtime
 defaultization, or locked-test evaluation.
 
-Stage151 should freeze the local service-entrypoint composition protocol:
-which public aggregate authorizes startup, how bootstrap and transport
-lifetimes compose, which local port input is allowed, how startup failure is
-reported, and how the process exits naturally. Implementation of that
-entrypoint should wait until the protocol is frozen.
+Stage151 completed the local service-entrypoint composition protocol freeze.
+It is recorded in
+`docs/primeqa_hybrid_agent_service_entrypoint_protocol.md`. Stage152 may now
+implement the non-default local entrypoint, including the required label-free
+bootstrap warmup refactor and fail-closed lifecycle validation.
