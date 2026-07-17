@@ -163,8 +163,9 @@ artifacts.
 
 ## Next Step
 
-Stage147 should freeze a non-default application Agent request-facade protocol
-before implementing FastAPI or another network surface. It should define the
-call contract, lifecycle ownership, capacity-error mapping, public response and
-trace allowlists, cancellation/error propagation, and shutdown behavior. Test,
-defaultization, queues, retries, and fallback remain separate closed gates.
+Completed in Stage147: the non-default application Agent request-facade
+protocol is frozen in
+`docs/primeqa_hybrid_agent_request_facade_protocol.md`. Stage148 should
+implement and validate the transport-neutral facade itself before FastAPI or
+another network surface. Test, defaultization, queues, retries, and fallback
+remain separate closed gates.

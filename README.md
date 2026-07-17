@@ -16,7 +16,7 @@ No downloaded dataset files are committed to this repository.
 
 ## Current Status
 
-Stage 146: explicit non-default concurrent application activation validated.
+Stage 147: transport-neutral application Agent request-facade protocol frozen.
 
 Implemented:
 
@@ -33,12 +33,14 @@ Implemented:
 - executable concurrent-runtime validation policy and workload contract
 - process-shared, request-isolated concurrency-four research runtime
 - disabled-by-default concurrent application bootstrap with evidence recomputation
+- executable private-call/public-telemetry facade protocol with lifecycle and error guards
 
 Not implemented yet:
 
 - LangGraph workflow
 - FastAPI service
-- application Agent request facade and network serving
+- transport-neutral application Agent request facade implementation
+- network serving
 - runtime defaultization and final locked-test evaluation
 
 The optional single-request runtime remains disabled unless
@@ -48,7 +50,8 @@ The Stage146 concurrent runtime is available only through the explicit
 `TS_RAG_ENABLE_CONCURRENT_SIDECAR_AGENT=true` application bootstrap with a
 compliant Stage145 aggregate. It remains off by default and is mutually
 exclusive with the single-request runtime flag. Neither runtime is registered
-as the default.
+as the default. Stage147 authorizes the next transport-neutral facade
+implementation step, but does not implement the facade or a network service.
 
 ## Quickstart
 

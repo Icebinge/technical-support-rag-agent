@@ -32227,3 +32227,61 @@ formal and preflight artifact ignore checks: passed
 - explicit activation available 与 default registration 是两个独立状态。Stage146 前者为 true、后者仍为 false；FastAPI 或 LangGraph 也仍未实现。
 
 下一步：Stage147 先冻结非默认 application Agent request-facade protocol，明确调用输入输出、runtime 生命周期、capacity rejection 到公共错误的映射、public response/trace allowlist、取消与异常传播、shutdown 行为，再决定是否实现 FastAPI。test、默认化、排队、重试和兜底继续关闭。
+
+## 2026-07-17 - Stage 147 application Agent request-facade 协议冻结
+
+目标：在实现 FastAPI 或其他网络层之前，先把 application Agent facade 的调用边界冻结为可执行 policy。Stage147 只能读取 Stage146 的公开聚合产物并运行 synthetic cases；不得加载 train/dev/test、问题、文档、模型、索引或候选池，也不得实际创建 facade、打开默认 runtime、添加排队/重试/兜底，或虚构网络层限制。
+
+### 冻结的调用边界
+
+- 私有 request 字段：`request_handle`、可选 `title`、`text`、可选 `cancellation_signal`；其中 handle 与 text 必填。
+- runtime request 必须 label-free。`gold_answer`、answerability label、gold document reference 和 test membership 禁止进入运行时调用。
+- 私有 response 只返回 handle、答案文本、refused 和 citations；citation 使用当前真实领域字段能够提供的 document reference、title、rank、evidence score。
+- candidate pool 和 raw Agent action trace 不返回给调用方；问题、答案、handle 和文档标识不进入 public telemetry。
+- 没有凭空定义请求字符上限、HTTP status 或 serialization 规则；这些都明确延期到 network transport protocol。
+
+### Error、取消与生命周期
+
+```text
+invalid request -> invalid_request，downstream 前拒绝
+PrimeQAHybridConcurrentCapacityExceededError -> capacity_exceeded，精确映射
+downstream error -> 原样传播，不转成答案
+queue / retry / fallback -> 0 / 0 / 0
+```
+
+- 取消只支持 dispatch 前 cooperative check；dispatch 后不声称能硬取消同步 runtime，请求仍自然结束或抛错，由 runtime `finally` 释放 permit。
+- facade 生命周期冻结为 `accepting -> draining -> closed`，不能 reopen。
+- shutdown 先进入 draining 并拒绝新调用，再自然等待 in-flight 归零；不加入隐式 timeout、不 force-cancel，也不销毁 bootstrap 所有的 process resources。
+
+### 可执行 policy 与正式结果
+
+```text
+source Stage146 guards: 43 / 43
+Stage147 guards: 34 / 34
+canonical policy cases: 1 eligible / 4 rejected
+formal time: 0.001102s
+train / dev / test loaded: false / false / false
+models / indexes loaded: false / false
+candidate pools built: false
+public forbidden keys: []
+SVG: 10
+```
+
+四个负例分别验证：Stage146 source/default/test 边界漂移会拒绝；label 或内容泄漏到 public telemetry 会拒绝；把容量错误变成排队/重试/兜底/答案会拒绝；硬取消、shutdown 不等待、隐式 timeout 或 force-cancel 会拒绝。policy 的 eligible 只授权 Stage148 实现 facade，不代表 facade、FastAPI、default 或 test 已经开放。
+
+### 真实执行与修正记录
+
+- 第一条定向命令使用了仓库内不存在的 `.venv\Scripts\python.exe`，PowerShell 在 Python 启动前失败，因此没有形成测试结果。随后确认真实解释器为 `C:\ProgramData\miniforge3\python.exe`。
+- 真实定向检查第一次为 `7 passed / 1 failed`；失败原因是测试把实际 33 个 guard 写成 32 个，Ruff 同时发现一个未使用的 `asdict` import。修正后为 `8 passed`，定向 Ruff/format 均通过。
+- 第一次正式 CLI 为 `32/33` guards，按 fail-closed 规则返回 rejected。原因是 reader 和 synthetic fixture 使用了 `eligible_runtime_full_workload_passed`，但真实 Stage146 JSON 的字段名是 `eligible_runtime_full_workload_validation_passed`。这不是 Stage146 证据失败，而是 Stage147 fixture 与真实 source contract 漂移。
+- 读取真实 Stage146 decision 后，同时修正 reader 与 fixture；第二次正式运行当时的 `33/33` guards 通过。提交前继续审计发现 public runtime trace allowlist 少列了 Stage146 已有的 `activation_requested` 和 `arrival_pattern`；补全真实 14 字段 allowlist 并增加一条精确 guard 后，重新运行形成最终 `34/34` artifact。第一次 rejected 结果不作为最终证据，但本段保留其真实过程。
+
+### 本步学到
+
+- evaluation sample schema 不能直接充当 serving schema。当前 `PrimeQAQuestion` 带 gold answer、answerable、answer document 等评测标签；facade 必须提供独立的 label-free 输入并在内部适配。
+- fixture 必须镜像真实 artifact contract。只让 synthetic fixture 自洽会掩盖 source 字段漂移；正式运行必须读取真实聚合产物并 fail closed。
+- cancellation 语义不能超出同步 runtime 的能力。没有底层 cooperative cancellation 时，只能保证 dispatch 前取消，不能把仍在运行的工作宣称为已取消。
+- graceful shutdown 的 ownership 要分清：facade 管理“是否接收新请求和等待 in-flight”，bootstrap 管理模型、索引和 runtime 资源；两者不能重复销毁。
+- request size 和 HTTP status 属于 transport 决策。Stage147 没有真实网络需求证据，因此不凭经验补一个数字或状态码。
+
+下一步：Stage148 实现 transport-neutral facade 本体，用 synthetic runtime 验证 label-free request conversion、私有 response 映射、public telemetry allowlist、capacity mapping、并发生命周期竞争、dispatch 前取消、异常原样传播和无隐式 timeout 的自然 shutdown。FastAPI、test、默认化、排队、重试和兜底继续关闭。

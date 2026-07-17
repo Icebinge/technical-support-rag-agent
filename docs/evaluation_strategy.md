@@ -1213,3 +1213,19 @@ contamination. Deterministic-jitter actual offset error has P99 `15.737221ms`
 and maximum `303.5484ms`, retained as a machine-specific load-generator
 diagnostic. Explicit evidence-gated activation is now available, but defaults,
 network serving, test, queues, retries, and fallback remain closed.
+
+The current Stage 147 application Agent request-facade protocol is recorded in:
+
+```text
+docs/primeqa_hybrid_agent_request_facade_protocol.md
+```
+
+Stage147 reads only the saved Stage146 public aggregate and freezes a
+transport-neutral private call contract, an allowlisted public telemetry
+contract, exact capacity-error mapping, cooperative pre-dispatch cancellation,
+and the `accepting -> draining -> closed` lifecycle. Shutdown rejects new work
+and waits naturally for in-flight calls without an implicit timeout or force
+cancellation. The executable policy passes `34/34` guards; one compliant case
+is eligible and four unsafe synthetic cases are rejected. No split, model,
+index, or candidate pool is loaded. The facade itself, network serving,
+defaultization, test evaluation, queues, retries, and fallback remain closed.
