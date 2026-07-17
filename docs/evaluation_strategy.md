@@ -1189,3 +1189,27 @@ not define this diagnostic as a decision gate. Dev is loaded once only after
 the train gate and matches Stage143 behavior with end-to-end P95/P99
 `0.591977/0.695942s`. Test, application activation, defaultization, queues,
 retries, and fallback remain closed.
+
+The current Stage 146 concurrent application-activation validation is recorded
+in:
+
+```text
+docs/primeqa_hybrid_concurrent_runtime_activation_validation.md
+```
+
+Stage146 adds a separate `TS_RAG_ENABLE_CONCURRENT_SIDECAR_AGENT` setting that
+defaults to false and is mutually exclusive with the single-request setting.
+The bootstrap recomputes Stage145 evidence and compares it with the saved
+evidence before any resource build. Disabled and synthetic rejected cases build
+zero resources; eligible startup builds once, performs one Top400 warmup, and
+returns the runtime used for the complete 3,372-request train workload,
+five-request overload probe, and gated dev pass.
+
+The final result passes `43/43` guards and all 39 latency scopes. Global train
+end-to-end P95/P99 is `0.559442/0.755804s`; worst-scope P95/P99 is
+`0.687264/0.866313s`; dev is `0.539259/0.695918s`. Recall, F1, citations,
+terminal states, and candidate depth match Stage145, with zero cross-request
+contamination. Deterministic-jitter actual offset error has P99 `15.737221ms`
+and maximum `303.5484ms`, retained as a machine-specific load-generator
+diagnostic. Explicit evidence-gated activation is now available, but defaults,
+network serving, test, queues, retries, and fallback remain closed.

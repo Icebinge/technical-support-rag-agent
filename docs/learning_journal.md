@@ -32059,3 +32059,171 @@ artifact ignore check: passed
 - `eligible` 只授权下一阶段接显式非默认 activation，不等于 concurrent runtime 已对应用开放，更不等于可以默认化或查看 test。
 
 下一步：Stage146 把已验证的 concurrency-four runtime 接到一个单独、显式、默认关闭的 application activation 路径，验证 disabled、rejected、eligible 三种启动状态和资源只构建一次。继续禁止默认化、test、排队、重试、兜底和未经单独设计的网络 serving。
+
+## 2026-07-17 - Stage 146 显式非默认并发 application activation 接线与验证
+
+目标：把 Stage145 已通过完整并发验证的 research runtime 接到应用可调用的显式 activation bootstrap。必须新增独立且默认关闭的配置，重新计算而不是盲信 Stage145 evidence，验证 disabled、rejected、eligible 三种 startup，确保只有 eligible 构建一次共享资源并 warmup。为了避免“startup 烟雾测试通过但应用接线改变真实性能”，eligible bootstrap 返回的 runtime 还要重新运行完整 3,372-request train、39-scope latency matrix、overload probe 和 gated dev。test、默认化、网络服务、排队、重试和兜底继续关闭。
+
+### 配置与 bootstrap 实现
+
+- `ProjectSettings` 新增：
+
+  ```text
+  field: enable_concurrent_sidecar_agent
+  env: TS_RAG_ENABLE_CONCURRENT_SIDECAR_AGENT
+  default: false
+  accepted strings: true / false
+  ```
+
+- 新变量与既有 `enable_optional_sidecar_agent` 互斥。两个开关同时为 true 时，Pydantic configuration validation 直接失败，避免一个进程初始化两套不同 runtime ownership。
+- 新增 `PrimeQAHybridConcurrentRuntimeBootstrap`，使用 one-shot lock 保护启动：
+  - disabled：不读取 policy outcome、不构建资源、不 warmup，返回 `disabled`；
+  - rejected：从 Stage145 聚合报告重新计算 Stage144 policy evidence，任何 source identity、guard、evidence、policy、test/default/public-safety 问题都会在资源构建前返回 `rejected`；
+  - eligible：证据合格后调用一次 `build_shared()`，核对实际资源 inventory，创建 concurrency-four runtime，执行一次 label-free Top400 warmup，返回 active runtime。
+- bootstrap 会逐字段比较“Stage145 保存的 evidence”和“从 Stage145 各聚合字段重算的 evidence”。因此只修改 report 中一个性能字段、却保留旧 `eligible` evaluation 的报告不能通过。
+- startup trace 记录 settings/env、activation state、source state、profile、max in-flight、资源初始化、factory build count、warmup pattern/depth/retrieval/E2E、rejection reasons 和关闭边界；不包含问题、答案、文档或请求标识。
+- disabled/rejected/eligible 都显式记录 default/test/queue/retry/fallback 为 false/zero。
+
+### 正式 validator
+
+- 新增 Stage146 validator 和 CLI。前置 source guards 只读取 Stage145 公共聚合报告并重算 policy；任何失败都在加载 train 和构建模型前阻断。
+- rejected startup 使用 Stage145 的内存 `deepcopy`，只把 train global P95 改为 `0.800001s`。该 copy 不保存；执行后重新读取整个 Stage145 JSON，与原始加载对象做完整相等比较。
+- eligible startup 返回的真实 runtime 执行：
+  - 一次 5-request overload probe；
+  - sync/jitter 交替的 6 个完整 train pass；
+  - 30 个 fold x pattern x repetition、6 个 pass、2 个 pattern pooled、1 个 global pooled，共 39 个独立门；
+  - train 全通过后一次 121-row mixed-pattern dev report-only。
+- 每个 train pass 与 Stage145 首个完整 pass 比较 recall、F1、gold citation、terminal、trace、候选深度和 retry/fallback；dev 与 Stage145 dev 比较。
+- 继续使用 barrier-based cohort clock，公开 target/actual/error 聚合；request-level behavior digest 只在内存中检查跨请求污染。
+- 新增 9 张 SVG：startup states、startup resource builds、train pattern latency、scope maxima、dev latency、overload、arrival fidelity、decision flags 和 guard status。
+
+### Startup 结果
+
+```text
+disabled: requested false, source not evaluated, builds 0, warmup 0, active false
+rejected: requested true, source rejected, builds 0, warmup 0, active false
+eligible: requested true, source eligible, builds 1, warmup 1, active true
+eligible warmup retrieval / E2E: 256.477 / 302.702ms
+eligible warmup candidate depth: 400
+```
+
+synthetic rejected reasons：
+
+```text
+stage145_saved_evidence_mismatch
+stage145_policy_evaluation_not_eligible
+train_end_to_end_p95_exceeds_slo
+```
+
+整个 Stage145 源 JSON 在 synthetic case 前后复读相等，synthetic copy 未保存。
+
+### 最终正式结果
+
+```text
+status: primeqa_hybrid_concurrent_runtime_application_activation_validation_passed
+validator internal time through guards: 487.615s
+guards: 43 / 43 passed
+failed guards: []
+train accepted requests: 3,372
+complete train passes: 6
+latency scopes: 39 / 39 passed
+train global E2E P50 / P95 / P99 / max: 0.345173 / 0.559442 / 0.755804 / 0.974289s
+train retrieval P95 / P99: 0.485895 / 0.691303s
+worst scope P95: 0.687264s, synchronized repetition 1 fold 3
+worst scope P99: 0.866313s, synchronized repetition 1 fold 2
+```
+
+分 arrival pattern：
+
+```text
+synchronized requests / P95 / P99 / max: 1,686 / 0.574038 / 0.779176 / 0.974289s
+deterministic-jitter requests / P95 / P99 / max: 1,686 / 0.538408 / 0.730639 / 0.850078s
+```
+
+过载结果：
+
+```text
+attempted / admitted / rejected: 5 / 4 / 1
+completed admitted / failed admitted: 4 / 0
+max in-flight: 4
+rejected downstream calls: 0
+typed rejection E2E: 0.004ms
+queue / retry / fallback: 0 / 0 / 0
+```
+
+Stage145 行为等价：
+
+```text
+train Recall@10/50/100/200/400: 0.6892 / 0.8189 / 0.8973 / 0.9324 / 0.9568
+train verified F1 / gold: 0.1946 / 906
+train complete / refuse: 3,360 / 12
+cross-request contamination: 0
+dev E2E P95 / P99: 0.539259 / 0.695918s
+dev Recall@10/50/100/200/400: 0.7237 / 0.8421 / 0.8684 / 0.9079 / 0.9211
+dev verified F1 / gold: 0.1873 / 33
+dev complete / refuse: 121 / 0
+```
+
+### 到达调度限制
+
+```text
+all-train arrival error average / P95 / P99 / max:
+3.762444 / 14.007355 / 15.737221 / 303.5484ms
+
+sync repetition max actual offset:
+1.4664 / 0.3473 / 0.6197ms
+
+jitter repetition max absolute error:
+303.5484 / 279.8377 / 277.2259ms
+```
+
+同步 burst 仍基本在 1.5ms 内释放。jitter worker 在目标 sleep 结束后可能被 Windows/Python 调度延迟，每轮都有约 280-304ms 的单次极端值；P99 仍约 16ms。Stage144 没有冻结 actual-offset error gate，不能事后新增门，也不能隐藏这些 outlier。这个结果只证明当前 benchmark harness 和机器上的冻结 E2E percentile workload 通过，不声称外部 load generator 会复现完全相同的实际到达时间。
+
+### Decision 边界
+
+```text
+application activation bootstrap implemented: true
+disabled / rejected / eligible startup validated: true
+eligible runtime full workload passed: true
+explicit non-default concurrent activation available: true
+concurrent activation requires explicit true and Stage145 evidence: true
+single and concurrent flags mutually exclusive: true
+runtime registered as default: false
+runtime defaultization allowed: false
+network service implemented: false
+test loaded / metrics run: false / false
+queue / retry / fallback: false / false / false
+public forbidden keys: []
+```
+
+### 真实执行与修正记录
+
+- 第一轮 activation targeted 检查中，Ruff 发现测试有 1 个未使用的 `numpy` import 和 2 个文件需格式化；pytest 为 `32 passed / 2 failed`。一个失败是断言写错 policy reason 名，另一个是测试夹具给 `RetrievalResult` 传了不存在的 `source`/`metadata` 参数。按真实接口修正并格式化后，相关 `34 passed`。
+- validator/CLI/visualization 完成后的定向组合为 `49 passed`；首次 format check 指出 CLI 和 validator test 需格式化，格式化后 lint/format/test 全通过。
+- 未确认 CLI preflight 真实运行一次：只有 `stage146_user_confirmed` guard 失败，train/dev 未加载，startup/resource/overload 未运行，公开 forbidden keys 为空。这证明 source fail-closed 路径，而不是正式性能运行。
+- 第一轮有效正式运行耗时 `486.508s`，`43/43` guards 和 `39/39` scopes 通过。提交前审计发现 synthetic source 未修改证明只比较了 global latency 字段；尽管实现使用 `deepcopy`，证明范围仍不够完整，因此不把这轮作为最终结果。
+- 改为重新读取并比较整个 Stage145 JSON 后，定向 21 项测试通过；第二轮有效正式运行耗时 `487.615s`，成为唯一最终 Stage146 结果。
+- 两次正式长进程都等待自然结束，没有自行终止、重启、缩减请求、修改阈值、访问 test、加入排队、重试或 fallback。
+
+最终验收：
+
+```text
+Stage146 changed/new Python format check: 6 files already formatted
+full repository Ruff lint: passed
+full repository pytest: 542 passed in 6.86s
+Stage146 formal guards: 43 / 43 passed
+Stage146 latency scopes: 39 / 39 passed
+Stage146 SVG XML parse: 9 / 9 passed
+formal and preflight artifact ignore checks: passed
+```
+
+### 本步学到
+
+- 一个布尔开关不是 activation policy。显式 true 只能表示用户请求，真正可激活还必须重新验证来源身份、聚合证据、policy evaluation、test/default 边界和实际资源 inventory。
+- saved evidence 与 report fields 必须双向一致。只信 report 自带的 `eligible` 等于允许旧签章覆盖新数据；重算并逐字段比较可以 fail closed。
+- rejected startup 的关键指标不是“返回 rejected”，而是资源 build count 必须为 0。模型或索引已经构建后再拒绝，既浪费启动时间，也破坏清晰的生命周期边界。
+- synthetic negative case 必须明确是内存 copy、不得持久化，并要证明真实 source 完整未修改；只比较被修改的那个字段不足以证明整个文件没有变化。
+- application wiring 需要完整 workload regression。bootstrap 返回同一个 runtime 类型并不自动证明接线层没有改变 warmup、resource ownership、counters 或性能。
+- explicit activation available 与 default registration 是两个独立状态。Stage146 前者为 true、后者仍为 false；FastAPI 或 LangGraph 也仍未实现。
+
+下一步：Stage147 先冻结非默认 application Agent request-facade protocol，明确调用输入输出、runtime 生命周期、capacity rejection 到公共错误的映射、public response/trace allowlist、取消与异常传播、shutdown 行为，再决定是否实现 FastAPI。test、默认化、排队、重试和兜底继续关闭。

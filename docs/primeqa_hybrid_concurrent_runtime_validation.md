@@ -181,9 +181,15 @@ local ignored artifacts.
 
 ## Next Step
 
-Stage146 may wire the validated concurrency-four runtime behind a separate,
-explicit, disabled-by-default application activation path. That stage must
-validate disabled, rejected, and eligible startup states without rebuilding
-heavy resources per request. It must not infer permission for defaultization,
-test evaluation, queues, retries, fallback, or a network service from this
-research-runtime result.
+Stage146 is complete and recorded in:
+
+```text
+docs/primeqa_hybrid_concurrent_runtime_activation_validation.md
+```
+
+It wires the validated concurrency-four runtime behind a separate explicit,
+disabled-by-default application bootstrap and validates disabled, rejected, and
+eligible startup plus the complete train/overload/dev workload. Stage147 should
+freeze a non-default application Agent request-facade protocol before any
+network implementation. Defaultization, test evaluation, queues, retries, and
+fallback remain separate closed gates.

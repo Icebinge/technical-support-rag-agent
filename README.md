@@ -16,7 +16,7 @@ No downloaded dataset files are committed to this repository.
 
 ## Current Status
 
-Stage 145: bounded four-request research runtime implemented and validated.
+Stage 146: explicit non-default concurrent application activation validated.
 
 Implemented:
 
@@ -32,19 +32,23 @@ Implemented:
 - train grouped-CV and dev report-only evaluation through Stage 145
 - executable concurrent-runtime validation policy and workload contract
 - process-shared, request-isolated concurrency-four research runtime
+- disabled-by-default concurrent application bootstrap with evidence recomputation
 
 Not implemented yet:
 
 - LangGraph workflow
 - FastAPI service
-- application-facing concurrent runtime activation and serving
+- application Agent request facade and network serving
 - runtime defaultization and final locked-test evaluation
 
 The optional single-request runtime remains disabled unless
 `TS_RAG_ENABLE_OPTIONAL_SIDECAR_AGENT=true` is set explicitly and the frozen
 activation evidence passes. It is not registered as the default runtime.
-The Stage145 concurrent runtime is validated research code but is not yet
-registered behind an application setting and cannot be activated by callers.
+The Stage146 concurrent runtime is available only through the explicit
+`TS_RAG_ENABLE_CONCURRENT_SIDECAR_AGENT=true` application bootstrap with a
+compliant Stage145 aggregate. It remains off by default and is mutually
+exclusive with the single-request runtime flag. Neither runtime is registered
+as the default.
 
 ## Quickstart
 
