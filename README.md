@@ -16,7 +16,7 @@ No downloaded dataset files are committed to this repository.
 
 ## Current Status
 
-Stage 152: strict non-default local Agent service entrypoint implemented and validated.
+Stage 153: deterministic local Agent tool-orchestration protocol frozen and validated.
 
 Implemented:
 
@@ -43,6 +43,9 @@ Implemented:
 - exact `--port` local service CLI with stable startup exit codes
 - built-in label-free warmup, one-shot resource composition, and prebound listener ownership
 - real resource, HTTP/1.1, main-thread Uvicorn, and natural shutdown lifecycle validation
+- executable nine-state Agent tool-workflow protocol with strict transition guards
+- frozen three-tool context authority, private state, and public trace contracts
+- current LangGraph `StateGraph` adapter research with implementation still gated
 
 Not implemented yet:
 
@@ -63,9 +66,11 @@ as the default. Stage149 freezes the exact local HTTP surface around that
 facade. Stage150 implements the FastAPI adapter and validates it with
 in-process ASGI calls plus a temporary real loopback socket. Stage151 freezes
 the process composition protocol. Stage152 implements its strict local service
-entrypoint and validates one real resource and HTTP lifecycle. The entrypoint
-remains disabled by default, binds loopback only after both explicit flags are
-true, and no network service remains running after validation.
+entrypoint and validates one real resource and HTTP lifecycle. Stage153 freezes
+the request-local tool workflow around that service without implementing or
+installing LangGraph. The entrypoint remains disabled by default, binds
+loopback only after both explicit flags are true, and no network service
+remains running after validation.
 
 The Stage150 implementation and formal evidence are recorded in
 [docs/primeqa_hybrid_agent_http_transport_validation.md](docs/primeqa_hybrid_agent_http_transport_validation.md).

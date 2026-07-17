@@ -32766,3 +32766,84 @@ Stage152 artifact SHA-256：`7976dfd7d19251f013d2bb246da3e0302e8ecadd26a23baf341
 - guard 本身也必须审计，尤其要警惕空集合上的 vacuous truth 把“没有证据”写成“全部通过”。
 
 下一步：Stage153 先冻结 local Agent tool-orchestration protocol，再决定如何引入 LangGraph 或其他 graph runner。service 继续默认关闭、仅 loopback、test gate 继续锁定。
+
+## 2026-07-18 - Stage 153 本地 Agent 工具编排协议冻结
+
+目标：在不打开 test、不加载语料和模型、不改变 runtime 默认状态的前提下，把 Stage152 服务入口后面的请求级工具编排边界冻结成可执行、可审计的协议，为下一阶段真正实现 Agent workflow 做准备。
+
+### 本阶段做了什么
+
+新增了框架中立的状态机、严格协议 policy、formal validator、29 个定向测试和 10 类 SVG 可视化。协议只读取已经保存的 Stage152 与 Stage139 公开 aggregate JSON，不读取 train/dev/test 题目，不加载文档、模型、索引或候选池，也不启动网络服务。
+
+工作流有 9 个状态、7 个节点和 8 条合法边：
+
+```text
+received -> validated -> retrieved -> context_prepared -> answered
+         -> verified -> observed -> complete | refuse
+```
+
+成功路径固定执行 3 个工具且各最多一次：`retrieve_candidate_pool`、`compose_grounded_answer`、`verify_grounded_answer`。唯一条件分支位于 `observed`，只允许进入 `complete` 或 `refuse`。非法 transition 在任何状态或 trace 修改前抛错；没有环、LLM 动态选工具、query rewrite、第二次 retrieval、queue、retry 或 fallback。
+
+上下文权威继续使用已验证边界：Top400 candidate pool、Top10 generation context、rank 200 verification prefix、3 个只读 sidecar observation slot。sidecar 不能生成、验证或替换主答案；最终输出只能来自 verified answer。
+
+每个请求拥有独立的 13 字段 private state。每进程可以 compile graph 一次，但不能跨请求共享 state。public trace 精确限制为 20 个聚合字段，不公开 request handle、问题、答案文本、文档内容、文档标识或 exception message。外层并发继续是 nonblocking 4，本阶段没有加入图内排队或 timeout。
+
+### 框架调研与真实边界
+
+2026-07-18 查阅了 LangGraph 官方 overview、Graph API、workflows/agents、LangChain tools 和 LangGraph PyPI。官方资料说明 `StateGraph` 由 state、nodes、edges 组成并需要 compile；workflow 是预定路径，而 agent 会动态选择工具；LangGraph 可独立于 LangChain 使用。`ToolNode` 自带工具执行和错误处理能力，与当前禁止 hidden recovery 的边界不完全一致，因此没有选择它。
+
+调研时 PyPI 显示的最新 LangGraph 版本为 1.2.9。本机真实检查结果是 `langgraph` 与 `langchain` 都未安装，本阶段也没有安装依赖。协议选择 `langgraph.graph.StateGraph` 作为 Stage154 待证明的 adapter，但不能把这写成“LangGraph Agent 已实现”。
+
+### Preflight、正式结果与修正记录
+
+未确认 preflight：
+
+```text
+Stage153 guards: 45 / 46
+failed: stage153_user_confirmed
+policy cases: 1 eligible / 6 rejected
+time: 0.002285s
+```
+
+用户本轮“好下一大步”作为明确确认后，正式结果：
+
+```text
+Stage152 source guards: 46 / 46
+Stage139 source guards: 45 / 45
+Stage153 formal guards: 46 / 46
+policy cases: 1 eligible / 6 rejected
+states / nodes / transitions: 9 / 7 / 8
+tools: 3
+private / public fields: 13 / 20
+time: 0.002492s
+train / dev / test loaded: false / false / false
+workflow implemented / LangGraph installed: false / false
+```
+
+正式 artifact SHA-256：`eb984f9f1e023048ba564faa85870d188f0d6cc3447181ac8171ddc616cbbebf`。
+
+- 第一轮 targeted test 真实结果是 `28 passed, 1 failed`。失败原因是测试写死期望 47 个 guard，而实现实际定义 46 个。没有为了凑数增加虚假 guard，而是把测试期望改为真实协议数量；第二轮为 `29 passed in 0.29s`。
+- 正式产物后的三个独立审计小脚本先后把 `guard_checks` 错当成字典、把 `canonical_policy_evaluations` 错当成列表、假设 source fingerprint 自带 `path` 字段，因此都在对应读取位置退出。它们没有改动产物。读取真实 schema 并按两个 source key 显式映射固定来源文件后，最终审计确认 formal `46/46`、preflight `45/46`、1 eligible / 6 rejected、来源 SHA 一致，以及两套共 20 个唯一 SVG 均可 XML 解析。
+- 本阶段没有设置监控时长、停止合法进程或重启长任务；协议冻结本身是毫秒级 aggregate/specification 运算。
+
+最终验收：
+
+```text
+Stage153 Python format check: 3 files already formatted
+targeted Ruff: passed
+targeted pytest: 29 passed in 0.51s
+full repository Ruff: passed
+full repository pytest: 687 passed, 1 existing Starlette TestClient deprecation warning in 6.98s
+formal / preflight SVG XML: 10 / 10 and 10 / 10
+git diff --cached --check: passed, with a CRLF-to-LF normalization warning for this journal
+```
+
+### 本步学到
+
+- “Agent”产品入口不等于内部必须是 autonomous tool loop。当前检索、生成和验证顺序已经由证据冻结，诚实而可控的抽象是 deterministic tool workflow。
+- graph framework 只是执行 adapter，不能反过来修改业务协议。应先用框架中立状态机冻结语义，再验证 `StateGraph` 实现与它逐项等价。
+- 每进程 compile 一次与跨请求共享 state 是两件不同的事；前者减少初始化开销，后者会破坏隔离，必须禁止。
+- public trace 的 allowlist 应在协议层固定，不能等接入 graph framework 后再从内部 state 中临时删字段。
+- 审计脚本本身也会犯 schema 假设错误；失败必须记录，并在读取真实容器结构后重跑，不能把脚本失败误写成 artifact 失败或悄悄省略。
+
+下一步：Stage154 安装并记录精确的 LangGraph 本地版本，实现 framework-neutral deterministic workflow 与 `StateGraph` adapter，使用同一组 complete/refuse/invalid-transition/concurrency/error-propagation 契约做等价性验证，并接入现有 facade/service 的 request path。test、remote、默认化、queue、retry 和 fallback 继续关闭。

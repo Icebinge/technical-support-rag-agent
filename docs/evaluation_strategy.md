@@ -1356,3 +1356,37 @@ or test question split is loaded and no test metric is run. The service remains
 off by default, loopback-only, nonpersistent after validation, and outside
 runtime defaultization. Stage153 may freeze a tool-orchestration protocol;
 remote serving, test, queues, retries, and fallback remain closed.
+
+The current Stage 153 deterministic Agent tool-orchestration protocol is
+recorded in:
+
+```text
+docs/primeqa_hybrid_agent_tool_orchestration_protocol.md
+```
+
+Stage153 reads only the saved Stage152 and Stage139 public aggregate reports
+and freezes a nine-state, seven-node, eight-transition acyclic workflow. Its
+three tools execute sequentially and at most once each: retrieve the exact
+Top400 candidate pool, compose from the frozen Top10 generation context, and
+verify against the frozen rank-200 prefix. The only branch occurs after
+diagnostic observation and terminates at `complete` or `refuse`. The verified
+answer remains the sole final response authority.
+
+The protocol is honestly classified as a deterministic workflow rather than an
+autonomous Agent: no LLM selects tools, no loop exists, and query rewrite,
+second retrieval, memory, persistence, streaming, retry, and fallback are
+closed. Each request owns an independent 13-field private state, while public
+telemetry is restricted to 20 aggregate fields. The graph may compile once per
+process but may not share request state.
+
+Official LangGraph documentation and PyPI were researched on 2026-07-18. The
+next implementation adapter selected for proof is
+`langgraph.graph.StateGraph`; neither LangGraph nor LangChain is currently
+installed, and Stage153 performed no dependency installation. The unconfirmed
+preflight passes `45/46` guards with only the confirmation guard false. The
+confirmed formal run passes `46/46` in `0.002492s`; one exact case is eligible
+and six unsafe cases are rejected. Formal and preflight each produce ten
+parseable SVG files. No split, document, model, index, candidate pool, socket,
+or service is opened, and test remains locked. Stage154 may implement and prove
+the deterministic workflow plus LangGraph adapter; remote serving,
+defaultization, test, queues, retries, and fallback remain closed.
