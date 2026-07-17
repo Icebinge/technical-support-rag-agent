@@ -25,7 +25,7 @@ from ts_rag_agent.application.primeqa_hybrid_optional_sidecar_agent_runtime impo
     PrimeQAHybridSharedRuntimeResources,
     _forbidden_keys_found,
 )
-from ts_rag_agent.domain.dataset import PrimeQAQuestion
+from ts_rag_agent.domain.dataset import PrimeQAQuery
 from ts_rag_agent.domain.retrieval import RetrievalResult
 
 _RUNTIME_MODE = "optional_sidecar_agent_concurrent_four_request"
@@ -59,6 +59,7 @@ class ConcurrentArrivalPattern(str, Enum):
     SYNCHRONIZED = "synchronized_four_request_burst"
     DETERMINISTIC_JITTER = "deterministic_jitter_0_to_20ms"
     OVERLOAD_PROBE = "five_request_overload_probe"
+    APPLICATION = "application_request"
 
 
 class AdmissionProbePort(Protocol):
@@ -148,7 +149,7 @@ class RequestLocalProfiledCandidatePoolRetriever:
         if self._pending_run.get() is not None:
             raise RuntimeError("previous request-local retrieval profile was not consumed")
 
-    def retrieve(self, question: PrimeQAQuestion) -> Sequence[RetrievalResult]:
+    def retrieve(self, question: PrimeQAQuery) -> Sequence[RetrievalResult]:
         if self._pending_run.get() is not None:
             raise RuntimeError("one retrieval profile is allowed per request context")
         run = self._delegate.retrieve_profiled(question)
@@ -214,7 +215,7 @@ class PrimeQAHybridConcurrentSidecarAgentRuntime:
 
     def run(
         self,
-        question: PrimeQAQuestion,
+        question: PrimeQAQuery,
         *,
         arrival_pattern: ConcurrentArrivalPattern,
         admission_probe: AdmissionProbePort | None = None,

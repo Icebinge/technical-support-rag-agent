@@ -13,7 +13,7 @@ from ts_rag_agent.application.evidence_selection import (
 )
 from ts_rag_agent.application.text_metrics import token_f1
 from ts_rag_agent.domain.answer import AnswerCitation, AnswerEvaluationMetrics, GeneratedAnswer
-from ts_rag_agent.domain.dataset import PrimeQAQuestion
+from ts_rag_agent.domain.dataset import PrimeQAQuery, PrimeQAQuestion
 from ts_rag_agent.domain.retrieval import RetrievalResult
 
 
@@ -69,7 +69,7 @@ class ExtractiveAnswerGenerator:
 
     def generate(
         self,
-        question: PrimeQAQuestion,
+        question: PrimeQAQuery,
         retrieval_results: Sequence[RetrievalResult],
     ) -> GeneratedAnswer:
         """Generate one extractive answer from retrieved documents."""
@@ -106,7 +106,7 @@ class ExtractiveAnswerGenerator:
 
     def select_answer_candidates(
         self,
-        question: PrimeQAQuestion,
+        question: PrimeQAQuery,
         retrieval_results: Sequence[RetrievalResult],
     ) -> list[SentenceEvidenceCandidate]:
         """Return final evidence candidates used to compose one answer."""
@@ -126,7 +126,7 @@ class ExtractiveAnswerGenerator:
 
     def rank_sentence_candidates(
         self,
-        question: PrimeQAQuestion,
+        question: PrimeQAQuery,
         retrieval_results: Sequence[RetrievalResult],
     ) -> list[SentenceEvidenceCandidate]:
         """Return ranked evidence candidates for analysis and answer generation."""

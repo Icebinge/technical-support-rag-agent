@@ -39,7 +39,7 @@ from ts_rag_agent.application.primeqa_hybrid_high_recall_union_comparison import
     _section_summary,
 )
 from ts_rag_agent.application.svg_charts import BarDatum, render_horizontal_bar_chart_svg
-from ts_rag_agent.domain.dataset import PrimeQADocument, PrimeQAQuestion
+from ts_rag_agent.domain.dataset import PrimeQADocument, PrimeQAQuery
 from ts_rag_agent.domain.retrieval import RetrievalResult
 from ts_rag_agent.infrastructure.bm25_retriever import tokenize_text
 from ts_rag_agent.infrastructure.primeqa_hybrid_split_loader import (
@@ -161,7 +161,7 @@ class SidecarObservationBundle:
 class CandidateScoringPolicy(Protocol):
     """Polymorphic runtime-visible scoring policy used by the adapter."""
 
-    def query_terms(self, question: PrimeQAQuestion) -> set[str]: ...
+    def query_terms(self, question: PrimeQAQuery) -> set[str]: ...
 
     def document_terms(self, document: PrimeQADocument) -> set[str]: ...
 
@@ -189,7 +189,7 @@ class QueryOverlapCandidateScoringPolicy:
         self._max_text_chars = max_text_chars
         self._term_cache: dict[str, set[str]] = {}
 
-    def query_terms(self, question: PrimeQAQuestion) -> set[str]:
+    def query_terms(self, question: PrimeQAQuery) -> set[str]:
         return set(tokenize_text(question.full_question))
 
     def document_terms(self, document: PrimeQADocument) -> set[str]:
@@ -267,7 +267,7 @@ class PrimeQAHybridSidecarObservationAdapter:
     def observe(
         self,
         *,
-        question: PrimeQAQuestion,
+        question: PrimeQAQuery,
         candidate_pool_results: Sequence[RetrievalResult],
     ) -> SidecarObservationBundle:
         query_terms = self._scoring_policy.query_terms(question)

@@ -27,7 +27,7 @@ from ts_rag_agent.application.evidence_selection import (
     SentenceEvidenceCandidate,
     classify_question_route,
 )
-from ts_rag_agent.domain.dataset import PrimeQAQuestion
+from ts_rag_agent.domain.dataset import PrimeQAQuery
 
 
 @dataclass(frozen=True)
@@ -57,15 +57,11 @@ class CandidateScoreGuardedRerankerCompositionPolicy:
         rank_contained_max_retrieval_rank: int | None = None,
         preserve_baseline_out_of_rank_docs: bool = False,
     ) -> None:
-        if (
-            rank_contained_max_retrieval_rank is not None
-            and rank_contained_max_retrieval_rank <= 0
-        ):
+        if rank_contained_max_retrieval_rank is not None and rank_contained_max_retrieval_rank <= 0:
             raise ValueError("rank_contained_max_retrieval_rank must be positive")
         if preserve_baseline_out_of_rank_docs and rank_contained_max_retrieval_rank is None:
             raise ValueError(
-                "preserve_baseline_out_of_rank_docs requires "
-                "rank_contained_max_retrieval_rank"
+                "preserve_baseline_out_of_rank_docs requires rank_contained_max_retrieval_rank"
             )
         self._scorer = scorer
         self._selector_name = selector_name
@@ -95,7 +91,7 @@ class CandidateScoreGuardedRerankerCompositionPolicy:
 
     def select(
         self,
-        question: PrimeQAQuestion,
+        question: PrimeQAQuery,
         candidates: Sequence[SentenceEvidenceCandidate],
         max_sentences: int,
     ) -> AnswerCompositionDecision:
@@ -110,9 +106,7 @@ class CandidateScoreGuardedRerankerCompositionPolicy:
                 model_score_margin_vs_top_candidate=0.0,
                 proposed_worst_retrieval_rank=None,
                 rank_contained_max_retrieval_rank=self._rank_contained_max_retrieval_rank,
-                preserve_baseline_out_of_rank_docs=(
-                    self._preserve_baseline_out_of_rank_docs
-                ),
+                preserve_baseline_out_of_rank_docs=(self._preserve_baseline_out_of_rank_docs),
             )
             return AnswerCompositionDecision(
                 selected_candidates=[],
@@ -197,9 +191,7 @@ class CandidateScoreGuardedRerankerCompositionPolicy:
             model_score_margin_vs_top_candidate=margin,
             proposed_worst_retrieval_rank=proposed_worst_retrieval_rank,
             rank_contained_max_retrieval_rank=self._rank_contained_max_retrieval_rank,
-            preserve_baseline_out_of_rank_docs=(
-                self._preserve_baseline_out_of_rank_docs
-            ),
+            preserve_baseline_out_of_rank_docs=(self._preserve_baseline_out_of_rank_docs),
             protected_baseline_out_of_rank_document_ids=tuple(sorted(protected_docs)),
             dropped_protected_baseline_out_of_rank_document_ids=tuple(
                 sorted(protected_docs - proposed_docs)
@@ -245,7 +237,7 @@ def fit_candidate_score_guarded_reranker_composition_policy(
 
 
 def _runtime_examples(
-    question: PrimeQAQuestion,
+    question: PrimeQAQuery,
     candidates: Sequence[SentenceEvidenceCandidate],
     selector_name: str,
     question_route: str,
@@ -316,8 +308,7 @@ def _rank_contained_blocked_reason(
     if max_retrieval_rank is None:
         return None
     if any(
-        candidate.retrieval_result.rank > max_retrieval_rank
-        for candidate in proposed_candidates
+        candidate.retrieval_result.rank > max_retrieval_rank for candidate in proposed_candidates
     ):
         return "selected_citation_rank_exceeds_limit"
     return None
@@ -350,9 +341,7 @@ def _baseline_out_of_rank_document_ids(
     if not enabled:
         return set()
     if max_retrieval_rank is None:
-        raise ValueError(
-            "max_retrieval_rank is required when preserving baseline out-of-rank docs"
-        )
+        raise ValueError("max_retrieval_rank is required when preserving baseline out-of-rank docs")
     return {
         candidate.retrieval_result.document.id
         for candidate in baseline_candidates

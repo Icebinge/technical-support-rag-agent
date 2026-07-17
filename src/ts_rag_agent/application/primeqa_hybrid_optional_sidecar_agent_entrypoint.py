@@ -31,7 +31,7 @@ from ts_rag_agent.application.primeqa_hybrid_sidecar_observation_validation impo
     PrimeQAHybridSidecarObservationAdapter,
 )
 from ts_rag_agent.domain.answer import AnswerVerificationResult, GeneratedAnswer
-from ts_rag_agent.domain.dataset import PrimeQAQuestion
+from ts_rag_agent.domain.dataset import PrimeQAQuery
 from ts_rag_agent.domain.retrieval import RetrievalResult
 
 _ENTRYPOINT_ID = "stage138_optional_sidecar_agent_entrypoint_v1"
@@ -66,7 +66,7 @@ _FORBIDDEN_PUBLIC_KEYS = frozenset(
 class CandidatePoolRetrieverPort(Protocol):
     """Build or retrieve the frozen candidate pool for one entrypoint request."""
 
-    def retrieve(self, question: PrimeQAQuestion) -> Sequence[RetrievalResult]: ...
+    def retrieve(self, question: PrimeQAQuery) -> Sequence[RetrievalResult]: ...
 
 
 class SidecarAgentOrchestratorExecutionFactoryPort(Protocol):
@@ -150,7 +150,7 @@ class StateAdvancingAnswerGenerator:
 
     def generate(
         self,
-        question: PrimeQAQuestion,
+        question: PrimeQAQuery,
         retrieval_results: Sequence[RetrievalResult],
     ) -> GeneratedAnswer:
         if self._state_machine.state is not SidecarAgentState.ANSWER:
@@ -268,7 +268,7 @@ class PrimeQAHybridOptionalSidecarAgentEntrypoint:
             orchestrator_factory or FrozenSidecarAgentOrchestratorExecutionFactory()
         )
 
-    def run(self, question: PrimeQAQuestion) -> OptionalSidecarAgentEntrypointRun:
+    def run(self, question: PrimeQAQuery) -> OptionalSidecarAgentEntrypointRun:
         state_machine = SidecarAgentActionStateMachine()
         state_machine.advance(SidecarAgentAction.RETRIEVE)
         candidate_pool = tuple(self._candidate_pool_retriever.retrieve(question))

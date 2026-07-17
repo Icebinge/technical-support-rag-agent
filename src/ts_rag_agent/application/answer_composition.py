@@ -12,7 +12,7 @@ from ts_rag_agent.application.route_aware_composition_policy import (
     CompositionPolicyCandidate,
     RouteAwareCompositionPolicy,
 )
-from ts_rag_agent.domain.dataset import PrimeQAQuestion
+from ts_rag_agent.domain.dataset import PrimeQAQuery
 
 
 @dataclass(frozen=True)
@@ -34,7 +34,7 @@ class AnswerCompositionPolicy(Protocol):
 
     def select(
         self,
-        question: PrimeQAQuestion,
+        question: PrimeQAQuery,
         candidates: Sequence[SentenceEvidenceCandidate],
         max_sentences: int,
     ) -> AnswerCompositionDecision:
@@ -48,7 +48,7 @@ class TopKAnswerCompositionPolicy:
 
     def select(
         self,
-        question: PrimeQAQuestion,
+        question: PrimeQAQuery,
         candidates: Sequence[SentenceEvidenceCandidate],
         max_sentences: int,
     ) -> AnswerCompositionDecision:
@@ -78,7 +78,7 @@ class RouteAwareAnswerCompositionPolicy:
 
     def select(
         self,
-        question: PrimeQAQuestion,
+        question: PrimeQAQuery,
         candidates: Sequence[SentenceEvidenceCandidate],
         max_sentences: int,
     ) -> AnswerCompositionDecision:
@@ -86,8 +86,7 @@ class RouteAwareAnswerCompositionPolicy:
         capped_candidates = list(candidates[:max_sentences])
         question_route = classify_question_route(question)
         policy_pairs = [
-            (_to_policy_candidate(candidate), candidate)
-            for candidate in capped_candidates
+            (_to_policy_candidate(candidate), candidate) for candidate in capped_candidates
         ]
         policy_candidates = [
             policy_candidate for policy_candidate, _runtime_candidate in policy_pairs

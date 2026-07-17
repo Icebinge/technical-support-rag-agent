@@ -21,7 +21,7 @@ from ts_rag_agent.application.primeqa_hybrid_sidecar_observation_validation impo
     SidecarObservationRecord,
 )
 from ts_rag_agent.domain.answer import AnswerVerificationResult, GeneratedAnswer
-from ts_rag_agent.domain.dataset import PrimeQAQuestion
+from ts_rag_agent.domain.dataset import PrimeQAQuery
 from ts_rag_agent.domain.retrieval import RetrievalResult
 
 _ORCHESTRATOR_ID = "stage116_primary_plus_stage128_sidecar_agent_orchestrator_v1"
@@ -60,7 +60,7 @@ class AnswerGeneratorPort(Protocol):
 
     def generate(
         self,
-        question: PrimeQAQuestion,
+        question: PrimeQAQuery,
         retrieval_results: Sequence[RetrievalResult],
     ) -> GeneratedAnswer: ...
 
@@ -203,7 +203,7 @@ class PrimeQAHybridSidecarAgentOrchestrator:
     def run(
         self,
         *,
-        question: PrimeQAQuestion,
+        question: PrimeQAQuery,
         candidate_pool_results: Sequence[RetrievalResult],
     ) -> PrimeQAHybridSidecarAgentRun:
         """Run one answer while keeping sidecar candidates out of answer paths."""

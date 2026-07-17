@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field
+from typing import Protocol
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class EvidenceContext(BaseModel):
@@ -48,6 +50,32 @@ class PrimeQAQuestion(BaseModel):
     doc_ids: list[str] = Field(default_factory=list)
     start_offset: int | None = None
     end_offset: int | None = None
+
+    @property
+    def full_question(self) -> str:
+        parts = [self.title.strip(), self.text.strip()]
+        return "\n\n".join(part for part in parts if part)
+
+
+class PrimeQAQuery(Protocol):
+    """Label-free structural contract consumed by the online RAG path."""
+
+    id: str
+    title: str
+    text: str
+
+    @property
+    def full_question(self) -> str: ...
+
+
+class PrimeQARuntimeQuery(BaseModel):
+    """Serving query carrying no gold answer, label, or document membership."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    title: str = ""
+    text: str
 
     @property
     def full_question(self) -> str:

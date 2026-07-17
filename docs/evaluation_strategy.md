@@ -1229,3 +1229,28 @@ cancellation. The executable policy passes `34/34` guards; one compliant case
 is eligible and four unsafe synthetic cases are rejected. No split, model,
 index, or candidate pool is loaded. The facade itself, network serving,
 defaultization, test evaluation, queues, retries, and fallback remain closed.
+
+The current Stage 148 transport-neutral Agent request-facade validation is
+recorded in:
+
+```text
+docs/primeqa_hybrid_agent_request_facade_validation.md
+```
+
+Stage148 separates the label-bearing offline `PrimeQAQuestion` from the new
+three-field `PrimeQARuntimeQuery` and updates the online retrieval/answer path
+to consume the structural label-free query contract. The implemented facade is
+constructible only from an eligible active Stage146 bootstrap. It maps private
+responses and citations, emits separate six-field facade and fourteen-field
+runtime public telemetry, maps capacity rejection exactly, propagates other
+downstream exceptions unchanged, and implements the monotonic
+`accepting -> draining -> closed` lifecycle.
+
+The formal aggregate/synthetic validator passes `37/37` guards in `0.001964s`.
+Invalid and pre-cancelled requests make zero runtime calls. A blocking
+concurrency case proves shutdown rejects new work while draining and waits for
+one in-flight call to finish naturally, without timeout or force-cancel. A
+separate synthetic Top400 integration test drives the label-free query through
+the real online runtime and legally ends in verified refusal. The formal
+validator loads no split, model, index, or candidate pool. Network serving,
+defaultization, test, queues, retries, and fallback remain closed.

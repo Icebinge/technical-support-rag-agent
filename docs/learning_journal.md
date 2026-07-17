@@ -32285,3 +32285,104 @@ SVG: 10
 - request size 和 HTTP status 属于 transport 决策。Stage147 没有真实网络需求证据，因此不凭经验补一个数字或状态码。
 
 下一步：Stage148 实现 transport-neutral facade 本体，用 synthetic runtime 验证 label-free request conversion、私有 response 映射、public telemetry allowlist、capacity mapping、并发生命周期竞争、dispatch 前取消、异常原样传播和无隐式 timeout 的自然 shutdown。FastAPI、test、默认化、排队、重试和兜底继续关闭。
+
+## 2026-07-17 - Stage 148 transport-neutral Agent request facade 实现与验证
+
+目标：按 Stage147 冻结协议实现真正可调用的 application facade，但继续不接 FastAPI。必须把线上 query 与含 gold label 的评测样本彻底分开，保留 Stage146 bootstrap 的资源 ownership 和 concurrency-four admission；验证私有 request/response、公开 telemetry、容量映射、异常传播、dispatch 前取消以及 `accepting -> draining -> closed` 自然关闭。formal validator 只允许读取 Stage147 公开聚合产物并运行 synthetic runtime，不加载 train/dev/test 或任何真实模型、索引和候选池。
+
+### Label-free 在线 query
+
+- 新增结构化 `PrimeQAQuery` protocol，在线 retriever、entrypoint、orchestrator、evidence/composition、answer generator 和 concurrent runtime 统一只依赖 `id/title/text/full_question`。
+- 新增冻结 Pydantic 模型 `PrimeQARuntimeQuery`，实际数据字段只有 `id`、`title`、`text`，`extra=forbid`；没有 answer、answerable、answer document、candidate document membership、offset 或 test membership。
+- 离线训练与评估仍使用原 `PrimeQAQuestion`，没有删除 gold 字段，也没有给线上 query 填伪造的空 answer/false label。
+- facade 用私有 `request_handle` 作为 query id；该 handle 不进入 public telemetry。
+
+### Facade 实现
+
+- `create_primeqa_hybrid_agent_request_facade()` 只接受 eligible、warm、active 的 Stage146 bootstrap result。普通构造缺少内部 active binding 会被拒绝；facade 不构建、不拥有也不销毁模型/index/runtime resources。
+- 私有 request：handle、可选 title、text、可选 caller-owned cancellation signal。
+- 私有 response：handle、答案 text、refused、citations；citation 精确映射 document reference/title/rank/evidence score。私有 payload 没有 public serializer。
+- 成功 run 的公开部分由 6 字段 facade event 与既有 14 字段 concurrent runtime trace 组成；内容、handle 和文档引用均不公开。
+- 使用 request-local `ContextVar` 保存当前调用的最后公开 event，不引入事件队列，也避免共享 `last_trace` 的跨线程污染。
+
+### 错误、取消与生命周期
+
+```text
+invalid request -> invalid_request，runtime call 0
+pre-dispatch cancellation -> cancelled_before_dispatch，runtime call 0
+capacity -> capacity_exceeded / rejected_capacity
+inactive / draining / closed -> 独立 typed error
+unknown downstream error -> 同一个异常对象原样抛出
+queue / retry / fallback -> 0 / 0 / 0
+```
+
+- capacity error 保留 `PrimeQAHybridConcurrentCapacityExceededError` 为 cause 和原 public runtime trace，不转答案、不进入 retrieval/generation。
+- cancellation 只在同步 runtime dispatch 前 cooperative check，不声称支持 in-flight hard cancellation。
+- shutdown 先把状态改为 draining 并拒绝新调用，再用 condition 无 timeout 等待 in-flight 归零，最后 closed；不 force-cancel，不关闭 bootstrap 所有资源。重复 shutdown 保持 closed。
+- 并发验证真实阻塞 1 个 synthetic request；观察 draining 后新调用被拒绝，释放原请求后它自然完成，shutdown 才进入 closed。
+
+### Formal source gate 与结果
+
+未确认 preflight：
+
+```text
+source gate passed: false
+failed: stage148_user_confirmed
+synthetic validation executed: false
+questions / models / candidate pools: false / false / false
+```
+
+用户确认后的唯一正式结果：
+
+```text
+source Stage147 guards: 34 / 34
+Stage148 guards: 37 / 37
+source gate / synthetic executed: true / true
+source file unchanged after validation: true
+runtime query fields: id / text / title
+forbidden runtime query attributes: []
+public facade / runtime fields: 6 / 14
+invalid / cancelled runtime calls: 0 / 0
+capacity: capacity_exceeded / rejected_capacity
+downstream same-object propagation: true
+in-flight before release: 1
+natural completion / closed: true / true
+implicit timeout / force-cancel: false / false
+formal time: 0.001964s
+network / default / test: false / false / false
+queue / retry / fallback: false / false / false
+public forbidden keys: []
+SVG: 10
+```
+
+Stage147 source SHA-256 保存值与磁盘一致：`3f72d7a8bd89d1b791c89d41d038e25c38e14ab053cc162c0fc0792fcf4dc860`。
+
+### 真实执行与修正记录
+
+- label-free 类型收敛和既有 runtime/entrypoint/answer/evidence 回归第一次即 `61 passed`，Ruff 通过。
+- facade、validator、并发 shutdown 和可视化定向组合第一次即 `13 passed`。
+- 未确认 CLI preflight 只有 `stage148_user_confirmed` 失败，synthetic validation 没有执行；证明真实 source gate fail closed。
+- 用户确认后的正式 CLI `37/37` guards 通过，Stage147 文件复读完整相等，10 张 SVG 生成。
+- 随后补充 400 篇 synthetic documents 的真实在线链路测试。第一次为 `13 passed / 1 failed`：无标签 query 已成功穿过 concurrent runtime、retriever、entrypoint、orchestrator、generator 和 verifier，但 synthetic 证据未达到 verifier 门槛，真实终态是合法 refused，而测试错误要求 complete。没有降低阈值或特制 evidence，改为断言真实 refused、Top400 和 application trace 后为 `14 passed`。
+- 所有线程同步都使用 `Event.wait()`、`Condition.wait()` 和 `Thread.join()` 自然等待，没有设置监控时长、超时终止、强制取消或重启。
+
+最终验收：
+
+```text
+changed/new Python format check: 16 files already formatted
+full repository Ruff: passed
+full repository pytest: 564 passed in 6.67s
+formal Stage148 guards: 37 / 37
+formal / preflight SVG XML parse: 10 / 10 and 10 / 10
+formal / preflight artifact ignore checks: passed
+```
+
+### 本步学到
+
+- 最干净的 serving 边界不是给评测模型的 gold 字段填空值，而是让在线链路依赖更小的结构化 protocol，并提供真正没有这些属性的 runtime model。
+- private response 与 public telemetry 必须是两种不同对象；“序列化时再删字段”不如从类型上根本不提供 private payload 的 public serializer。
+- downstream error 原样传播与 telemetry 可以同时成立：request-local `ContextVar` 记录事件，不需要包装未知异常，也不需要共享可变 last-trace。
+- graceful shutdown 测试必须先占住真实 in-flight，再观察 draining；只调用空闲 facade 的 shutdown 无法证明它会等待。
+- 集成测试应该接受真实 verifier 结果。为了符合预设 complete 而修改阈值或 synthetic evidence，会把测试从行为验证变成指标迎合。
+
+下一步：Stage149 冻结 facade 外层的 network transport protocol，明确 serialization schema、HTTP error/status mapping、request-size policy、client disconnect、lifespan ownership、health/readiness 和 public logging 边界。协议通过前不实现 FastAPI；test、默认化、排队、重试和兜底继续关闭。

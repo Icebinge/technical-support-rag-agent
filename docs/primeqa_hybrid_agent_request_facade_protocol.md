@@ -128,9 +128,8 @@ stage147_guard_check_status.svg
 
 ## Next Step
 
-Stage148 should implement the transport-neutral facade against this frozen
-protocol and validate request conversion, exact private response mapping,
-public telemetry, capacity rejection, lifecycle races, cooperative
-pre-dispatch cancellation, downstream exception propagation, and natural
-shutdown using synthetic runtimes. FastAPI, test evaluation, defaultization,
-queues, retries, and fallback remain closed.
+Completed in Stage148: the transport-neutral facade is implemented and
+validated in `docs/primeqa_hybrid_agent_request_facade_validation.md`.
+Stage149 should freeze the network transport protocol before FastAPI or another
+network implementation. Test evaluation, defaultization, queues, retries, and
+fallback remain closed.

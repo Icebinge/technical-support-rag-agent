@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from ts_rag_agent.domain.dataset import PrimeQAQuestion
+from ts_rag_agent.domain.dataset import PrimeQAQuery
 from ts_rag_agent.domain.retrieval import RetrievalResult
 
 
@@ -39,7 +39,7 @@ class SentenceEvidenceSelector(Protocol):
 
     def rank_sentence_candidates(
         self,
-        question: PrimeQAQuestion,
+        question: PrimeQAQuery,
         retrieval_results: Sequence[RetrievalResult],
     ) -> list[SentenceEvidenceCandidate]:
         """Return ranked evidence candidates for one question."""
@@ -59,7 +59,7 @@ class OverlapSentenceEvidenceSelector:
 
     def rank_sentence_candidates(
         self,
-        question: PrimeQAQuestion,
+        question: PrimeQAQuery,
         retrieval_results: Sequence[RetrievalResult],
     ) -> list[SentenceEvidenceCandidate]:
         query_terms = set(tokenize_text(question.full_question))
@@ -141,7 +141,7 @@ class BM25SentenceEvidenceSelector:
 
     def rank_sentence_candidates(
         self,
-        question: PrimeQAQuestion,
+        question: PrimeQAQuery,
         retrieval_results: Sequence[RetrievalResult],
     ) -> list[SentenceEvidenceCandidate]:
         query_terms = _content_terms(tokenize_text(question.full_question))
@@ -487,7 +487,7 @@ class HybridRoutingEvidenceSelector:
 
     def rank_sentence_candidates(
         self,
-        question: PrimeQAQuestion,
+        question: PrimeQAQuery,
         retrieval_results: Sequence[RetrievalResult],
     ) -> list[SentenceEvidenceCandidate]:
         """Route one question to the best known non-LLM selector."""
@@ -548,7 +548,7 @@ class HybridWindowRoutingEvidenceSelector:
 
     def rank_sentence_candidates(
         self,
-        question: PrimeQAQuestion,
+        question: PrimeQAQuery,
         retrieval_results: Sequence[RetrievalResult],
     ) -> list[SentenceEvidenceCandidate]:
         """Route one question to a selector without using gold answers."""
@@ -761,9 +761,7 @@ STOPWORDS = {
 
 def split_sentences(text: str) -> list[str]:
     return [
-        sentence.strip()
-        for sentence in re.split(r"(?<=[.!?])\s+|\n{2,}", text)
-        if sentence.strip()
+        sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+|\n{2,}", text) if sentence.strip()
     ]
 
 
@@ -776,11 +774,7 @@ def normalize_sentence(sentence: str) -> str:
 
 
 def _content_terms(tokens: list[str]) -> set[str]:
-    return {
-        token
-        for token in tokens
-        if token not in STOPWORDS and not _is_noisy_token(token)
-    }
+    return {token for token in tokens if token not in STOPWORDS and not _is_noisy_token(token)}
 
 
 def _is_noisy_token(token: str) -> bool:
@@ -793,14 +787,9 @@ def _is_noisy_token(token: str) -> bool:
 
 def _compute_idf_by_term(query_terms: set[str], rows: list[_SentenceRow]) -> dict[str, float]:
     sentence_count = len(rows)
-    document_frequency = {
-        term: sum(1 for row in rows if term in row.terms)
-        for term in query_terms
-    }
+    document_frequency = {term: sum(1 for row in rows if term in row.terms) for term in query_terms}
     return {
-        term: math.log(
-            1 + (sentence_count - frequency + 0.5) / (frequency + 0.5)
-        )
+        term: math.log(1 + (sentence_count - frequency + 0.5) / (frequency + 0.5))
         for term, frequency in document_frequency.items()
     }
 
@@ -1115,7 +1104,7 @@ def _non_ascii_ratio(text: str) -> float:
     return non_ascii_count / len(text)
 
 
-def classify_question_route(question: PrimeQAQuestion) -> str:
+def classify_question_route(question: PrimeQAQuery) -> str:
     """Classify a question for selector routing without using gold answers."""
 
     combined = question.full_question.lower()
@@ -1134,8 +1123,7 @@ def classify_question_route(question: PrimeQAQuestion) -> str:
 
 def _is_security_bulletin_question(combined_question: str) -> bool:
     return any(
-        token in combined_question
-        for token in ("cve-", "cveid", "cvss", "security bulletin")
+        token in combined_question for token in ("cve-", "cveid", "cvss", "security bulletin")
     )
 
 
@@ -1192,7 +1180,7 @@ def _asks_security_remediation(combined_question: str) -> bool:
 
 
 def trace_selector_route(
-    question: PrimeQAQuestion,
+    question: PrimeQAQuery,
     selector_name: str,
 ) -> SelectorRouteTrace:
     """Trace selector routing without using gold answers."""

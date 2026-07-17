@@ -43,7 +43,7 @@ from ts_rag_agent.application.primeqa_hybrid_sidecar_agent_orchestrator_validati
     _stage128_summary,
 )
 from ts_rag_agent.config import ProjectSettings
-from ts_rag_agent.domain.dataset import PrimeQAQuestion
+from ts_rag_agent.domain.dataset import PrimeQAQuery, PrimeQAQuestion
 from ts_rag_agent.domain.retrieval import RetrievalResult
 from ts_rag_agent.infrastructure.primeqa_loader import (
     load_primeqa_document_sections,
@@ -189,7 +189,7 @@ class _ProfiledCandidatePoolRetriever:
         if self._pending_run is not None:
             raise RuntimeError("previous retrieval profile was not consumed")
 
-    def retrieve(self, question: PrimeQAQuestion) -> Sequence[RetrievalResult]:
+    def retrieve(self, question: PrimeQAQuery) -> Sequence[RetrievalResult]:
         if self._pending_run is not None:
             raise RuntimeError("only one sequential runtime request is authorized")
         self._pending_run = self._delegate.retrieve_profiled(question)
@@ -234,7 +234,7 @@ class PrimeQAHybridOptionalSidecarAgentRuntime:
     def resource_summary(self) -> PrimeQAHybridRuntimeResourceSummary:
         return self._resources.summary
 
-    def run(self, question: PrimeQAQuestion) -> OptionalSidecarAgentRuntimeRun:
+    def run(self, question: PrimeQAQuery) -> OptionalSidecarAgentRuntimeRun:
         if not self._request_lock.acquire(blocking=False):
             raise RuntimeError("concurrent optional runtime requests are not authorized")
         try:

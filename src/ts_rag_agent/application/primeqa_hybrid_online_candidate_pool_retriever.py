@@ -10,7 +10,7 @@ from typing import Protocol
 from ts_rag_agent.application.primeqa_hybrid_optional_sidecar_agent_entrypoint import (
     CandidatePoolRetrieverPort,
 )
-from ts_rag_agent.domain.dataset import PrimeQADocument, PrimeQAQuestion
+from ts_rag_agent.domain.dataset import PrimeQADocument, PrimeQAQuery
 from ts_rag_agent.domain.retrieval import RetrievalResult
 
 ChannelSearcher = Callable[[str, int], Sequence[RetrievalResult]]
@@ -155,10 +155,10 @@ class PrimeQAHybridOnlineCandidatePoolRetriever(CandidatePoolRetrieverPort):
         self._channels = tuple(channels)
         self._config = config
 
-    def retrieve(self, question: PrimeQAQuestion) -> Sequence[RetrievalResult]:
+    def retrieve(self, question: PrimeQAQuery) -> Sequence[RetrievalResult]:
         return self.retrieve_profiled(question).results
 
-    def retrieve_profiled(self, question: PrimeQAQuestion) -> CandidatePoolRetrievalRun:
+    def retrieve_profiled(self, question: PrimeQAQuery) -> CandidatePoolRetrievalRun:
         started_at = time.perf_counter()
         query = question.full_question
         results_by_channel: dict[str, Sequence[RetrievalResult]] = {}
