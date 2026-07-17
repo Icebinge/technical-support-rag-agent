@@ -215,6 +215,14 @@ class PrimeQAHybridRuntimeResourceBundle:
     summary: PrimeQAHybridRuntimeResourceSummary
 
 
+@dataclass(frozen=True)
+class PrimeQAHybridSharedRuntimeResources:
+    """Long-lived retrieval graph shared by one process runtime assembly."""
+
+    candidate_pool_retriever: PrimeQAHybridOnlineCandidatePoolRetriever
+    summary: PrimeQAHybridRuntimeResourceSummary
+
+
 class PrimeQAHybridOptionalSidecarAgentRuntime:
     """Explicit non-default single-request runtime around the Stage139 entrypoint."""
 
@@ -372,6 +380,20 @@ class PrimeQAHybridProcessRuntimeResourceFactory:
         self.build_count = 0
 
     def build(self) -> PrimeQAHybridRuntimeResourceBundle:
+        shared = self.build_shared()
+        profiled_retriever = _ProfiledCandidatePoolRetriever(shared.candidate_pool_retriever)
+        entrypoint = create_primeqa_hybrid_optional_sidecar_agent_entrypoint(
+            candidate_pool_retriever=profiled_retriever,
+        )
+        return PrimeQAHybridRuntimeResourceBundle(
+            profiled_retriever=profiled_retriever,
+            entrypoint=entrypoint,
+            summary=shared.summary,
+        )
+
+    def build_shared(self) -> PrimeQAHybridSharedRuntimeResources:
+        """Build the heavy graph once for sequential or concurrent assembly."""
+
         if self.build_count:
             raise RuntimeError("process runtime resources may be built only once")
         self.build_count += 1
@@ -416,10 +438,6 @@ class PrimeQAHybridProcessRuntimeResourceFactory:
             channels=_online_channels(lexical_channels + dense_channels),
             config=_retrieval_config(selected_config),
         )
-        profiled_retriever = _ProfiledCandidatePoolRetriever(online_retriever)
-        entrypoint = create_primeqa_hybrid_optional_sidecar_agent_entrypoint(
-            candidate_pool_retriever=profiled_retriever,
-        )
         summary = PrimeQAHybridRuntimeResourceSummary(
             dense_model_count=2,
             dense_embedding_cache_count=len(dense_summary.get("dense_cache_configs") or []),
@@ -428,9 +446,8 @@ class PrimeQAHybridProcessRuntimeResourceFactory:
             candidate_pool_retriever_instance_count=1,
             optional_entrypoint_instance_count=1,
         )
-        return PrimeQAHybridRuntimeResourceBundle(
-            profiled_retriever=profiled_retriever,
-            entrypoint=entrypoint,
+        return PrimeQAHybridSharedRuntimeResources(
+            candidate_pool_retriever=online_retriever,
             summary=summary,
         )
 

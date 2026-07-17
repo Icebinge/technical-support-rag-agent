@@ -31916,3 +31916,146 @@ stage144_guard_check_status.svg
 - `eligible` 仍然只是证据判定结果，不会自动实现、激活或默认化 runtime。Stage144 没有并发性能数据，不能声称并发已通过。
 
 下一步：Stage145 按 Stage144 协议实现 bounded concurrency 4、非阻塞 admission、typed capacity rejection 和 request-local profiling/state，然后完整运行 3,372 个 train accepted request、五折/pooled 延迟矩阵、overload probe，train 全通过后再跑一次 121-row dev report-only。test、默认化、排队、重试和兜底继续关闭。
+
+## 2026-07-17 - Stage 145 四并发 research runtime 实现与 train-CV/dev 验证
+
+目标：按 Stage144 已冻结的严格实用型 B 档协议，真正实现最大并发 4 的 research runtime，并在当前机器上完整验证端到端时延、过载拒绝、共享资源、请求状态隔离和 Stage143 行为等价性。本阶段只允许 train grouped-CV 和 train gate 通过后的一次 dev report-only；test、应用激活、默认化、网络服务、排队、重试和兜底继续关闭。
+
+### 实现内容
+
+- 新增 `PrimeQAHybridSharedRuntimeResources`，把 Stage143 资源工厂拆成共享重资源构建与单请求 runtime 组装两个明确边界。原单请求 `build()` 行为保持不变；并发实现只调用一次 `build_shared()`。
+- 新增 `PrimeQAHybridConcurrentSidecarAgentRuntime`：
+  - 使用容量 4 的非阻塞 `BoundedSemaphore`；
+  - 第 5 个并发请求抛出 `PrimeQAHybridConcurrentCapacityExceededError`；
+  - 拒绝发生在 candidate retrieval 和 Agent 之前；
+  - 不排队、不重试、不 fallback；
+  - 下游异常原样传播并在 `finally` 中释放 permit；
+  - 聚合 counters 在锁内更新，可验证 attempts、admitted、rejected、downstream、completed、failed 和 max in-flight。
+- 新增 `RequestLocalProfiledCandidatePoolRetriever`，用 `ContextVar` 隔离每个请求的 retrieval profile。重模型、embedding cache、lexical index、online retriever 和 entrypoint 仍为进程共享；每请求 Agent 状态机由既有 entrypoint 调用栈独立创建。
+- 每个新问题仍需在线产生该问题自己的有序 Top400 检索结果，但不会为每个请求重建模型、cache 或 index。Stage145 测量的是这条真实在线路径，不是离线预生成候选池。
+- runtime public trace 严格使用 Stage144 allowlist，包含 runtime mode、activation、SLO profile、warm state、concurrency/admission、arrival pattern、candidate depth、retrieval/end-to-end latency 和 terminal state，不写 request id、问题、答案、文档或候选行。
+- 新增 Stage145 formal validator 和 CLI：先读 Stage144/143 公共聚合产物，再加载 train、构建一次共享资源、执行一次 label-free warmup、一次 5-request overload probe、6 个完整 train pass；只有 train gate 全通过才加载并运行一次 dev report-only。
+- 训练请求执行顺序固定为 sync-1、jitter-1、sync-2、jitter-2、sync-3、jitter-3。正式门包括 30 个 fold x pattern x repetition、6 个完整 pass、2 个 pattern pooled 和 1 个 global pooled，共 39 个独立 P95/P99 scope。
+- 私有 per-request trace 和 behavior digest 只保留在内存中用于行为等价与跨请求污染检查；保存的 JSON/SVG 只有聚合数据。
+- 新增 10 张 SVG，覆盖 train pass latency、pattern pooled latency、scope maxima、dev latency、request budget、throughput、overload、behavior invariant、decision 和 guard status。
+
+### 到达负载真实性审计
+
+最初实现把 `cohort_started_at` 记在主线程提交 future 之前。虽然 worker target offset 分配正确，但正式结果出现实际 offset 误差超过 250ms，说明“目标 schedule 正确”不能证明 4 个 worker 已同时就绪。该结果不能作为最终同步 burst 证据。
+
+修正后新增每 cohort 的 `_CohortArrivalGate`：所有 worker 先在 `Barrier` 就绪，由 barrier action 记录唯一共享时钟原点，然后分别按 `0/0/0/0ms` 或 `0/7/13/20ms` 目标执行。单元测试验证 4 个 worker 读取的是完全相同的 release timestamp。
+
+最终屏障版结果：
+
+```text
+synchronized repetition 1 max actual offset: 0.6999ms
+synchronized repetition 2 max actual offset: 0.3608ms
+synchronized repetition 3 max actual offset: 0.3708ms
+all-train arrival error average / P95 / P99: 3.421241 / 14.249230 / 15.815290ms
+all-train arrival error max: 286.9019ms
+```
+
+同步 burst 的实际到达已收敛到 1ms 内。最大离群只出现在 deterministic-jitter repetition 2：Windows/Python worker 已在 barrier 就绪，但 sleep 到目标 offset 后仍可能被操作系统延迟调度。Stage144 冻结的是 target offset 和端到端 P95/P99，没有定义 actual-offset error gate，因此不能事后新增门改变决策；同时也不能把目标确定性描述成物理到达绝对确定。最终文档把 P99 和单次 max 离群都作为 workload-fidelity limitation 如实公开。
+
+### 最终正式结果
+
+最终采用屏障版正式运行，未使用前两轮较乐观数据：
+
+```text
+status: primeqa_hybrid_concurrent_runtime_train_cv_dev_validation_passed
+validator internal time through guards: 489.895s
+guard checks: 36 / 36 passed
+failed latency scopes: []
+train accepted requests: 3,372
+train complete passes: 6
+train latency gate scopes: 39
+train global E2E P50 / P95 / P99 / max: 0.346035 / 0.569697 / 0.763205 / 1.055940s
+train retrieval P95 / P99: 0.497690 / 0.693310s
+worst scope P95: 0.682807s, synchronized repetition 3 fold 5
+worst scope P99: 0.875067s, deterministic-jitter repetition 2 fold 3
+all scopes meet P95 <= 0.800s and P99 <= 1.500s: true
+```
+
+分 arrival pattern：
+
+```text
+synchronized pooled requests / P95 / P99 / max: 1,686 / 0.574487 / 0.760026 / 0.874202s
+deterministic-jitter pooled requests / P95 / P99 / max: 1,686 / 0.564124 / 0.764513 / 1.055940s
+```
+
+资源、过载和隔离：
+
+```text
+resource factory build count: 1
+dense models / caches / lexical indexes / derived routes: 2 / 2 / 4 / 1
+candidate retriever / entrypoint instances: 1 / 1
+resources built or loaded per request: false
+warmup retrieval / E2E: 59.704 / 109.715ms
+overload attempts / admitted / rejected: 5 / 4 / 1
+overload completed / failed / max in-flight: 4 / 0 / 4
+rejected downstream call count: 0
+typed rejection E2E: 0.004ms
+queue / retry / fallback actions: 0 / 0 / 0
+cross-request contamination count: 0
+```
+
+Stage143 行为等价：
+
+```text
+train Recall@10/50/100/200/400: 0.6892 / 0.8189 / 0.8973 / 0.9324 / 0.9568
+train verified F1 / gold: 0.1946 / 906
+train complete / refuse: 3,360 / 12
+train runtime / entrypoint trace violations: 0 / 0
+dev rows: 121, loaded only after train gate
+dev E2E P95 / P99: 0.591977 / 0.695942s
+dev Recall@10/50/100/200/400: 0.7237 / 0.8421 / 0.8684 / 0.9079 / 0.9211
+dev verified F1 / gold: 0.1873 / 33
+dev complete / refuse: 121 / 0
+dev Stage143 behavior match: true
+candidate depth: always 400
+```
+
+边界判定：
+
+```text
+can wire explicit non-default concurrent runtime now: true
+concurrent runtime registered for application use: false
+concurrent runtime activation allowed now: false
+runtime registered as default: false
+runtime defaultization allowed now: false
+test loaded / metrics run: false / false
+public forbidden keys: []
+```
+
+### 真实执行与修正记录
+
+- 第一轮 targeted runtime 测试通过后，Ruff 如实发现 1 个未使用 import 和 3 个文件格式差异；修正后定向静态检查通过。
+- 第一轮 validator targeted 测试为 `35 passed / 1 failed`，失败原因是 SVG `BarDatum` 缺少 `value_label`，同时 Ruff 发现 import order；统一通过 `_bar()` 构造并整理 import 后通过。
+- 第一轮正式运行在元数据审计前完成，耗时 `498.956s`，性能门通过。随后发现 blocked report 把 `train_split_loaded` 固定写成 `true`，且源文件 hash 时间被错误计入 train load；这两个口径被修正并新增测试，因此第一轮产物不作为最终产物。
+- 尝试用 shell timeout `0` 表示无限等待时，底层把它解释成立即超时，命令在约 15ms 内被拒绝，正式 Python 流程没有实际启动。随后使用不会触及运行时长的长上限，始终等待进程自然完成；这个失败不计为 formal run。
+- 元数据修正后的第二轮有效正式运行耗时 `489.355s`，`36/36` guards 和 `39/39` scopes 通过；审计发现同步 workload 的时钟从 future 提交开始，实际误差 max `255.7308ms`，因此没有把这一轮当最终证据。
+- 引入 barrier 共同起点并增加测试后，第三轮有效正式运行耗时 `489.895s`，成为唯一最终 Stage145 结果。同步实际 offset max 降到 `0.6999ms`；jitter 的调度离群如实保留。
+- 正式长进程均等待自然结束，没有根据观察窗口终止、重启、缩减请求、修改 SLO、打开 test、加入重试或启用 fallback。
+
+最终验收：
+
+```text
+Stage145 changed/new Python format check: 6 files already formatted
+full repository Ruff lint: passed
+full repository pytest: 521 passed in 5.99s
+Stage145 formal guards: 36 / 36 passed
+Stage145 latency scopes: 39 / 39 passed
+Stage145 SVG XML parse: 10 / 10 passed
+artifact ignore check: passed
+```
+
+### 本步学到
+
+- “共享候选池资源”与“每问题在线检索结果”必须区分：模型、cache 和 index 应只构建一次，但每个新问题仍必须在已有索引上快速生成自己的 Top400。Stage145 的并发端到端测量说明这条在线路径在当前 B 档 SLO 内，而不是取消检索。
+- 提交 future 的时间不是请求真实到达时间。并发 benchmark 需要先证明 worker 就绪，再记录共享时钟；否则线程池启动延迟会让同步 burst 名义上并发、实际上错开。
+- barrier 能控制逻辑释放，不能控制操作系统调度。负载生成器必须同时报告 target 与 actual offset；没有预先冻结 actual-error gate 时，既不能事后改变决策，也不能隐藏离群点。
+- 并发安全需要资源 ownership 与 mutable request state 分离。共享不可变/线程安全重资源可以避免每请求重建成本，`ContextVar` 和每调用 Agent 状态机则防止请求互相消费 profile 或污染 action trace。
+- 过载证据必须把 4 个 permit 真正占满并停在 downstream 前，再发第 5 个请求；仅靠快速提交 5 个 future 可能因为前一请求先结束而偶然不触发拒绝。
+- `eligible` 只授权下一阶段接显式非默认 activation，不等于 concurrent runtime 已对应用开放，更不等于可以默认化或查看 test。
+
+下一步：Stage146 把已验证的 concurrency-four runtime 接到一个单独、显式、默认关闭的 application activation 路径，验证 disabled、rejected、eligible 三种启动状态和资源只构建一次。继续禁止默认化、test、排队、重试、兜底和未经单独设计的网络 serving。

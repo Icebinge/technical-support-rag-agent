@@ -199,9 +199,15 @@ The JSON and SVG artifacts are local ignored aggregate-only files.
 
 ## Next Step
 
-Stage145 may now redesign the Stage143 single-request adapter into a bounded
-four-request runtime, add request-local profiling and state, implement typed
-pre-downstream capacity rejection, and run the complete frozen train-CV/dev
-workload. The implementation must be validated against the Stage144 executable
-policy. Test, defaultization, queues, retries, and fallback remain separate
-closed gates.
+Stage145 is complete and recorded in:
+
+```text
+docs/primeqa_hybrid_concurrent_runtime_validation.md
+```
+
+It implements the bounded four-request research runtime, adds request-local
+profiling and state, proves typed pre-downstream capacity rejection, and passes
+the complete frozen train-CV/dev workload. Stage146 may now wire that validated
+runtime behind a separate explicit non-default application activation path.
+Test, defaultization, queues, retries, fallback, and network serving remain
+separate closed gates.

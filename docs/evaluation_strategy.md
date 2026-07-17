@@ -1164,3 +1164,28 @@ latency scopes, and a five-request overload probe that admits four and rejects
 one before any downstream call. Dev remains one mixed report-only pass after
 the train gate. Stage144 itself loads no split rows and runs no concurrent
 requests; test, defaults, queues, retries, and fallback remain closed.
+
+The current Stage 145 bounded concurrent-runtime validation is recorded in:
+
+```text
+docs/primeqa_hybrid_concurrent_runtime_validation.md
+```
+
+Stage145 builds the heavy resource graph once, performs one label-free warmup,
+and validates a nonblocking concurrency-four research runtime against the
+frozen Stage144 profile B workload. Six complete train passes produce 3,372
+accepted requests across 39 independently gated latency scopes. Global train
+end-to-end P95/P99 is `0.569697/0.763205s`; the worst individual scope is
+P95 `0.682807s` and P99 `0.875067s`, so all scopes meet the
+`0.800/1.500s` limits. The five-request overload probe admits four and rejects
+one with a typed error before any downstream call.
+
+The final barrier-synchronized harness records actual arrival fidelity rather
+than assuming thread submission equals arrival. Synchronized bursts have a
+maximum observed offset of `0.6999ms`. Deterministic jitter retains its exact
+target `0/7/13/20ms` schedule, while actual absolute offset error has P99
+`15.815290ms` and one Windows scheduling outlier of `286.9019ms`; Stage144 did
+not define this diagnostic as a decision gate. Dev is loaded once only after
+the train gate and matches Stage143 behavior with end-to-end P95/P99
+`0.591977/0.695942s`. Test, application activation, defaultization, queues,
+retries, and fallback remain closed.

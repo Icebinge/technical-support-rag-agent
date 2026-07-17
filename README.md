@@ -16,7 +16,7 @@ No downloaded dataset files are committed to this repository.
 
 ## Current Status
 
-Stage 144: strict practical four-request concurrency validation protocol frozen.
+Stage 145: bounded four-request research runtime implemented and validated.
 
 Implemented:
 
@@ -29,20 +29,22 @@ Implemented:
 - BM25, section BM25, dense-cache, and fused high-recall retrieval
 - extractive answer generation, verification, and optional sidecar Agent orchestration
 - disabled-by-default process-scoped runtime bootstrap with public-safe traces
-- train grouped-CV and dev report-only evaluation through Stage 143
-- executable concurrent-runtime validation policy and workload contract through Stage 144
+- train grouped-CV and dev report-only evaluation through Stage 145
+- executable concurrent-runtime validation policy and workload contract
+- process-shared, request-isolated concurrency-four research runtime
 
 Not implemented yet:
 
 - LangGraph workflow
 - FastAPI service
-- concurrent runtime serving
-- concurrent runtime performance validation
+- application-facing concurrent runtime activation and serving
 - runtime defaultization and final locked-test evaluation
 
 The optional single-request runtime remains disabled unless
 `TS_RAG_ENABLE_OPTIONAL_SIDECAR_AGENT=true` is set explicitly and the frozen
 activation evidence passes. It is not registered as the default runtime.
+The Stage145 concurrent runtime is validated research code but is not yet
+registered behind an application setting and cannot be activated by callers.
 
 ## Quickstart
 
