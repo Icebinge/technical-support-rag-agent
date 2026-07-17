@@ -1102,3 +1102,18 @@ match the legacy sequence, and train/dev Recall@10/50/100/200/400 exactly match
 Stage127. The observed train/dev P95 latency is 0.450798/0.293909 seconds. Dev is
 report-only, test remains locked, and no product latency SLO is inferred from
 these measurements.
+
+The current Stage 141 strict non-default runtime activation protocol is
+recorded in:
+
+```text
+docs/primeqa_hybrid_nondefault_runtime_activation_protocol.md
+```
+
+Stage141 freezes the user-selected warm single-request limits of P95 <= 0.300
+seconds and P99 <= 1.000 seconds. The future gate requires three complete warm
+train passes, all five grouped folds plus the pooled train aggregate to pass,
+and then one dev report-only pass. Stage140's train P95 fails the strict target
+and train/dev P99 were not measured, so current evidence is explicitly
+ineligible. Stage141 freezes policy only; no runtime flag or service entrypoint
+is implemented, concurrent serving is unauthorized, and test remains locked.

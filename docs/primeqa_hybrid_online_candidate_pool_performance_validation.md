@@ -162,16 +162,26 @@ public-safety, train/dev-only, test-lock, retry, fallback, and runtime-default
 guards. The online candidate-pool core is validated, but it is not activated or
 registered as a runtime default.
 
-No user-confirmed production latency SLO currently exists. Stage140 therefore
-reports the observed distribution but does not invent a product SLO or use it
-to authorize runtime activation.
+At Stage140 completion no user-confirmed production latency SLO existed, so the
+stage reported the observed distribution without inventing an acceptance
+threshold or authorizing runtime activation. Stage141 subsequently froze the
+user-selected strict-C target; it did not retroactively turn Stage140 into a
+passing latency run.
 
 ## Next Step
 
-Stage141 should freeze a user-confirmed latency SLO and explicit non-default
-runtime activation protocol. It should define startup ownership of the two
-dense models, cached embeddings, and four lexical indexes; the disabled-by-
-default runtime flag; one-request timing and public trace fields; concurrency
-and warmup validation; refusal behavior; and activation guards. Test remains
-locked. Runtime defaultization, retries, and fallback strategies remain
-disabled.
+Stage141 is complete and recorded in:
+
+```text
+docs/primeqa_hybrid_nondefault_runtime_activation_protocol.md
+```
+
+It froze warm single-request P95 <= 0.300 seconds and P99 <= 1.000 seconds,
+explicit disabled-by-default activation, process-scoped resource ownership,
+public traces, and fail-closed guards. Stage140 train P95 exceeds the new limit
+and Stage140 has no P99 evidence, so runtime remains ineligible and unwired.
+
+Stage142 must optimize and validate that strict SLO with three complete warm
+train passes, five-fold plus aggregate checks, and one locked dev report-only
+pass. Test remains locked. Runtime defaultization, concurrency, retries, and
+fallback strategies remain disabled.

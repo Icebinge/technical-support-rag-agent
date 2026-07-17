@@ -920,6 +920,19 @@ row, and writes only aggregate latency, recall, identity, and guard summaries.
 It does not load the test split or write per-row question, document, label, or
 candidate data.
 
+The current PrimeQA/TechQA hybrid Stage141 strict non-default runtime activation
+protocol is recorded in:
+
+```text
+docs/primeqa_hybrid_nondefault_runtime_activation_protocol.md
+```
+
+Stage141 reads only the saved Stage140 public-safe aggregate JSON. It does not
+open train/dev split files, load the corpus, models, indexes, or test data, or
+execute runtime requests. Its canonical activation cases are synthetic policy
+inputs. The report contains only aggregate source fields and public-safe policy
+state, and it keeps test unloaded and unmeasured.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

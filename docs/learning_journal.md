@@ -31367,3 +31367,114 @@ git diff --check: passed
 下一步：Stage141 冻结用户确认的 latency SLO 和显式、非默认 runtime activation protocol。协议需要明确模型、dense
 cache 和四个 lexical index 的启动所有权，默认关闭的用户可见 flag，warmup/concurrency 验证，单请求 latency/public
 trace 合同、拒绝行为和激活 guards。test 继续锁定，不允许 runtime 默认化，不加入重试或兜底策略。
+
+## 2026-07-17 - Stage 141 严格 C 单请求 SLO 与非默认 runtime activation protocol 冻结
+
+目标：在不加载任何样本、语料、模型、索引或 test 数据的前提下，把用户明确选择的严格 C 性能要求冻结成可执行的
+runtime 激活规则。该阶段只允许读取 Stage140 已保存的公开安全聚合报告，必须把“协议冻结成功”“现有性能达到门槛”
+和“runtime 已接线/已激活”分开记录，不能因为协议代码通过就伪造运行时已经可用。
+
+用户确认的门槛：
+
+```text
+profile: strict_c_warm_single_request_v1
+warm single-request P95: <= 0.300s
+warm single-request P99: <= 1.000s
+```
+
+本步改动：
+
+- 新增 `primeqa_hybrid_nondefault_runtime_activation_protocol.py`，封装严格 SLO、激活证据、三态决策和 fail-closed
+  policy；状态只有 `disabled`、`rejected`、`eligible`，其中 `eligible` 也不会自动激活 runtime。
+- 冻结未来环境变量 `TS_RAG_ENABLE_OPTIONAL_SIDECAR_AGENT`，默认值为 false 且只接受显式激活意图；仓库当前没有
+  FastAPI/runtime 入口，也没有对应 `ProjectSettings` 字段，因此只记录未来接口，明确标记“尚未实现、尚未注册”。
+- 冻结 process-scoped bootstrap 所有权：2 个 dense model、2 个 dense embedding cache、4 个 lexical index 和
+  1 个 candidate-pool retriever 均在请求外初始化；special-token route 复用 full-document BM25，不拥有额外索引。
+- 冻结 warmup：用不读取标签的确定性 train-only 行执行 1 次完整请求并排除该次计时；同一行仍重新纳入每个完整
+  train 测量 pass，不能减少样本。
+- 冻结 Stage142 测量：3 个完整 warm train pass，现有 5 个 grouped fold 每个都要满足 P95/P99，合并 train 也要
+  满足；train 决策固定后，dev 只运行 1 次 report-only gate。test 不加载、不测量。
+- 并发 SLO 尚未由用户确认，因此当前协议明确只覆盖 single-request research runtime；并发激活请求直接 rejected，
+  不能用单请求结果声称并发就绪。
+- 冻结公开 request trace 白名单、启动成本与请求成本分离、guard 失败时服务前拒绝，以及无 retry、无 fallback、
+  无 silent route substitution 的拒绝合同。
+- 新增 Stage141 CLI、9 个单元测试、公开安全聚合 JSON 和 5 张 SVG；更新 Stage139/140 后续说明、data strategy、
+  evaluation strategy 和独立阶段文档。
+
+真实源证据与当前判定：
+
+```text
+Stage140 train P95: 0.450798s -> exceeds 0.300s
+Stage140 dev P95:   0.293909s -> within 0.300s
+Stage140 train P99: unavailable
+Stage140 dev P99:   unavailable
+current activation policy state: rejected
+runtime activated: false
+```
+
+本步没有把 Stage140 的 max 当作 P99，也没有从已有分布倒推出不存在的 P99。协议 run 自身没有初始化模型和索引，
+因此当前证据还包含 `warm_runtime_resources_not_ready`；这不是性能测量失败，而是对本阶段“只读聚合协议冻结”范围的
+真实描述。
+
+Stage141 最终结果：
+
+```text
+status: primeqa_hybrid_nondefault_runtime_activation_protocol_frozen
+guard checks: 19 / 19 passed
+failed checks: []
+strict SLO currently satisfied: false
+runtime settings flag implemented: false
+runtime entrypoint registered: false
+runtime activation allowed / activated now: false / false
+concurrent runtime activation allowed: false
+runtime defaultization allowed: false
+test split loaded / metrics run: false / false
+retry / fallback enabled: false / false
+public-safe forbidden keys: []
+```
+
+可视化结果：
+
+```text
+stage141_source_p95_vs_strict_slo.svg
+stage141_percentile_evidence_availability.svg
+stage141_activation_case_states.svg
+stage141_runtime_permission_flags.svg
+stage141_guard_check_status.svg
+```
+
+阶段内验证：
+
+```text
+targeted ruff check: passed
+targeted format check: passed after formatting 2 new files
+targeted pytest: 9 passed
+Stage141 real protocol freeze: passed
+Stage141 guard checks: 19 / 19 passed
+artifact ignore check: passed
+SVG XML parse check: 5 / 5 passed
+```
+
+全仓库验证：
+
+```text
+full repository ruff check: passed
+full repository pytest: 461 passed
+Stage141 changed-file format check: 3 files already formatted
+git diff --check: passed
+```
+
+本步学到：
+
+- “协议通过”只说明规则完整且一致，不说明源性能通过。Stage141 必须同时保留 protocol frozen=true 和 strict SLO
+  currently satisfied=false，才能避免把设计验收混成性能验收。
+- P95 合格不能替代 P99；max 也不能冒充 P99。缺失的分位数必须作为缺失证据保留到下一次真实运行。
+- 单请求 SLO 不能自然外推为并发能力。没有用户确认的并发负载、并发度和尾延迟门槛时，最诚实的边界是禁止并发
+  激活，而不是擅自发明一个并发验收配置。
+- future flag 的名字可以先冻结，但仓库没有 runtime 时不能提前把它写进配置并声称可用；真正接线必须等性能门槛
+  通过后再做。
+
+下一步：Stage142 针对严格 C 做性能优化与真实验证。保持 7-channel、Top200 prefix、Top400 append、候选池完整有序
+identity 和 Stage127 recall 不变，执行 3 个完整 warm train pass，报告 5-fold 与 aggregate P50/P95/P99/max；train
+方案固定后只运行 1 次 dev report-only。test 继续锁定，不实现 runtime flag/entrypoint，不允许默认化、并发、重试或
+兜底策略。

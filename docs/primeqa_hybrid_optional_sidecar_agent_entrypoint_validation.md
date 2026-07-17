@@ -303,7 +303,15 @@ docs/primeqa_hybrid_online_candidate_pool_performance_validation.md
 
 Stage140 preserved every candidate-pool sequence and frozen recall count while
 reducing the complete 683-row online retrieval pass from the Stage139 source
-time of 7600.407 seconds to 195.427 seconds. Stage141 is now the explicit
-non-default runtime activation protocol step, subject to a user-confirmed
-latency SLO. Test remains locked; runtime defaultization, retry actions, and
-fallback strategies remain disabled.
+time of 7600.407 seconds to 195.427 seconds. Stage141 then froze the explicit
+non-default activation protocol and strict-C warm single-request SLO in:
+
+```text
+docs/primeqa_hybrid_nondefault_runtime_activation_protocol.md
+```
+
+The current evidence is not activation-eligible because Stage140 train P95 is
+0.450798 seconds against the 0.300-second limit and Stage140 has no train/dev
+P99 measurement. Stage142 must optimize and run the frozen train-CV/dev latency
+protocol. Test remains locked; runtime wiring, defaultization, concurrency,
+retry actions, and fallback strategies remain disabled.
