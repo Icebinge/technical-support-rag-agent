@@ -1254,3 +1254,27 @@ separate synthetic Top400 integration test drives the label-free query through
 the real online runtime and legally ends in verified refusal. The formal
 validator loads no split, model, index, or candidate pool. Network serving,
 defaultization, test, queues, retries, and fallback remain closed.
+
+The current Stage 149 strict local Agent HTTP transport protocol is recorded
+in:
+
+```text
+docs/primeqa_hybrid_agent_network_transport_protocol.md
+```
+
+Stage149 reads only the saved Stage148 public aggregate and freezes a
+loopback-only HTTP/1.1 surface with one versioned answer route and separate
+liveness/readiness routes. It requires strict JSON without coercion, a 32 KiB
+raw-body hard cap, exact field limits, stable success/error schemas, and exact
+`400/413/415/422/500/503` mappings. Verified refusal remains HTTP 200, while
+capacity and lifecycle failures remain nonblocking 503 outcomes.
+
+The protocol records pre-dispatch disconnect cancellation honestly and does
+not claim in-flight hard cancellation. FastAPI lifespan must wait naturally
+for facade in-flight work without an application timeout or force-cancel.
+Default access logging is disabled in favor of an 18-field public allowlist.
+The formal aggregate-only run passes `39/39` guards in `0.001029s`; one exact
+case is eligible and five unsafe cases are rejected. No split, question,
+document, model, index, candidate pool, network service, or port is opened.
+FastAPI implementation is authorized next, but remote serving,
+defaultization, test, queues, retries, and fallback remain closed.

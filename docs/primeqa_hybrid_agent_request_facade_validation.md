@@ -172,9 +172,8 @@ stage148_guard_check_status.svg
 
 ## Next Step
 
-Stage149 should freeze the network transport protocol around this facade:
-serialization schema, HTTP error/status mapping, request-size policy,
-disconnect semantics, lifespan ownership, health/readiness behavior, and
-public logging boundary. FastAPI implementation follows only after that
-protocol passes. Test, defaultization, queues, retries, and fallback remain
-closed.
+Completed in Stage149: the strict local HTTP transport protocol is frozen and
+validated in `docs/primeqa_hybrid_agent_network_transport_protocol.md`.
+Stage150 may implement the disabled-by-default local FastAPI adapter against
+that exact contract. Test, defaultization, remote exposure, queues, retries,
+and fallback remain closed.

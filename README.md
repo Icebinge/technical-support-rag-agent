@@ -16,7 +16,7 @@ No downloaded dataset files are committed to this repository.
 
 ## Current Status
 
-Stage 148: transport-neutral application Agent request facade implemented and validated.
+Stage 149: strict local HTTP transport protocol frozen and validated.
 
 Implemented:
 
@@ -36,12 +36,12 @@ Implemented:
 - executable private-call/public-telemetry facade protocol with lifecycle and error guards
 - label-free runtime query and transport-neutral Agent request facade
 - typed capacity/lifecycle errors and natural no-timeout shutdown
+- executable local-loopback HTTP transport protocol with strict size and error guards
 
 Not implemented yet:
 
 - LangGraph workflow
 - FastAPI service
-- network transport protocol
 - network serving
 - runtime defaultization and final locked-test evaluation
 
@@ -54,7 +54,8 @@ compliant Stage145 aggregate. It remains off by default and is mutually
 exclusive with the single-request runtime flag. Neither runtime is registered
 as the default. Stage148 adds a transport-neutral facade over the eligible
 concurrent runtime, but it is still not a network service and is not registered
-as the default.
+as the default. Stage149 freezes the exact local HTTP surface around that
+facade, but it does not yet implement or start FastAPI.
 
 ## Quickstart
 

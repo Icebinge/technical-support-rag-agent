@@ -32386,3 +32386,90 @@ formal / preflight artifact ignore checks: passed
 - 集成测试应该接受真实 verifier 结果。为了符合预设 complete 而修改阈值或 synthetic evidence，会把测试从行为验证变成指标迎合。
 
 下一步：Stage149 冻结 facade 外层的 network transport protocol，明确 serialization schema、HTTP error/status mapping、request-size policy、client disconnect、lifespan ownership、health/readiness 和 public logging 边界。协议通过前不实现 FastAPI；test、默认化、排队、重试和兜底继续关闭。
+
+## 2026-07-17 - Stage 149 strict local HTTP transport protocol 冻结
+
+目标：在真正实现 FastAPI 前，把 Stage148 facade 的外层 HTTP 行为冻结成可执行、fail-closed 的协议。Stage149 只能读取保存的 Stage148 公开聚合 JSON，并运行 synthetic policy cases；不得加载 train/dev/test、问题、文档、模型、索引或候选池，不得监听端口，也不得提前改变 runtime 默认状态。
+
+### 冻结的网络边界
+
+```text
+binding: 127.0.0.1 only
+protocol: HTTP/1.1
+POST /v1/agent/answers
+GET  /health/live
+GET  /health/ready
+```
+
+- 远程暴露、TLS、鉴权、CORS、OpenAPI UI、streaming、WebSocket 与无版本 Agent 路由继续关闭。
+- answer request 只允许 `request_handle/title/text`，未知字段拒绝且禁止类型 coercion。
+- 原始 body 上限为 32,768 bytes；handle/title/text 上限为 128/512/24,576 characters。先检查 Content-Length，再在流式读取中执行同一个硬上限；超限直接 413，不截断后继续处理。
+- 这些上限是 Stage149 为本地研究服务制定的保守工程策略，不是生产流量实测值，也没有读取 train/dev/test 来调参。
+
+### Response、错误与状态码
+
+```text
+domain refusal -> 200
+malformed JSON -> 400
+body too large -> 413
+unsupported media -> 415
+schema/facade invalid -> 422
+inactive/capacity/draining/closed -> 503
+unknown downstream error -> generic 500
+known pre-dispatch disconnect -> 不伪造 HTTP response
+```
+
+成功 response 精确映射 Stage148 的 handle/text/refused/citations。错误只公开稳定的 `error.code/error.message`；未知异常内容不返回。capacity 既不转成拒答，也不排队、不自动重试。
+
+### Disconnect、lifespan 与日志
+
+- body 读取和验证后、dispatch 前检查断连；已断连时设置 facade cooperative signal，runtime call 必须为 0。
+- 明确记录 disconnect check 与同步 dispatch 之间仍有竞态，不能声称消除了竞态。dispatch 后没有 hard-cancel port，工作自然完成或抛错。
+- FastAPI lifespan 下一步只管理 facade 启停；bootstrap 继续拥有模型、索引和 runtime resources。shutdown 先 draining，再自然等待 in-flight 为 0；无 application timeout、无 force-cancel。
+- liveness 不探测模型；readiness 只有 facade 为 accepting 时返回 200，其余为 503。
+- 默认 Uvicorn access log 关闭，只允许 18 个聚合字段。内容、handle、citation、文档标识、headers/cookies/client IP/user-agent 与公开异常文本全部禁止。
+
+协议设计参考了 2026-07-17 实际查阅的 FastAPI lifespan/error handling、Starlette disconnect detection 与 Uvicorn settings 官方文档。保存进 artifact 的 URL 是设计来源记录，正式校验本身不联网。
+
+### 真实执行记录
+
+- 新模块与 CLI 写入后，第一次 format check 报告协议模块需要格式化；格式化后 Ruff 发现 1 行 110 字符，拆行后通过。
+- 定向测试第一次正式运行即为 `22 passed in 0.18s`，Ruff 同时通过。
+- 未确认 preflight 使用真实 Stage148 artifact：39 个 guard 中只有 `stage149_user_confirmed` 失败，状态为 rejected；仍然没有加载数据/模型或绑定端口。
+- 用户本轮“好下一大步”作为真实确认后，正式 CLI 为 `39/39` guards 通过，1 个 exact case eligible、5 个 unsafe case rejected；Stage148 文件复读完全一致。
+- 文档审计发现初始正式 artifact 把 ASGI 能力写成 `HTTP/1.1_or_HTTP/2_via_ASGI`，但下一步指定的本地 Uvicorn 实现并未冻结 HTTP/2。这是协议声明过宽，不是运行失败。新增精确协议断言后的第一轮定向测试真实为 `21 passed / 1 failed`，证明先前大块文档补丁整体失败时协议常量也未落盘；随后单独收紧为 `HTTP/1.1` 并重跑。初始 artifact 被覆盖且不作为最终证据。
+- 收紧后最终定向回归为 `22 passed in 0.41s`；重新生成的正式 artifact 精确记录 `HTTP/1.1`。
+- 最终正式时间 `0.001029s`。这只是 aggregate/specification 时间，不是 HTTP latency 或 Agent latency。
+
+```text
+Stage148 source SHA-256: 2ac205de34cbc2badf05843368f2a8c1e24552c2bbe46216d0f191c58c04a55b
+formal / preflight SVG XML: 10 / 10 and 10 / 10
+network service / port bound: false / false
+train / dev / test loaded: false / false / false
+models / indexes / candidate pools: false / false / false
+queue / retry / fallback: false / false / false
+public forbidden keys: []
+```
+
+最终验收：
+
+```text
+Stage149 Python format check: 3 files already formatted
+full repository Ruff: passed
+full repository pytest: 586 passed in 6.35s
+formal Stage149 guards: 39 / 39
+formal / preflight SVG XML parse: 10 / 10 and 10 / 10
+formal / preflight artifact ignore checks: passed
+```
+
+完整 `ruff format --check src scripts tests` 还客观报告：当前 formatter 会重排 311 个历史 Python 文件，131 个文件已匹配。Stage149 的 3 个 Python 文件全部匹配；本阶段没有把 311 个无关历史文件批量格式化。该结果不是 Ruff lint 或 pytest 失败。
+
+### 本步学到
+
+- request size 必须在 JSON 解析前限制原始字节；只有 Pydantic 字符上限无法阻止超大 body 先占用内存。
+- domain refusal、client input error、capacity/lifecycle unavailable 和 unknown server error 是四类不同语义，不能全部塞进 200 answer 或同一个 500。
+- disconnect detection 是一次状态观察，不等于底层推理支持取消。没有 cooperative in-flight port 时，诚实完成工作比制造“已取消”状态更重要。
+- liveness 与 readiness 必须分离：前者回答进程是否活着，后者回答 facade 是否接收新请求；liveness 触发模型探测会把健康检查变成昂贵工作。
+- 框架默认 access log 也属于公开边界。即使应用 logger 不写内容，默认 client/path/header 行为仍可能突破 allowlist。
+
+下一步：Stage150 实现 disabled-by-default、loopback-only FastAPI adapter。用 in-process ASGI integration 与真实本地 socket smoke test 验证 body cap、严格 schema、完整状态映射、disconnect 边界、无 application waiting queue、readiness 状态变化、自然 shutdown 和日志 allowlist。remote deployment、默认化、test、重试与兜底继续关闭。
