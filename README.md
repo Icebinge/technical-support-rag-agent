@@ -16,7 +16,7 @@ No downloaded dataset files are committed to this repository.
 
 ## Current Status
 
-Stage 0: project scaffold and dataset verification.
+Stage 143: explicit non-default single-request Agent runtime wiring validated.
 
 Implemented:
 
@@ -26,16 +26,21 @@ Implemented:
 - local download completed for NVIDIA TechQA-RAG-Eval and PrimeQA/TechQA
 - architecture and data strategy docs
 - minimal domain models and loader utilities
+- BM25, section BM25, dense-cache, and fused high-recall retrieval
+- extractive answer generation, verification, and optional sidecar Agent orchestration
+- disabled-by-default process-scoped runtime bootstrap with public-safe traces
+- train grouped-CV and dev report-only evaluation through Stage 143
 
 Not implemented yet:
 
-- BM25 retriever
-- vector retriever
-- reranker
-- RAG answer generator
 - LangGraph workflow
 - FastAPI service
-- full evaluation runner
+- concurrent runtime serving
+- runtime defaultization and final locked-test evaluation
+
+The optional single-request runtime remains disabled unless
+`TS_RAG_ENABLE_OPTIONAL_SIDECAR_AGENT=true` is set explicitly and the frozen
+activation evidence passes. It is not registered as the default runtime.
 
 ## Quickstart
 

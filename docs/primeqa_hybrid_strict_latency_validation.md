@@ -194,9 +194,14 @@ data only.
 
 ## Next Step
 
-Stage143 should implement and validate the explicit non-default single-request
-runtime wiring frozen in Stage141. It may expose the disabled-by-default
-`TS_RAG_ENABLE_OPTIONAL_SIDECAR_AGENT` setting, process-scoped bootstrap, and
-public trace contract. It must test disabled, rejected, and eligible startup
-behavior without opening concurrent serving, changing defaults, loading test,
-or adding retries or fallback strategies.
+Stage143 has implemented and validated the explicit non-default single-request
+runtime wiring in:
+
+```text
+docs/primeqa_hybrid_optional_sidecar_runtime_validation.md
+```
+
+Disabled and concurrent-rejected startup initialize nothing. Eligible startup
+builds the process-owned resources once, completes one label-free warmup, and
+passes full train grouped-five-fold plus dev report-only runtime validation.
+Concurrent serving, defaults, test, retries, and fallback remain unchanged.

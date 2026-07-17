@@ -326,8 +326,14 @@ test loaded: false
 retry/fallback: false / false
 ```
 
-The Stage142 latency evidence is now eligible for implementation of explicit,
-non-default, single-request runtime wiring. Runtime is still unwired and
-inactive. Test remains locked; defaultization, concurrency, retry actions, and
-fallback strategies remain disabled. The next implementation step is Stage143,
-not an implicit activation of this entrypoint.
+Stage143 subsequently implemented and validated the explicit non-default
+single-request runtime wiring in:
+
+```text
+docs/primeqa_hybrid_optional_sidecar_runtime_validation.md
+```
+
+The entrypoint now runs behind a strict disabled-by-default process bootstrap.
+Its full Stage143 train/dev runtime pass preserves Stage139 F1, citations,
+terminal counts, and exact five-transition traces. It remains unregistered as
+the default. Test, concurrency, retries, and fallback remain closed.

@@ -31632,3 +31632,207 @@ total: 262.095s
 下一步：Stage143 按 Stage141 协议实现并验证显式、默认关闭的单请求 runtime 接线，包括
 `TS_RAG_ENABLE_OPTIONAL_SIDECAR_AGENT`、process-scoped bootstrap 和公开 trace 合同；覆盖 disabled、rejected、eligible
 启动行为。继续禁止并发 serving、默认化、test、重试和兜底策略。
+
+## 2026-07-17 - Stage 143 显式非默认单请求 runtime 接线与 train-CV/dev 验证
+
+目标：把 Stage141 冻结、Stage142 性能门禁已授权的 optional Agent runtime 真正接入应用层，同时严格区分“默认关闭”、
+“请求但被拒绝”和“证据合格后显式激活”。本阶段不引入 FastAPI 或其他网络服务，不注册默认 runtime，不开放并发，
+不加载 test，不加入重试或兜底策略。正式验证必须先跑完整 train grouped 5-fold，train gate 通过后才加载 dev 一次。
+
+本步实现：
+
+- `ProjectSettings` 新增 `enable_optional_sidecar_agent: bool = False`，对应
+  `TS_RAG_ENABLE_OPTIONAL_SIDECAR_AGENT`。环境值只接受字面 `true/false`；`1`、`yes`、`on` 等模糊真值直接报错。
+- 新增 `PrimeQAHybridOptionalSidecarRuntimeBootstrap`，每个进程只能启动一次。flag 为 false 时返回 `disabled`，不构建
+  任何模型、cache、index、retriever 或 Agent；证据失败或请求并发时返回 `rejected`，同样在资源构建前停止。
+- 新增 Stage142 aggregate -> Stage141 `RuntimeActivationEvidence` 转换，逐项读取 25/25 guards、strict SLO、完整有序
+  identity、Stage127 recall、5-fold、dev report-only 和 test lock，不把 `eligible` 字符串单独当作充分证据。
+- 新增 `PrimeQAHybridProcessRuntimeResourceFactory`。只有预检 `eligible` 后才一次性加载 2 个 dense model、2 个 dense
+  embedding cache、4 个 lexical index，组装 1 个 derived special-token route、1 个 online candidate-pool retriever 和
+  1 个 optional Agent entrypoint；重复 build 直接拒绝。
+- eligible bootstrap 选择确定性 train-only 样本，但在 warmup question 中清空 answer、answerable、answer_doc_id、doc_ids，
+  从而执行完整 entrypoint warmup 而不向 runtime 暴露标签。warmup 不计入 train/dev 测量。
+- 新增 `PrimeQAHybridOptionalSidecarAgentRuntime`，只允许单请求。非阻塞 lock 检测到同时请求时立即报错，不排队、不重试、
+  不切换 route。检索、生成或验证异常继续原样传播。
+- runtime 内部 profiling adapter 复用唯一长驻 candidate retriever，提取当前请求真实 retrieval latency；每个请求完成后
+  只公开 Stage141 白名单的 9 个字段。`latency_budget_passed` 仅表示当前请求延迟不超过严格 P99 的数值上限，不替代
+  aggregate P95/P99 结论。
+- 新增 Stage143 正式 validator、CLI、7 张 SVG、15 个 runtime 单元测试和 7 个 validator/visualization 测试；更新
+  `.env.example`、README、data/evaluation strategy 及 Stage139/141/142 交接文档。
+
+三种真实启动路径：
+
+```text
+disabled:
+  activation requested: false
+  resources initialized: false
+  warmup requests: 0
+  runtime activated: false
+
+rejected:
+  activation requested: true
+  concurrent support requested: true
+  rejection: concurrent_runtime_not_authorized_by_single_request_protocol
+  resources initialized: false
+  runtime activated: false
+
+eligible:
+  activation requested: true
+  resources initialized: true
+  resource factory build count: 1
+  warmup requests: 1
+  warmup pool depth / retrieval latency: 400 / 64.084ms
+  runtime activated: true
+```
+
+这里的 `runtime activated: true` 仅指本次显式 `true` 的 Stage143 process-local optional runtime 已通过所有证据和 warmup
+并可接受顺序单请求；默认配置仍是 false，仓库没有网络服务，也没有默认路由变化。
+
+正式 train grouped-CV 结果：
+
+```text
+rows / answerable: 562 / 370
+runtime request trace violations: 0
+entrypoint trace violations: 0
+exact five-transition trace rate: 1.0000
+candidate-pool depth min/max: 400 / 400
+retrieval avg/P50/P95/P99/max: 0.061893/0.053957/0.104243/0.152497/0.371683s
+strict retrieval SLO passed: true
+latency-budget failed requests: 0
+terminal complete/refuse: 560 / 2
+verified F1: 0.1946
+verified gold citations: 151
+retry/fallback actions: 0 / 0
+```
+
+五个 train fold 全部同时满足 P95 <= `0.300s`、P99 <= `1.000s`，并且 runtime/entrypoint trace、pool depth 和
+retry/fallback guards 全部通过：
+
+```text
+fold_1 P95/P99: 0.098532/0.127544s
+fold_2 P95/P99: 0.108273/0.331931s
+fold_3 P95/P99: 0.105277/0.123359s
+fold_4 P95/P99: 0.105316/0.151209s
+fold_5 P95/P99: 0.094989/0.150179s
+```
+
+train gate 通过后才加载的 dev report-only 结果：
+
+```text
+rows / answerable: 121 / 76
+runtime request trace violations: 0
+entrypoint trace violations: 0
+exact five-transition trace rate: 1.0000
+candidate-pool depth min/max: 400 / 400
+retrieval avg/P50/P95/P99/max: 0.059910/0.053435/0.094431/0.123178/0.295469s
+strict retrieval SLO passed: true
+latency-budget failed requests: 0
+terminal complete/refuse: 121 / 0
+verified F1: 0.1873
+verified gold citations: 33
+retry/fallback actions: 0 / 0
+```
+
+runtime recall 精确匹配 Stage142：
+
+```text
+train Recall@10/50/100/200/400: 0.6892/0.8189/0.8973/0.9324/0.9568
+dev Recall@10/50/100/200/400:   0.7237/0.8421/0.8684/0.9079/0.9211
+train hit counts: 255/303/332/345/354
+dev hit counts: 55/64/66/69/70
+```
+
+train/dev F1、gold citation、terminal counts 和 exact five-transition rate 也精确匹配 Stage139 最终回归。因此本阶段验证
+的是 runtime 接线不改变检索和答案路径，没有声称新的答案质量提升。
+
+Stage143 最终判定：
+
+```text
+status: primeqa_hybrid_optional_sidecar_runtime_wiring_validation_passed
+guard checks: 28 / 28 passed
+failed checks: []
+optional runtime wiring implemented: true
+optional runtime activation validated: true
+disabled/rejected/eligible startup validated: true
+process-scoped resources validated: true
+single-request runtime validated: true
+runtime registered as default: false
+runtime defaultization allowed: false
+concurrent runtime activation allowed: false
+test gate opened / test metrics run: false / false
+retry / fallback enabled: false / false
+default runtime policy: unchanged
+public forbidden keys: []
+```
+
+真实耗时：
+
+```text
+load public sources: 0.001s
+load train and build folds: 0.011s
+validate disabled/rejected startup: 0.001s
+build resources and eligible warmup: 45.049s
+run complete train runtime pass: 67.066s
+load dev after train gate: 0.045s
+run dev report-only runtime pass: 14.193s
+summarize and guard: 0.005s
+total: 126.371s
+```
+
+运行中遇到的问题、原因与修正：
+
+- runtime 核心首次 targeted 命令在 Ruff 阶段因测试文件未使用 `Mapping` 导入停止，耗时约 `0.2s`，pytest 未启动；
+  删除导入后重跑，15 个 runtime 测试通过。
+- 正式 validator 首次 Ruff 检查发现 CLI 缺少 `Mapping` 导入和多处超过 100 字符的行；没有启动数据运行。补充导入并
+  格式化新文件后，仍有两处复杂 f-string 超长，改为 `_latency`/`_recall_rate` helper。
+- validator 测试首次静态检查发现已不再使用的 `Counter` 和 import order；pytest 尚未启动。移除导入并用 Ruff 整理后，
+  22 个 Stage143 targeted tests 全部通过。
+- 正式 Stage143 数据运行一次完成，未发生中途失败或重跑，耗时 `126.371s`，28/28 guards 全部通过。
+
+可视化结果：
+
+```text
+stage143_startup_states.svg
+stage143_process_resource_inventory.svg
+stage143_train_fold_latency.svg
+stage143_split_latency_vs_slo.svg
+stage143_recall_at_k.svg
+stage143_decision_flags.svg
+stage143_guard_check_status.svg
+```
+
+阶段内已完成验证：
+
+```text
+targeted Ruff check: passed
+targeted pytest: 22 passed
+Stage143 formal validation: passed
+Stage143 guard checks: 28 / 28 passed
+artifact ignore check: passed
+SVG XML parse check: 7 / 7 passed
+```
+
+最终全仓验收第一次在 format check 即停止：`config.py`、runtime module 和 runtime tests 共 3 个本阶段文件需要 Ruff
+格式化，因此该轮没有进入全仓 Ruff check 或 pytest。只格式化这 3 个文件后，从头重跑全部验收，真实结果为：
+
+```text
+Stage143 changed/new Python format check: 6 files already formatted
+full repository ruff check: passed
+full repository pytest: 499 passed
+git diff --check: passed
+```
+
+本步学到：
+
+- “默认关闭”不能只依赖文档说明。配置默认值、严格环境解析、disabled 零资源构建和默认路由不注册必须同时由代码和
+  测试证明。
+- fail-closed 最重要的性能意义之一，是 rejected 请求在昂贵资源初始化前停止。Stage143 的并发请求用真实 Stage142
+  合格证据仍会被拒绝，说明单请求证据没有被错误外推。
+- process-scoped ownership 需要可观测的 build count 和资源清单；仅仅把变量放在函数外，并不能证明每请求不会重建。
+- runtime 验证不能只看启动成功。把完整 train 5-fold、dev report-only、召回、Agent 指标、action trace 和公开安全合同
+  一起跑通，才能证明接线没有改变既有系统行为。
+- 单请求 P95/P99 仍不能推出并发能力。下一阶段若做并发，必须先由用户确认并发数、到达模型、硬件和新的尾延迟门槛。
+
+下一步候选是 Stage144 并发 runtime validation protocol，但不能直接沿用单请求阈值。开始前需要用户明确并发负载模型、
+并发请求数、到达方式、硬件范围、warm/cold 边界、P95/P99 指标、拒绝行为和资源安全规则。test、默认化、重试和兜底
+仍是独立且关闭的后续门禁。

@@ -1133,3 +1133,18 @@ P95 <= 0.300 seconds and P99 <= 1.000 seconds. Combined train P95/P99 is
 0.111715/0.322262 seconds and dev P95/P99 is 0.094916/0.120182 seconds. Recall
 and Agent regression remain unchanged. This authorizes implementation of
 non-default single-request wiring, not runtime activation or defaultization.
+
+The current Stage 143 optional runtime wiring validation is recorded in:
+
+```text
+docs/primeqa_hybrid_optional_sidecar_runtime_validation.md
+```
+
+Stage143 validates disabled, rejected, and eligible startup behavior, builds
+the eligible process-scoped resources exactly once, and executes one complete
+train grouped-five-fold runtime pass before a single dev report-only pass.
+Train/dev runtime and entrypoint trace violations are zero; runtime retrieval
+P95/P99 is 0.104243/0.152497 seconds on train and 0.094431/0.123178 seconds on
+dev. Recall matches Stage142 and verified F1/gold citations match Stage139.
+This validates explicit single-request activation only; concurrency,
+defaultization, and test remain closed.

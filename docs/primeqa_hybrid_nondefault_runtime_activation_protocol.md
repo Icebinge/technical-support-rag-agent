@@ -158,6 +158,18 @@ passed three complete warm train runs plus one dev report-only run. Combined
 train P95/P99 is `0.111715s / 0.322262s`; dev P95/P99 is
 `0.094916s / 0.120182s`. Identity violations are zero and recall is unchanged.
 
-Stage143 may now implement and validate the explicit non-default
-single-request runtime wiring. Test stays locked. Concurrent serving,
-defaultization, retries, and fallback strategies remain out of scope.
+Stage143 is now complete and recorded in:
+
+```text
+docs/primeqa_hybrid_optional_sidecar_runtime_validation.md
+```
+
+It implements the strict `ProjectSettings` field, process-scoped bootstrap,
+eligible runtime, and public request trace. Disabled and rejected startup build
+no resources; eligible startup builds the frozen inventory once and completes
+one label-free warmup. All train/dev runtime checks pass. This does not change
+the historical Stage141 report fields above: Stage141 itself did not implement
+or activate runtime.
+
+Any concurrent-serving step now requires a separately user-confirmed workload
+and SLO protocol. Test, defaultization, retries, and fallback remain closed.

@@ -947,6 +947,19 @@ reference pools and optimized pools remain in memory; saved JSON/SVG outputs
 contain aggregate distributions and violation counts only. Test remains
 unloaded and unmeasured.
 
+The current PrimeQA/TechQA hybrid Stage143 optional runtime wiring validation
+is recorded in:
+
+```text
+docs/primeqa_hybrid_optional_sidecar_runtime_validation.md
+```
+
+Stage143 loads train before dev, executes all 562 train rows through the real
+single-request runtime, and opens the one-pass dev report-only step only after
+the complete train and five-fold gate passes. Questions, answers, candidate
+pools, action traces, and fold membership stay in memory; saved outputs contain
+aggregate counts and distributions only. Test remains unloaded and unmeasured.
+
 ## Leakage Checks
 
 Before reporting evaluation results:
