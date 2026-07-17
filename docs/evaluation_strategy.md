@@ -1070,3 +1070,19 @@ entrypoint unimplemented. This is protocol evidence, not train/dev answer
 evaluation or runtime action-order validation. Stage139 must implement the
 optional adapter and revalidate per-row action traces and Stage137 answer-path
 invariance before any runtime integration decision.
+
+The current Stage 139 optional sidecar-agent entrypoint train grouped-CV/dev
+report-only validation is recorded in:
+
+```text
+docs/primeqa_hybrid_optional_sidecar_agent_entrypoint_validation.md
+```
+
+Stage139 executes the retrieval port and entrypoint on all 683 train/dev rows.
+Every row has exactly five legal transitions, every dependency is called once,
+terminal states match verified refusal, all answer/context/isolation deltas are
+zero, and candidate-pool plus split aggregates match the saved Stage137 report
+exactly. Therefore the implementation and runtime action order are validated
+for an explicit future non-default activation path. This does not authorize
+runtime defaultization, final-test evaluation, retries, fallback strategies, or
+claims of sidecar effectiveness.

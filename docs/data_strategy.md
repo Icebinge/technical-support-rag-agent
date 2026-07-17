@@ -892,6 +892,20 @@ test data. Its two canonical action traces are synthetic public-safe state
 transitions, not per-sample runtime traces. The optional runtime entrypoint is
 not implemented or registered as the default.
 
+The current PrimeQA/TechQA hybrid Stage139 optional sidecar-agent entrypoint
+train-CV/dev action-trace validation is recorded in:
+
+```text
+docs/primeqa_hybrid_optional_sidecar_agent_entrypoint_validation.md
+```
+
+Stage139 loads only the frozen train/dev split files, local training/dev corpus,
+existing dense caches, and public-safe Stage125/128/137/138 artifacts. It checks
+current source SHA256 values against Stage137 before running. Per-row candidate
+pools, control/entrypoint executions, dependency contexts, answers, and action
+traces remain in memory. The saved report is aggregate-only and test remains
+unloaded.
+
 ## Leakage Checks
 
 Before reporting evaluation results:

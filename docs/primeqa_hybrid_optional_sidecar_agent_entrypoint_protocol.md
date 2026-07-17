@@ -185,11 +185,15 @@ Stage138 proves deterministic state semantics and preserves every locked
 Stage137 boundary. It does not prove a runtime entrypoint, action-order
 instrumentation, answer-quality improvement, or sidecar effectiveness.
 
-## Next Step
+## Follow-Up
 
-Stage139 should implement the optional entrypoint adapter against the frozen
-state machine and the validated orchestrator, then run train grouped-CV/dev
-report-only action-trace validation. It must compare answer and verification
-inputs and outputs with the Stage137 control, verify the exact five-transition
-terminal trace per row, keep dev non-selective, keep test locked, leave runtime
-defaults unchanged, and add no retry or fallback path.
+Stage139 implemented and validated the optional entrypoint on all train/dev
+rows. The result is recorded in:
+
+```text
+docs/primeqa_hybrid_optional_sidecar_agent_entrypoint_validation.md
+```
+
+The implementation and real five-transition action order passed, but runtime
+activation remains unwired and non-default. Test remains locked; retries and
+fallback strategies remain disabled.

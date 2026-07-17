@@ -30989,3 +30989,205 @@ Python 文件不在该列表中。因为这些历史文件与 Stage138 协议无
 下一步：Stage139 实现真正的可选 entrypoint adapter，把冻结状态机接到 Stage137-validated orchestrator，并运行 train
 五折分组完整性验证与 dev 单次只读 action-trace 验证。逐样本必须只有五次合法转换，并继续比较 generator/verifier
 实际输入、原始答案、验证答案和验证原因；dev 不选参，test 继续锁定，runtime 默认不变，不加入重试或兜底策略。
+
+## 2026-07-17 - Stage 139 可选 sidecar-agent entrypoint 实现与 train-CV/dev 验证
+
+目标：把 Stage138 已冻结但只执行过纯状态转换的协议接到 Stage137 已验证 orchestrator，建立真实可选 entrypoint，
+然后在完整 train 五折分组完整性验证和 dev 单次只读报告中逐条验证 retrieval、answer、verify、observe、
+complete/refuse 的真实动作顺序。继续保持 test 锁定、dev 不选参、runtime 默认不变、无重试和无兜底。
+
+本步改动：
+
+- 新增 `src/ts_rag_agent/application/primeqa_hybrid_optional_sidecar_agent_entrypoint.py`。
+- 新增 `src/ts_rag_agent/application/primeqa_hybrid_optional_sidecar_agent_entrypoint_validation.py`。
+- 新增 `scripts/run_primeqa_hybrid_optional_sidecar_agent_entrypoint_validation.py`。
+- 新增 `tests/test_primeqa_hybrid_optional_sidecar_agent_entrypoint.py`。
+- 新增 `tests/test_primeqa_hybrid_optional_sidecar_agent_entrypoint_validation.py`。
+- 新增 `docs/primeqa_hybrid_optional_sidecar_agent_entrypoint_validation.md`。
+- 更新 Stage138 follow-up、data strategy、evaluation strategy 和本 learning journal。
+
+工程实现：
+
+- `CandidatePoolRetrieverPort` 封装候选池来源；Stage139 验证使用只存在于内存的冻结 candidate-pool retriever。
+- `SidecarAgentOrchestratorExecutionFactoryPort` 封装每个请求的 orchestrator 构建，避免入口依赖具体工厂。
+- 每个请求创建独立 `SidecarAgentActionStateMachine` 和独立 instrumented orchestrator，不共享可变动作状态。
+- entrypoint 进入 `retrieve` 后调用 retrieval port，候选池成功返回后才进入 `answer`。
+- `StateAdvancingAnswerGenerator` 在真实 generator 成功返回后推进到 `verify`；生成失败时不推进、不重试。
+- `StateAdvancingAnswerVerifier` 在真实 verifier 成功返回后推进到 `observe`；验证失败时不推进、不兜底。
+- orchestrator 返回后依据真实 `verified_answer.refused` 进入 `complete` 或 `refuse`，两者都是终态。
+- 逐样本公开 action trace 只在内存检查，保存 artifact 只含聚合计数，不写 question、answer、document、handle、
+  sample id、gold label 或 test membership。
+- 验证器复用 Stage137 的 control runner、指标汇总、候选池构建和折检查，并新增保存 Stage137 聚合结果的内置
+  exact-parity guard，防止 control 与 entrypoint 同时漂移却彼此一致。
+
+测试过程中发现的问题、原因与修正：
+
+- 第一个入口测试把合成问题硬编码为 `complete`，但默认 Stage137 verifier 实际将其拒绝。入口行为是正确的，
+  错误来自测试假设。接受路径测试改用明确的低 evidence threshold，默认配置测试则验证终态必须与
+  `verified_refused` 一致。
+- 验证器测试最初报告 candidate-pool identity violation。原因是测试夹具用了 `1/(rank+1)` 分数，而冻结
+  Stage128 `_pool_results` 使用 `1/log2(rank+1)`。测试改用冻结 `_rank_score` 后身份比较通过；真实验证器始终
+  使用同一个冻结候选池构造器。
+
+真实运行过程：
+
+- 第一次完整运行已启动并运行超过 30 分钟，但等待通道被外部中断。恢复检查确认对应 Python 进程已不存在，
+  Stage139 最终 artifact 也不存在；因此第一次运行没有完成、没有报告、没有可引用指标，不能记成成功。
+- 随后从头启动一次完整恢复运行。第二次运行让执行调用本身持续阻塞到进程自然退出，没有分段监控窗口，
+  没有中途抽样、停止或重启。
+
+第二次完整运行命令：
+
+```text
+python scripts/run_primeqa_hybrid_optional_sidecar_agent_entrypoint_validation.py --user-confirmed-validation --confirmation-note "user confirmed Stage139 real optional sidecar-agent entrypoint train five-fold grouped-CV and dev single-pass report-only action-trace validation after Stage138 protocol freeze; first attempt was externally interrupted without artifact and this is the single full recovery run; exact Stage137 source parity required; no candidate selection; no dev retuning; test locked; no final metrics; runtime defaults unchanged; no retries or fallback strategies"
+```
+
+数据与动作结果：
+
+```text
+train rows: 562
+dev rows: 121
+train retrieval calls / missing: 562 / 0
+dev retrieval calls / missing: 121 / 0
+candidate-pool identity violations: 0
+dependency call-count violations: 0
+terminal-state mismatches: 0
+entrypoint trace serialization/forbidden/contract violations: 0 / 0 / 0
+train complete / refuse: 560 / 2
+dev complete / refuse: 121 / 0
+train exact five-transition trace rate: 1.0000
+dev exact five-transition trace rate: 1.0000
+retry actions: 0
+fallback actions: 0
+test split loaded: false
+```
+
+Train control vs entrypoint：
+
+```text
+verified average token F1: 0.1946 / 0.1946
+verified F1 delta: +0.0000
+verified gold citation count: 151 / 151
+gold citation delta: +0
+generation context violations: 0
+verification context violations: 0
+changed original answers: 0 / 562
+changed verified answers: 0 / 562
+changed verification reasons: 0 / 562
+```
+
+Dev control vs entrypoint：
+
+```text
+verified average token F1: 0.1873 / 0.1873
+verified F1 delta: +0.0000
+verified gold citation count: 33 / 33
+gold citation delta: +0
+generation context violations: 0
+verification context violations: 0
+changed original answers: 0 / 121
+changed verified answers: 0 / 121
+changed verification reasons: 0 / 121
+dev used for selection or retuning: false
+```
+
+Stage137 来源一致性：
+
+```text
+candidate-pool summary exact: true
+train mismatched aggregate keys: []
+dev mismatched aggregate keys: []
+overall Stage137 parity: true
+```
+
+Sidecar 边界：
+
+```text
+sidecar generation leaks: 0
+sidecar verification leaks: 0
+sidecar/primary overlaps: 0
+train append opportunities / captures: 9 / 0
+dev append opportunities / captures: 1 / 0
+sidecar effectiveness: safe_but_neutral
+```
+
+真实结果：
+
+```text
+status: primeqa_hybrid_optional_sidecar_agent_entrypoint_train_cv_dev_validation_passed
+guard checks: 45 / 45 passed
+failed checks: []
+optional entrypoint implementation validated: true
+runtime action order validated: true
+answer-path invariance validated: true
+can expose optional runtime entrypoint now: true
+entrypoint registered as runtime default: false
+can open final test gate now: false
+runtime defaultization allowed now: false
+retry actions enabled: false
+fallback strategies enabled: false
+default runtime policy: unchanged
+public-safe forbidden keys: []
+```
+
+运行耗时：
+
+```text
+build candidate pools: 7600.407 seconds
+run control and entrypoint traces: 58.645 seconds
+total: 7834.841 seconds
+```
+
+候选池构建仍然占绝大部分耗时；这是工程运行成本，不是算法效果指标。
+
+本步学到的东西：
+
+- Agent 状态机只有接到真实依赖调用后才能证明 action order。Stage139 通过 wrapper 在依赖成功返回的准确时点推进
+  状态，避免事后根据最终结果伪造动作轨迹。
+- `observe` 表示 verification 后发布 sidecar 诊断，不代表 sidecar 数据此时才计算，也不代表它进入答案路径。
+- 每请求独立状态机和 orchestrator 是必要隔离边界；否则共享 wrapper 很容易造成并发请求状态污染。
+- 新 control 与新 entrypoint 相等仍不足以证明没有共同漂移；保存 Stage137 聚合结果的 exact-parity guard 提供了第三方
+  来源锚点。
+- 当前 agent 已经完成“可选入口实现与 train/dev 真实流程验证”，但尚未完成“runtime 参数暴露”。更不能因为流程
+  验证通过就声称 sidecar 提高了 citation、召回或答案质量。
+- 长进程的等待必须直接持续到进程结束。第一次等待通道中断造成进程丢失和无产物，第二次采用单次阻塞执行才获得
+  可引用的完整结果；后续不得再设置分段监控等待。
+
+可视化结果：
+
+```text
+stage139_train_fold_action_trace_violations.svg
+stage139_split_terminal_paths.svg
+stage139_split_answer_metric_deltas.svg
+stage139_stage137_source_parity.svg
+stage139_sidecar_isolation_violations.svg
+stage139_decision_flags.svg
+stage139_guard_check_status.svg
+```
+
+阶段内验证：
+
+```text
+targeted ruff: passed
+new entrypoint/validation pytest: 17 passed
+Stage136-139 integration pytest: 48 passed
+Stage139 real train-CV/dev validation: passed
+Stage139 guard checks: 45 / 45 passed
+artifact ignore check: passed
+```
+
+全仓库验证：
+
+```text
+Stage139 changed-file format check: 5 files already formatted
+full repository ruff check: passed
+full repository pytest: 436 passed
+git diff --check: passed
+```
+
+本步没有批量重写全仓历史格式。Stage138 已真实检查并记录 Ruff 0.15.21 会格式化 314 个无关历史 Python 文件；
+Stage139 新增的 5 个 Python 文件均通过独立 format check。
+
+下一步：Stage140 冻结显式、非默认的 agent runtime activation protocol，明确用户可见 runtime flag、生产 retrieval
+port 所有权、默认关闭行为、拒绝输出和公开 trace 合同、激活 guards。test 继续锁定，不允许 runtime 默认化，
+不加入重试或兜底策略。
