@@ -31836,3 +31836,83 @@ git diff --check: passed
 下一步候选是 Stage144 并发 runtime validation protocol，但不能直接沿用单请求阈值。开始前需要用户明确并发负载模型、
 并发请求数、到达方式、硬件范围、warm/cold 边界、P95/P99 指标、拒绝行为和资源安全规则。test、默认化、重试和兜底
 仍是独立且关闭的后续门禁。
+
+## 2026-07-17 - Stage 144 严格实用型 B 档并发 runtime 验证协议冻结
+
+目标：在 Stage143 已验证的显式非默认单请求 runtime 之上，先冻结一份可执行、可复现、不会把单请求证据外推成并发能力的验证协议。用户选择 B 档：当前机器、单个 warm 进程、最大并发 4、同步突发与确定性 0-20ms 抖动、端到端 P95 不超过 `0.800s`、P99 不超过 `1.500s`。超额请求必须在进入检索和 Agent 前拒绝；不允许排队、重试或兜底。test、默认化和最终激活继续关闭。
+
+本步实现：
+
+- 新增 `StrictPracticalConcurrencySlo`、`ConcurrentRuntimeValidationEvidence` 和 `StrictPracticalConcurrentRuntimeValidationPolicy`，把 profile、train 交叉验证、端到端延迟、过载拒绝、资源安全、dev 顺序、test 锁和默认策略全部变成 fail-closed 的可执行条件。
+- 冻结两种 arrival pattern：同步四请求偏移 `0/0/0/0ms`，确定性 jitter 偏移 `0/7/13/20ms`。不使用随机抖动，避免不同 repetition 的 workload 本身发生漂移。
+- train 每种 pattern 跑 3 个完整 562-row pass，共 6 pass、`3,372` 个 accepted request。每个 pass 为 140 个满四请求 cohort 加 1 个两请求 cohort。
+- 延迟门禁不是只看一个全局数：30 个 fold x pattern x repetition scope、6 个 pass aggregate、2 个 pattern pooled、1 个 global pooled，共 39 个 scope；每一个都必须同时通过 P95/P99。
+- 可执行 evidence 还要求 arrival schedule 精确、accepted request 数精确为 `3,372`、latency scope 数精确为 39，并要求所有 train/dev runtime trace、entrypoint trace、跨请求污染、候选深度、召回、terminal count、F1 和 gold citation 与 Stage143 保持一致。
+- 冻结五请求 overload probe：验证 harness 在 admission 后、retrieval 前暂时卡住已接纳的 4 个请求，再让第 5 个尝试 admission。必须精确得到 admitted 4、rejected 1，拒绝类型为 `PrimeQAHybridConcurrentCapacityExceededError`，且被拒请求的 downstream call 为 0。
+- “立即拒绝”没有虚构毫秒阈值，而是定义为结构性事实：在 retrieval、Agent 或任何 downstream call 前停止。拒绝延迟单独报告，不混入 accepted-request SLO。
+- 保留 Stage143 的一次性进程资源清单；dense model/cache/index/retriever 不得按请求复制。retrieval profile、Agent state machine、entrypoint execution、结果和 trace 必须 request-local，禁止继续使用共享 pending retrieval profile。
+- dev 只有 train 全部门禁通过后才能加载一次；121 行按同步/jitter cohort 交替执行，P95/P99 仍需通过，但 dev 不得用于选择实现或调参。
+- 新增 Stage144 CLI、9 个协议/判定器/可视化测试和 8 张 SVG。正式报告只读取 Stage143 聚合 JSON，不加载任何 split、模型、索引或候选池。
+
+正式 Stage144 冻结结果：
+
+```text
+status: primeqa_hybrid_concurrent_runtime_validation_protocol_frozen
+guard checks: 29 / 29 passed
+failed checks: []
+profile: strict_practical_b_concurrency4_v1
+max in-flight: 4
+end-to-end P95/P99 limits: 0.800s / 1.500s
+train accepted-request budget: 3,372
+train latency gate scopes: 39
+overload attempted/admitted/rejected: 5 / 4 / 1
+concurrency validation policy executable: true
+concurrent runtime implemented now: false
+concurrent runtime validation run: false
+concurrent runtime activation allowed now: false
+test loaded / metrics run: false / false
+queue / retry / fallback enabled: false / false / false
+default runtime policy: unchanged
+public forbidden keys: []
+```
+
+当前 benchmark machine 记录为 Windows 10、AMD64、16 logical CPU、CPython 3.10.20。该记录只限定未来 Stage145 的本机结果范围，不代表其他硬件。
+
+真实执行过程与修正：
+
+- 首轮 targeted 命令中，9 个 pytest 全部通过；Ruff 如实发现测试文件有 1 个未使用的 `asdict` import，format check 发现 2 个新文件需要格式化。删除未使用 import 并运行 Ruff formatter 后，第二轮 targeted Ruff check、format check 和 9 个 pytest 全部通过。
+- 首次正式 Stage144 CLI 只读取已保存的 Stage143 聚合产物，运行一次完成，`29/29` guards 全部通过，总耗时 `0.011946s`。提交前复核发现 evidence policy 还应显式拒绝 arrival/count/behavior invariant 不完整的证据，于是补强 policy 和测试后第二次生成最终正式产物；最终仍为 `29/29`，耗时 `0.014430s`。两个耗时都只是协议生成耗时，不是并发 runtime 性能。
+- 额外尝试的全仓 `ruff format --check .` 在历史格式基线处停止：314 个旧 Python 文件按当前 formatter 会被重排，本阶段 3 个新 Python 文件不在该列表中。没有批量改写这些历史文件；继续采用仓库既有口径，即本阶段 Python 文件 format check、全仓 Ruff lint 和全仓 pytest。
+
+最终验收：
+
+```text
+Stage144 changed/new Python format check: 3 files already formatted
+full repository Ruff lint: passed
+full repository pytest: 508 passed
+Stage144 formal guards: 29 / 29 passed
+Stage144 SVG XML parse: 8 / 8 passed
+artifact ignore check: passed
+```
+
+可视化结果：
+
+```text
+stage144_end_to_end_latency_slo.svg
+stage144_train_request_budget.svg
+stage144_arrival_pattern_offsets.svg
+stage144_latency_gate_matrix.svg
+stage144_overload_contract.svg
+stage144_process_resource_inventory.svg
+stage144_decision_flags.svg
+stage144_guard_check_status.svg
+```
+
+本步学到：
+
+- 并发性能不能由单请求 P95/P99 推导，必须明确 workload、到达模式、并发容量、资源共享和过载语义后重新测量完整端到端路径。
+- 只看全局 pooled percentile 会隐藏某个 fold、pattern 或 repetition 的退化；39 个 scope 的矩阵让局部不稳定不能被总体样本稀释。
+- 并发实现的关键不仅是把锁从 1 改成 4。共享重资源和 request-local mutable state 必须分开，否则 profiling、trace 或 Agent 状态会跨请求污染。
+- `eligible` 仍然只是证据判定结果，不会自动实现、激活或默认化 runtime。Stage144 没有并发性能数据，不能声称并发已通过。
+
+下一步：Stage145 按 Stage144 协议实现 bounded concurrency 4、非阻塞 admission、typed capacity rejection 和 request-local profiling/state，然后完整运行 3,372 个 train accepted request、五折/pooled 延迟矩阵、overload probe，train 全通过后再跑一次 121-row dev report-only。test、默认化、排队、重试和兜底继续关闭。

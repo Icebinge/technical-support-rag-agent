@@ -1148,3 +1148,19 @@ P95/P99 is 0.104243/0.152497 seconds on train and 0.094431/0.123178 seconds on
 dev. Recall matches Stage142 and verified F1/gold citations match Stage139.
 This validates explicit single-request activation only; concurrency,
 defaultization, and test remain closed.
+
+The current Stage 144 strict practical concurrent-runtime validation protocol
+is recorded in:
+
+```text
+docs/primeqa_hybrid_concurrent_runtime_validation_protocol.md
+```
+
+Stage144 freezes profile B for one warm process with four in-flight requests,
+synchronized four-request bursts, deterministic `0/7/13/20ms` jitter, and
+end-to-end P95/P99 limits of `0.800/1.500s`. Future Stage145 train evidence must
+cover three complete 562-row passes per pattern, 39 grouped-fold and pooled
+latency scopes, and a five-request overload probe that admits four and rejects
+one before any downstream call. Dev remains one mixed report-only pass after
+the train gate. Stage144 itself loads no split rows and runs no concurrent
+requests; test, defaults, queues, retries, and fallback remain closed.

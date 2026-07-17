@@ -187,8 +187,16 @@ The JSON report and SVGs are local ignored aggregate-only artifacts.
 
 ## Next Step
 
-Any Stage144 concurrency work requires a new user-confirmed protocol specifying
-the workload model, concurrent request count, arrival pattern, hardware,
-startup state, P95/P99 limits, rejection behavior, and resource safety rules.
-The current single-request evidence cannot authorize concurrent serving.
-Runtime defaultization and final test evaluation remain separate future gates.
+Stage144 is now complete and recorded in:
+
+```text
+docs/primeqa_hybrid_concurrent_runtime_validation_protocol.md
+```
+
+It freezes the user-selected profile B: one warm process, maximum four in-
+flight requests, synchronized bursts plus deterministic 0-20ms jitter,
+end-to-end P95 <= `0.800s` and P99 <= `1.500s`, typed pre-downstream overload
+rejection, preserved process resources, and request-local mutable state. It is
+an executable protocol result, not concurrent implementation or performance
+evidence. Runtime defaultization and final test evaluation remain separate
+future gates.

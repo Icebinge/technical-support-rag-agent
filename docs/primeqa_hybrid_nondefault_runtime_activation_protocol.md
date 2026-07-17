@@ -171,5 +171,14 @@ one label-free warmup. All train/dev runtime checks pass. This does not change
 the historical Stage141 report fields above: Stage141 itself did not implement
 or activate runtime.
 
-Any concurrent-serving step now requires a separately user-confirmed workload
-and SLO protocol. Test, defaultization, retries, and fallback remain closed.
+The separately user-confirmed concurrent workload and SLO protocol is now
+frozen in:
+
+```text
+docs/primeqa_hybrid_concurrent_runtime_validation_protocol.md
+```
+
+Stage144 selects profile B with four in-flight requests and end-to-end P95/P99
+limits of `0.800s / 1.500s`. It does not revise the historical Stage141 result
+or claim that concurrent runtime has been implemented or measured. Test,
+defaultization, queues, retries, and fallback remain closed.
