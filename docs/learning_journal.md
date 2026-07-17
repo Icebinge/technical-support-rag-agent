@@ -31478,3 +31478,157 @@ git diff --check: passed
 identity 和 Stage127 recall 不变，执行 3 个完整 warm train pass，报告 5-fold 与 aggregate P50/P95/P99/max；train
 方案固定后只运行 1 次 dev report-only。test 继续锁定，不实现 runtime flag/entrypoint，不允许默认化、并发、重试或
 兜底策略。
+
+## 2026-07-17 - Stage 142 严格 C 单请求延迟优化与 train-CV/dev 验证
+
+目标：在不改变检索分数、分词、tie-break、route 权重、7-channel 图、冻结 Top200 prefix、Top400 append 和 RRF 的
+前提下，解决 Stage140 train P95 `0.450798s` 未达到严格 C `0.300s` 的问题。所有方案选择和性能判断只使用 train；
+train 的 3 次完整 warm pass、每次 5-fold、合并分布和合并 fold 全部通过后，才允许加载 dev 并执行一次 report-only。
+test 始终不加载、不测量。本阶段也不接 runtime，不开放并发，不改默认值，不加入重试或兜底策略。
+
+瓶颈分析与实现：
+
+- Stage140 虽然已向量化 BM25 打分，但每个 lexical/dense channel 仍会对全部 eligible row 做全排序；full-document
+  channel 最多约 28,482 个文档，section channel 还需处理命中的父文档。Stage142 将该步骤替换为精确 Top-K 边界选择。
+- 新增 `exact_top_k.py`：先用 NumPy partition 找 Top-K 分数边界，保留边界以上以及边界处的全部 tie，再只对缩小后的
+  集合执行原有 `score desc + tie key` 排序。它不是近似检索，也没有改变分数或截断 tie。
+- document BM25、section BM25、mapped field-weighted BM25 和 dense retriever 均保留 validation-only 的历史全量排序
+  方法。最终运行直接用旧排序语义创建 reference pool，再逐题比较优化池的完整 Top400 有序序列。
+- BM25 的 `k1` 缩放长度归一化与 query 无关，移到索引构建时预计算；query tokenization、重复 term 累加、float
+  precision、IDF 和 channel fusion 均保持不变。
+- train-only 筛选实测 562 题 P50/P95/P99/max 为
+  `0.054075/0.104895/0.235705/0.393015s`，因此冻结顺序执行的 7-channel 方案，没有加入线程池或请求内并行。
+- 新增 Stage142 validator、CLI、精确 Top-K 单元测试、三个 retriever 的 optimized/full-sort 等价测试、train-first
+  流程与可视化 guard 测试。
+
+历史 reference 的事实边界：Stage140 没有持久化逐题候选序列 digest，本阶段没有声称存在该 digest。最终证据是用同一份
+模型、索引、query 和冻结配置直接执行 validation-only 历史 full eligible-row sort，然后与 optimized pool 比较；同时再跑
+完整 Stage139 Agent regression。这比仅比较 recall 更严格，但它仍应准确描述为本次重建的历史排序语义 reference。
+
+真实运行过程、问题与修正：
+
+- 第一轮 Stage139 回归确认文本写成了 `Stage142 shared...`，而继承的 fail-closed preflight 明确要求字面量
+  `Stage139`。该轮在 `7.08s` 后以 `17/18` preflight guards 阻断，没有运行 Agent 评估；修正确认文本后从头运行。
+- 第一版 Stage142 formal run 的严格延迟与同轮 reference guards 通过，但复核发现 Stage140 未保存逐题历史 digest，
+  原证据不足以声称“与 Stage140 保存序列一致”。该结果被后续更严格的 direct full-sort reference run 取代。
+- 增加 direct full-sort reference 后，第一次强化运行在约 `40.3s` 时停止：mapped field-weighted BM25 wrapper 尚未暴露
+  `search_full_sort_reference`。该轮没有完成 train/dev 测量，也没有形成新的完成报告。
+- wrapper 增加显式 reference delegation 后，从模型和索引初始化开始完整重跑；最终 Stage142 和最终代码上的 Stage139
+  全链路回归均通过。没有复用失败进程中未落盘的测量。
+
+严格 C 最终延迟结果：
+
+```text
+train pass 1 avg/P50/P95/P99/max: 0.063797/0.054924/0.115416/0.319545/0.354894s
+train pass 2 avg/P50/P95/P99/max: 0.063589/0.055092/0.107201/0.231092/0.401503s
+train pass 3 avg/P50/P95/P99/max: 0.063618/0.053562/0.107752/0.327095/0.377087s
+combined train avg/P50/P95/P99/max: 0.063668/0.054662/0.111715/0.322262/0.401503s
+dev report-only avg/P50/P95/P99/max: 0.059702/0.053795/0.094916/0.120182/0.311350s
+```
+
+3 个 pass 的每个 fold、合并 train 和 5 个合并 fold 均同时满足 P95 <= `0.300s`、P99 <= `1.000s`。合并 fold 的
+P95 范围为 `0.096234-0.120056s`，P99 范围为 `0.146212-0.337555s`。与 Stage140 的观测值相比，train P95
+降低 `4.04x`，dev P95 降低 `3.10x`；这些只是当前硬件和当前顺序单请求运行的观测比值，不外推并发或其他机器。
+
+identity 与 recall：
+
+```text
+warmup full-sort identity violations: 0 / 1
+three train passes identity violations: 0 / 1686
+dev identity violations: 0 / 121
+candidate-pool depth: 400
+train Recall@10/50/100/200/400: 0.6892/0.8189/0.8973/0.9324/0.9568
+dev Recall@10/50/100/200/400: 0.7237/0.8421/0.8684/0.9079/0.9211
+train hit counts: 255/303/332/345/354
+dev hit counts: 55/64/66/69/70
+```
+
+最终 Stage139 Agent 回归：
+
+```text
+status: passed
+guards: 45 / 45
+train/dev candidate-pool identity violations: 0 / 0
+train/dev exact five-transition trace rate: 1.0000 / 1.0000
+train/dev verified F1: 0.1946 / 0.1873
+train/dev verified gold citations: 151 / 33
+Stage137 aggregate parity: true
+test loaded: false
+retry/fallback: false / false
+```
+
+Stage142 最终判定：
+
+```text
+status: primeqa_hybrid_strict_warm_latency_validation_passed
+guard checks: 25 / 25 passed
+failed checks: []
+strict SLO evidence state: eligible
+can implement non-default runtime wiring now: true
+runtime flag implemented: false
+runtime entrypoint registered: false
+runtime activated: false
+concurrent activation allowed: false
+runtime defaultization allowed: false
+test loaded / metrics run: false / false
+retry / fallback enabled: false / false
+public-safe forbidden keys: []
+```
+
+`eligible` 只授权下一步实现显式、非默认、单请求 runtime 接线，不表示 runtime 已经启用或激活。
+
+可视化结果：
+
+```text
+stage142_train_pass_latency_vs_slo.svg
+stage142_train_fold_worst_latency.svg
+stage142_stage140_latency_comparison.svg
+stage142_train_channel_p95_latency.svg
+stage142_dev_latency_vs_slo.svg
+stage142_decision_flags.svg
+stage142_guard_check_status.svg
+```
+
+最终 Stage142 formal run 的关键耗时：
+
+```text
+load dense resources: 4.463s
+build lexical indexes: 31.480s
+build train historical full-sort references: 89.933s
+three complete measured train passes: 107.880s
+build dev historical full-sort references: 18.826s
+one dev report-only measured pass: 7.264s
+total: 262.095s
+```
+
+其中 full-sort reference 是本次验证证据成本，不是未来在线请求成本。最终 Stage139 Agent 回归总耗时 `132.820s`，
+其中候选池构建 `54.164s`、control/entrypoint traces `37.429s`。
+
+验收过程与结果：
+
+- 首次收尾命令尝试调用 `uv run ...`，但当前 PowerShell `PATH` 中没有 `uv`；该命令约 `0.4s` 即停止，未进入
+  Ruff 或 pytest，不能算作验证结果。随后确认仓库依赖可由 Miniforge Python 3.10.20 直接使用，并改用
+  `python -m ruff` / `python -m pytest`。
+- targeted Ruff check 通过；精确 Top-K、三个 retriever 和 Stage142 validator 共 `29 passed`。
+- 11 个新增/改动 Python 文件通过 Ruff format check；历史 `primeqa_hybrid_high_recall_union_comparison.py` 只增加
+  reference delegation，没有批量改写其既有 format baseline。
+- full repository Ruff check 通过；full repository pytest 为 `477 passed`。
+- Stage142 artifact assertions 为 `25/25` guards、train/dev strict SLO 通过、identity violations 为 0、test/runtime
+  边界关闭；Stage139 regression assertions 为 `45/45` guards。
+- Stage142 与 Stage139 regression 的 SVG XML parse 均为 `7/7`；三个 JSON/SVG artifact 路径通过 git ignore 检查；
+  `git diff --check` 通过。
+
+本步学到：
+
+- 高召回多路检索不一定要靠并发才能达到严格单请求 SLO。先消除全量排序这种与 Top-K 目标不匹配的成本，可以保留
+  全部检索与融合语义，同时显著降低尾延迟。
+- Top-K 优化的等价性不能只看 Recall@K；必须把边界 tie 全部纳入二次排序，并逐题比较完整有序序列。历史 digest
+  不存在时，应重建并明确标记 reference，而不是声称比较了不存在的保存结果。
+- 性能门禁必须和数据使用顺序绑定。train 未完整通过时不加载 dev；dev 只报告一次，test 继续锁定，才能避免把验证集或
+  测试集变成反复调参工具。
+- `eligible` 是接线许可，不是激活事实。Stage142 没有实现 settings flag、runtime entrypoint 或默认策略，也没有验证
+  并发能力。
+
+下一步：Stage143 按 Stage141 协议实现并验证显式、默认关闭的单请求 runtime 接线，包括
+`TS_RAG_ENABLE_OPTIONAL_SIDECAR_AGENT`、process-scoped bootstrap 和公开 trace 合同；覆盖 disabled、rejected、eligible
+启动行为。继续禁止并发 serving、默认化、test、重试和兜底策略。

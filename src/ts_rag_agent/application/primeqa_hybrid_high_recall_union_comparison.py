@@ -115,6 +115,22 @@ class _MappedBM25Retriever:
 
     def search(self, query: str, top_k: int = 10) -> list[RetrievalResult]:
         results = self._retriever.search(query, top_k=top_k)
+        return self._map_results(results)
+
+    def search_full_sort_reference(
+        self,
+        query: str,
+        top_k: int = 10,
+    ) -> list[RetrievalResult]:
+        """Run the wrapped BM25 historical full-sort reference path."""
+
+        results = self._retriever.search_full_sort_reference(query, top_k=top_k)
+        return self._map_results(results)
+
+    def _map_results(
+        self,
+        results: Sequence[RetrievalResult],
+    ) -> list[RetrievalResult]:
         return [
             RetrievalResult(
                 document=self._original_documents_by_id[result.document.id],

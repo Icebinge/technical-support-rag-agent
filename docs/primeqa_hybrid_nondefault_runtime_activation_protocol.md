@@ -146,8 +146,18 @@ public-safe aggregate or synthetic policy data.
 
 ## Next Step
 
-Stage142 should optimize and validate the frozen strict-C warm single-request
-SLO. It must preserve all 683 candidate-pool sequences and Stage127 recall,
-execute three full warm train passes with five-fold and aggregate P95/P99, then
-run dev once as report-only. Test stays locked. Runtime wiring, defaultization,
-concurrency, retries, and fallback strategies remain out of scope.
+Stage142 is complete and recorded in:
+
+```text
+docs/primeqa_hybrid_strict_latency_validation.md
+```
+
+It replaced full eligible-row sorting with exact Top-K boundary selection,
+compared optimized pools directly with a historical full-sort reference, and
+passed three complete warm train runs plus one dev report-only run. Combined
+train P95/P99 is `0.111715s / 0.322262s`; dev P95/P99 is
+`0.094916s / 0.120182s`. Identity violations are zero and recall is unchanged.
+
+Stage143 may now implement and validate the explicit non-default
+single-request runtime wiring. Test stays locked. Concurrent serving,
+defaultization, retries, and fallback strategies remain out of scope.

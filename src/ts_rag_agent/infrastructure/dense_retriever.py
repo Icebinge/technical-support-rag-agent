@@ -7,6 +7,10 @@ import numpy as np
 
 from ts_rag_agent.domain.dataset import PrimeQADocument
 from ts_rag_agent.domain.retrieval import RetrievalResult
+from ts_rag_agent.infrastructure.exact_top_k import (
+    exact_top_k_indices,
+    full_sort_top_k_indices,
+)
 
 
 class TextEmbeddingModel(Protocol):
@@ -102,6 +106,25 @@ class DenseRetriever:
     def search(self, query: str, top_k: int = 10) -> list[RetrievalResult]:
         """返回与查询向量最相似的 top-k 文档。"""
 
+        return self._search(query, top_k=top_k, use_full_sort_reference=False)
+
+    def search_full_sort_reference(
+        self,
+        query: str,
+        top_k: int = 10,
+    ) -> list[RetrievalResult]:
+        """Run the historical stable full sort for equivalence validation."""
+
+        return self._search(query, top_k=top_k, use_full_sort_reference=True)
+
+    def _search(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        use_full_sort_reference: bool,
+    ) -> list[RetrievalResult]:
+
         if self._embeddings is None:
             raise RuntimeError("DenseRetriever.fit() must be called before search().")
         if top_k <= 0:
@@ -112,12 +135,13 @@ class DenseRetriever:
         query_embedding = self._encoder.encode([f"{self._query_prefix}{query}"])
         query_vector = _normalize_rows(np.asarray(query_embedding, dtype=np.float32))[0]
         scores = self._embeddings @ query_vector
-        top_indices = np.argsort(-scores, kind="stable")[:top_k]
+        selector = full_sort_top_k_indices if use_full_sort_reference else exact_top_k_indices
+        top_indices = selector(scores, top_k=top_k)
 
         return [
             RetrievalResult(
-                document=self._documents[int(index)],
-                score=float(scores[int(index)]),
+                document=self._documents[index],
+                score=float(scores[index]),
                 rank=rank,
             )
             for rank, index in enumerate(top_indices, start=1)

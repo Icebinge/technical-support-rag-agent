@@ -9,6 +9,10 @@ import numpy as np
 from ts_rag_agent.domain.dataset import PrimeQADocument, PrimeQADocumentSection
 from ts_rag_agent.domain.retrieval import RetrievalResult
 from ts_rag_agent.infrastructure.bm25_retriever import tokenize_text
+from ts_rag_agent.infrastructure.exact_top_k import (
+    exact_top_k_indices,
+    full_sort_top_k_indices,
+)
 
 
 class SectionBM25Retriever:
@@ -27,6 +31,7 @@ class SectionBM25Retriever:
         self._document_indices: dict[str, int] = {}
         self._sections: list[PrimeQADocumentSection] = []
         self._section_lengths = np.empty(0, dtype=np.float64)
+        self._length_normalizers = np.empty(0, dtype=np.float64)
         self._section_document_indices = np.empty(0, dtype=np.int32)
         self._avg_section_length = 0.0
         self._idf: dict[str, float] = {}
@@ -71,6 +76,7 @@ class SectionBM25Retriever:
         )
         total_length = float(self._section_lengths.sum())
         self._avg_section_length = total_length / section_count if section_count else 0.0
+        self._length_normalizers = self._build_length_normalizers(self._section_lengths)
         self._postings = {
             term: (
                 np.fromiter((item[0] for item in term_postings), dtype=np.int32),
@@ -87,6 +93,25 @@ class SectionBM25Retriever:
     def search(self, query: str, top_k: int = 10) -> list[RetrievalResult]:
         """返回按 section 分数聚合后的父文档 top-k。"""
 
+        return self._search(query, top_k=top_k, use_full_sort_reference=False)
+
+    def search_full_sort_reference(
+        self,
+        query: str,
+        top_k: int = 10,
+    ) -> list[RetrievalResult]:
+        """Run the historical full document sort for equivalence validation."""
+
+        return self._search(query, top_k=top_k, use_full_sort_reference=True)
+
+    def _search(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        use_full_sort_reference: bool,
+    ) -> list[RetrievalResult]:
+
         if not self._is_fitted:
             raise RuntimeError("SectionBM25Retriever.fit() must be called before search().")
         if top_k <= 0:
@@ -97,7 +122,6 @@ class SectionBM25Retriever:
             return []
 
         section_scores = np.zeros(len(self._sections), dtype=np.float64)
-        touched_sections = np.zeros(len(self._sections), dtype=np.bool_)
         for term in query_terms:
             idf = self._idf.get(term)
             if idf is None:
@@ -107,11 +131,10 @@ class SectionBM25Retriever:
             section_scores[section_indices] += self._score_terms(
                 idf,
                 term_frequencies,
-                self._section_lengths[section_indices],
+                self._length_normalizers[section_indices],
             )
-            touched_sections[section_indices] = True
 
-        touched_section_indices = np.flatnonzero(touched_sections)
+        touched_section_indices = np.flatnonzero(section_scores)
         document_scores = np.full(len(self._document_ids), -np.inf, dtype=np.float64)
         if touched_section_indices.size:
             np.maximum.at(
@@ -120,9 +143,12 @@ class SectionBM25Retriever:
                 section_scores[touched_section_indices],
             )
         touched_document_indices = np.flatnonzero(np.isfinite(document_scores))
-        ranked_document_indices = sorted(
-            touched_document_indices,
-            key=lambda index: (-float(document_scores[index]), self._document_ids[int(index)]),
+        selector = full_sort_top_k_indices if use_full_sort_reference else exact_top_k_indices
+        ranked_document_indices = selector(
+            document_scores,
+            top_k=top_k,
+            eligible_indices=touched_document_indices,
+            string_tie_breaks=self._document_ids,
         )
         return [
             RetrievalResult(
@@ -131,7 +157,7 @@ class SectionBM25Retriever:
                 rank=rank,
             )
             for rank, document_index in enumerate(
-                ranked_document_indices[:top_k],
+                ranked_document_indices,
                 start=1,
             )
         ]
@@ -140,15 +166,17 @@ class SectionBM25Retriever:
         self,
         idf: float,
         term_frequencies: np.ndarray,
-        section_lengths: np.ndarray,
+        length_normalizers: np.ndarray,
     ) -> np.ndarray:
-        length_normalizer = 1 - self._b
+        numerator = term_frequencies * (self._k1 + 1)
+        denominator = term_frequencies + length_normalizers
+        return idf * numerator / denominator
+
+    def _build_length_normalizers(self, section_lengths: np.ndarray) -> np.ndarray:
+        length_normalizer = np.full(section_lengths.shape, 1 - self._b, dtype=np.float64)
         if self._avg_section_length:
             length_normalizer += self._b * section_lengths / self._avg_section_length
-
-        numerator = term_frequencies * (self._k1 + 1)
-        denominator = term_frequencies + self._k1 * length_normalizer
-        return idf * numerator / denominator
+        return self._k1 * length_normalizer
 
 
 def _section_search_text(document: PrimeQADocument, section: PrimeQADocumentSection) -> str:

@@ -141,8 +141,15 @@ def test_vectorized_bm25_matches_scalar_formula_and_tie_breaking():
         "missing-term",
     ):
         actual = retriever.search(query, top_k=4)
+        full_sort_reference = retriever.search_full_sort_reference(query, top_k=4)
         expected = _scalar_bm25_search(documents, query=query, top_k=4, k1=1.5, b=0.75)
 
+        assert [result.document.id for result in actual] == [
+            result.document.id for result in full_sort_reference
+        ]
+        assert [result.score for result in actual] == [
+            result.score for result in full_sort_reference
+        ]
         assert [result.document.id for result in actual] == [row[0] for row in expected]
         assert [result.score for result in actual] == pytest.approx(
             [row[1] for row in expected],

@@ -1117,3 +1117,19 @@ and then one dev report-only pass. Stage140's train P95 fails the strict target
 and train/dev P99 were not measured, so current evidence is explicitly
 ineligible. Stage141 freezes policy only; no runtime flag or service entrypoint
 is implemented, concurrent serving is unauthorized, and test remains locked.
+
+The current Stage 142 strict warm single-request latency validation is recorded
+in:
+
+```text
+docs/primeqa_hybrid_strict_latency_validation.md
+```
+
+Stage142 uses exact Top-K boundary selection while retaining all score and tie
+semantics, then compares every measured optimized pool against a validation-
+only historical full-sort pool. Three complete train passes, all five folds in
+each pass, pooled train, all pooled folds, and one dev report-only pass meet
+P95 <= 0.300 seconds and P99 <= 1.000 seconds. Combined train P95/P99 is
+0.111715/0.322262 seconds and dev P95/P99 is 0.094916/0.120182 seconds. Recall
+and Agent regression remain unchanged. This authorizes implementation of
+non-default single-request wiring, not runtime activation or defaultization.

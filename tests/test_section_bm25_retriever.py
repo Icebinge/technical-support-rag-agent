@@ -117,6 +117,7 @@ def test_vectorized_section_bm25_matches_scalar_rollup_formula():
 
     for query in ("adapter token restart", "adapter adapter", "database package"):
         actual = retriever.search(query, top_k=3)
+        full_sort_reference = retriever.search_full_sort_reference(query, top_k=3)
         expected = _scalar_section_bm25_search(
             documents,
             sections,
@@ -126,6 +127,12 @@ def test_vectorized_section_bm25_matches_scalar_rollup_formula():
             b=0.75,
         )
 
+        assert [result.document.id for result in actual] == [
+            result.document.id for result in full_sort_reference
+        ]
+        assert [result.score for result in actual] == [
+            result.score for result in full_sort_reference
+        ]
         assert [result.document.id for result in actual] == [row[0] for row in expected]
         assert [result.score for result in actual] == pytest.approx(
             [row[1] for row in expected],

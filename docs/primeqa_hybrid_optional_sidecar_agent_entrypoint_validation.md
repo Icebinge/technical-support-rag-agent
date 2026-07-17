@@ -310,8 +310,24 @@ non-default activation protocol and strict-C warm single-request SLO in:
 docs/primeqa_hybrid_nondefault_runtime_activation_protocol.md
 ```
 
-The current evidence is not activation-eligible because Stage140 train P95 is
-0.450798 seconds against the 0.300-second limit and Stage140 has no train/dev
-P99 measurement. Stage142 must optimize and run the frozen train-CV/dev latency
-protocol. Test remains locked; runtime wiring, defaultization, concurrency,
-retry actions, and fallback strategies remain disabled.
+Stage142 subsequently completed the frozen train-CV/dev latency protocol. Its
+final shared retrieval implementation was followed by another complete
+Stage139 Agent regression:
+
+```text
+status: passed
+guards: 45 / 45
+train/dev candidate identity violations: 0 / 0
+train/dev exact five-transition trace rate: 1.0 / 1.0
+train/dev verified F1: 0.1946 / 0.1873
+train/dev verified gold citations: 151 / 33
+Stage137 aggregate parity: true
+test loaded: false
+retry/fallback: false / false
+```
+
+The Stage142 latency evidence is now eligible for implementation of explicit,
+non-default, single-request runtime wiring. Runtime is still unwired and
+inactive. Test remains locked; defaultization, concurrency, retry actions, and
+fallback strategies remain disabled. The next implementation step is Stage143,
+not an implicit activation of this entrypoint.

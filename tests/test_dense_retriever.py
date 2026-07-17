@@ -33,7 +33,15 @@ def test_dense_search_returns_most_similar_document():
     )
 
     results = retriever.search("service restart problem", top_k=2)
+    full_sort_reference = retriever.search_full_sort_reference(
+        "service restart problem",
+        top_k=2,
+    )
 
+    assert [result.document.id for result in results] == [
+        result.document.id for result in full_sort_reference
+    ]
+    assert [result.score for result in results] == [result.score for result in full_sort_reference]
     assert results[0].document.id == "doc-a"
     assert results[0].rank == 1
     assert results[0].score > results[1].score

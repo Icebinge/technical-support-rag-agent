@@ -185,3 +185,14 @@ Stage142 must optimize and validate that strict SLO with three complete warm
 train passes, five-fold plus aggregate checks, and one locked dev report-only
 pass. Test remains locked. Runtime defaultization, concurrency, retries, and
 fallback strategies remain disabled.
+
+This handoff is now complete. Stage142 results are recorded in:
+
+```text
+docs/primeqa_hybrid_strict_latency_validation.md
+```
+
+The final exact-boundary Top-K implementation passed the strict SLO, direct
+historical full-sort pool identity checks, Stage127 recall checks, and the full
+Stage139 Agent regression. Stage143 is the explicit non-default single-request
+runtime wiring and activation-validation step.

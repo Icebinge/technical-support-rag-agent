@@ -933,6 +933,20 @@ execute runtime requests. Its canonical activation cases are synthetic policy
 inputs. The report contains only aggregate source fields and public-safe policy
 state, and it keeps test unloaded and unmeasured.
 
+The current PrimeQA/TechQA hybrid Stage142 strict warm latency validation is
+recorded in:
+
+```text
+docs/primeqa_hybrid_strict_latency_validation.md
+```
+
+Stage142 loads train first and performs all optimization, three repeated warm
+measurements, and five-fold gates there. Dev is not loaded until the complete
+train gate passes, then runs once as report-only. Historical full-sort
+reference pools and optimized pools remain in memory; saved JSON/SVG outputs
+contain aggregate distributions and violation counts only. Test remains
+unloaded and unmeasured.
+
 ## Leakage Checks
 
 Before reporting evaluation results:
