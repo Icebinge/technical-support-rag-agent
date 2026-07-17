@@ -26,7 +26,7 @@ from ts_rag_agent.application.primeqa_hybrid_optional_sidecar_agent_runtime impo
     runtime_activation_evidence_from_stage142,
 )
 from ts_rag_agent.config import ProjectSettings
-from ts_rag_agent.domain.dataset import PrimeQADocument, PrimeQAQuestion
+from ts_rag_agent.domain.dataset import PrimeQADocument, PrimeQARuntimeQuery
 from ts_rag_agent.domain.retrieval import RetrievalResult
 
 
@@ -252,14 +252,11 @@ def _runtime_bundle() -> PrimeQAHybridRuntimeResourceBundle:
     )
 
 
-def _question() -> PrimeQAQuestion:
-    return PrimeQAQuestion(
+def _question() -> PrimeQARuntimeQuery:
+    return PrimeQARuntimeQuery(
         id="private-question",
         title="adapter token installation",
         text="How do I repair the adapter token installation failure?",
-        answer="Apply the adapter token procedure.",
-        answerable=True,
-        answer_doc_id="doc-001",
     )
 
 

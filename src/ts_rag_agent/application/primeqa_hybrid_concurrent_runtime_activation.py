@@ -26,7 +26,7 @@ from ts_rag_agent.application.primeqa_hybrid_optional_sidecar_agent_runtime impo
     _forbidden_keys_found,
 )
 from ts_rag_agent.config import ProjectSettings
-from ts_rag_agent.domain.dataset import PrimeQAQuestion
+from ts_rag_agent.domain.dataset import PrimeQARuntimeQuery
 
 _STAGE145_STATUS = "primeqa_hybrid_concurrent_runtime_train_cv_dev_validation_passed"
 _STAGE145_ANALYSIS_ID = "primeqa_hybrid_concurrent_runtime_train_cv_dev_validation_v1"
@@ -114,7 +114,7 @@ class PrimeQAHybridConcurrentRuntimeBootstrap:
         settings: ProjectSettings,
         stage145_report: Mapping[str, Any],
         resource_factory: ConcurrentRuntimeSharedResourceFactoryPort,
-        warmup_question: PrimeQAQuestion,
+        warmup_question: PrimeQARuntimeQuery,
     ) -> PrimeQAHybridConcurrentRuntimeBootstrapResult:
         with self._start_lock:
             if self._started:

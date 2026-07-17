@@ -35,7 +35,7 @@ from ts_rag_agent.application.rag_answering import evaluate_answers
 from ts_rag_agent.application.svg_charts import BarDatum, render_horizontal_bar_chart_svg
 from ts_rag_agent.config import ProjectSettings
 from ts_rag_agent.domain.answer import GeneratedAnswer
-from ts_rag_agent.domain.dataset import PrimeQAQuestion
+from ts_rag_agent.domain.dataset import PrimeQARuntimeQuery
 from ts_rag_agent.infrastructure.primeqa_hybrid_split_loader import (
     PrimeQAHybridSplitSample,
     load_primeqa_hybrid_split_samples,
@@ -818,15 +818,11 @@ def _source_agent_summary(report: Mapping[str, Any], split: str) -> dict[str, An
     }
 
 
-def _label_free_question(sample: PrimeQAHybridSplitSample) -> PrimeQAQuestion:
-    return PrimeQAQuestion(
+def _label_free_question(sample: PrimeQAHybridSplitSample) -> PrimeQARuntimeQuery:
+    return PrimeQARuntimeQuery(
         id="runtime-warmup",
         title=sample.question_title,
         text=sample.question_text,
-        answer="",
-        answerable=False,
-        answer_doc_id=None,
-        doc_ids=[],
     )
 
 

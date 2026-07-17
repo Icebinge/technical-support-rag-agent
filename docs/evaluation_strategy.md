@@ -1330,3 +1330,29 @@ document, model, index, candidate pool, signal handler, listener, or service is
 opened. Stage152 may implement the entrypoint after refactoring bootstrap
 warmup to `PrimeQARuntimeQuery`; remote serving, defaults, test, queues,
 retries, and fallback remain closed.
+
+The current Stage 152 non-default local Agent service-entrypoint validation is
+recorded in:
+
+```text
+docs/primeqa_hybrid_agent_service_entrypoint_validation.md
+```
+
+Stage152 implements the frozen invocation, source ordering, stable exit codes,
+18-field terminal event, single resource graph, label-free built-in warmup,
+prebound loopback listener, and main-thread Uvicorn ownership. The concurrent
+and optional bootstrap warmup signatures now require `PrimeQARuntimeQuery`, so
+service startup no longer needs an evaluation-shaped question with emptied
+gold fields.
+
+Nine formal synthetic cases validate the source, activation, runtime, resource,
+socket, server, and clean-return boundaries; a direct unit case separately
+validates unexpected-composition exit code 1. The one formal real-resource
+lifecycle loads the technote corpus and retrieval models, then observes
+HTTP/1.1 `200/200/200` for live, ready, and answer on `127.0.0.1:18152`. It
+returns three citations, closes the transport, releases the listener, and exits
+zero after `51.098075s`. The final report passes `46/46` guards. No train, dev,
+or test question split is loaded and no test metric is run. The service remains
+off by default, loopback-only, nonpersistent after validation, and outside
+runtime defaultization. Stage153 may freeze a tool-orchestration protocol;
+remote serving, test, queues, retries, and fallback remain closed.

@@ -28,7 +28,7 @@ from ts_rag_agent.application.primeqa_hybrid_optional_sidecar_agent_runtime impo
     PrimeQAHybridSharedRuntimeResources,
 )
 from ts_rag_agent.config import ProjectSettings
-from ts_rag_agent.domain.dataset import PrimeQADocument, PrimeQAQuestion
+from ts_rag_agent.domain.dataset import PrimeQADocument, PrimeQARuntimeQuery
 from ts_rag_agent.domain.retrieval import RetrievalResult
 
 
@@ -337,14 +337,11 @@ def _resource_summary() -> PrimeQAHybridRuntimeResourceSummary:
     )
 
 
-def _question() -> PrimeQAQuestion:
-    return PrimeQAQuestion(
+def _question() -> PrimeQARuntimeQuery:
+    return PrimeQARuntimeQuery(
         id="private-stage146-question",
         title="Adapter installation failure",
         text="How do I repair the adapter installation failure?",
-        answer="Apply the documented adapter repair procedure.",
-        answerable=True,
-        answer_doc_id="doc-000",
     )
 
 

@@ -32692,3 +32692,77 @@ formal / preflight artifact ignore checks: passed
 - signal 的“触发 graceful shutdown”与“跨平台 exit code 一致”是两件事。让 Uvicorn 管理 signal 时不能同时声称自己归一化了 OS 退出语义。
 
 下一步：Stage152 实现 non-default local service entrypoint。先把 concurrent bootstrap warmup 改为 `PrimeQARuntimeQuery`，再实现严格 CLI/source gate/startup event/exit mapping/prebound listener/main-thread Uvicorn composition；先用 synthetic resource factory 验证全部失败路径，最后只做一次真实本地 resource lifecycle。remote、默认化、test、排队、重试和兜底继续关闭。
+
+## 2026-07-18 - Stage 152 本地 Agent service entrypoint 实现与真实生命周期验证
+
+目标：把 Stage151 冻结的 process composition 协议真正实现为可运行但默认关闭的本地服务入口，同时保持 test 锁定、loopback-only、无队列、无重试、无备用端口、无兜底、无隐式 shutdown timeout。
+
+### 实现内容
+
+新增生产入口：
+
+```text
+python -m ts_rag_agent.local_agent_service --port <PORT>
+```
+
+CLI 只接受 `--port` 和一个 ASCII 十进制端口，范围严格为 `1024..65535`。Stage150 先授权，之后才检查 `TS_RAG_ENABLE_CONCURRENT_SIDECAR_AGENT=true` 和 `TS_RAG_ENABLE_LOCAL_AGENT_HTTP_TRANSPORT=true`。Stage145 由原 bootstrap 重算；不合格时不构建资源、不绑定 socket。
+
+Stage146 与旧 optional bootstrap 的 warmup 参数都从 `PrimeQAQuestion` 收敛为 `PrimeQARuntimeQuery`。生产 warmup 是内置 synthetic query，字段只有 `id/title/text`，没有 answer、answerable、answer document、doc ids 或 split membership。服务启动不再为了满足旧签名加载评测题。
+
+资源图只构建一次。warmup 成功后才创建 FastAPI/Uvicorn；listener 只对固定的 `127.0.0.1:<PORT>` bind/listen 一次，并把同一个 socket 交给主线程的 `uvicorn.Server.run`。退出时 finally 再做幂等 close。外部 signal 退出码不做跨平台归一化，Uvicorn 继续拥有它支持的 signal handler。
+
+### Synthetic 严格路径
+
+正式 validator 执行了 9 个 synthetic case：CLI 2、Stage150 3、activation 4、Stage145/runtime 5、resource/warmup 6、socket 7、server/lifespan 8 和 clean 0 全部与冻结语义一致。clean case 的 factory/build/warmup/bind/server/close/terminal event 都是 1 次；queue/retry/fallback 全是 0。另有单元测试覆盖 unexpected composition 1 与 KeyboardInterrupt 不归一化。
+
+另外直接调用了一次真实模块命令，并把两个 activation flag 显式设为 false。Stage150 先授权，随后进程按协议返回 4；终态事件记录 `resources_initialized=false`、`listener_bound=false`，没有构建资源或启动服务。
+
+### 唯一一次真实资源生命周期
+
+正式运行固定使用 `127.0.0.1:18152`，没有备用端口、重试、进程重启或监控截止时间。真实加载 technote corpus、两路 dense 资源、四个 lexical index 与 Stage145 concurrent runtime。验证 client 对已 listen 的 socket 做无 timeout 的 live/ready/answer，随后设置 Uvicorn 正常 `should_exit`；server 仍在主线程运行，主进程自然等待两边结束。
+
+```text
+real lifecycle: 51.098075s
+HTTP: HTTP/1.1 / HTTP/1.1 / HTTP/1.1
+live / ready / answer: 200 / 200 / 200
+answer refused / citation count: false / 3
+terminal event fields: 18
+source fingerprints: 6
+listener released / transport closed: true / true
+exit code: 0
+```
+
+报告没有保存 probe request handle、问题文本、答案文本或 citation identity。train/dev/test 问题 split 都没有加载；本轮加载的是服务所需文档 corpus，不是评测样本。test gate 没有打开，test metrics 为 false，runtime default 不变。
+
+### Preflight、失败与修正记录
+
+- 第一次只读 preflight 的 source/synthetic 逻辑已完成，但 SVG wrapper 错把仓库 helper 的真实 `bars=` 参数写成 `data=`，因此命令在 JSON 落盘前失败，不能算 preflight 通过。修正后重新执行，Stage151 source gate 与 9/9 synthetic case 通过；因为明确关闭用户确认，real lifecycle 相关 guard 保持失败，这是预期 preflight 状态。
+- 唯一一次正式真实资源运行随后自然完成，未重跑。正式结果为 46/46。
+- 正式运行后的代码审计发现：preflight 没有 real fingerprint 时，`all([])` 会让 SHA guard 虚假为 true。修正为“数量必须等于 6 且每个 SHA 长度为 64”，并只重生成只读 preflight。正式运行原本就有 6 个有效 SHA，因此正式结论没有被改写或倒填。
+- 第一轮 targeted 命令中 format check 真实报告 2 个文件需要格式化；同命令后续 Ruff lint 和 `74 passed` 虽通过，也不能把整条命令称为全绿。运行 formatter 后，独立 format check 与 lint 通过。
+- 提交前自审发现 unexpected composition 退出码 `1` 虽已实现，但没有直接单元测试；补测后 targeted 为 75、全量为 658。随后执行的全仓 `ruff format --check .` 真实报告 311 个历史文件会被格式化；这些与 Stage152 无关，没有批量改写。本阶段文件 targeted format check 通过，全仓 Ruff lint 仍通过。
+
+### 最终结果
+
+```text
+Stage151 source: 33 / 33
+Stage152 formal: 46 / 46
+synthetic exit cases: 9 / 9
+targeted pytest: 75 passed
+full Ruff: passed
+full pytest: 658 passed, 1 Starlette TestClient deprecation warning
+git diff --check: passed
+formal / preflight SVG XML: 10 / 10 and 10 / 10
+```
+
+Stage152 artifact SHA-256：`7976dfd7d19251f013d2bb246da3e0302e8ecadd26a23baf3418d0d63498566b`。
+
+### 本步学到
+
+- serving warmup 应在类型层面就是 label-free query，不能依赖把 evaluation model 的 gold 字段清空来假装在线输入。
+- prebind 的价值不仅是“端口能用”，而是让 composition root 拥有唯一真实 bind，并把同一 listener 交给 Uvicorn，消除 check-then-bind 竞争窗口。
+- synthetic failure mapping 与真实资源生命周期证明的是两组不同事实：前者证明失败关闭边界，后者证明模型、索引、HTTP、lifespan 和端口释放真正能连起来。
+- “没有 shutdown timeout”不能只看配置值；还要真实观察 HTTP 完成、transport closed、listener released 和 process return。
+- guard 本身也必须审计，尤其要警惕空集合上的 vacuous truth 把“没有证据”写成“全部通过”。
+
+下一步：Stage153 先冻结 local Agent tool-orchestration protocol，再决定如何引入 LangGraph 或其他 graph runner。service 继续默认关闭、仅 loopback、test gate 继续锁定。

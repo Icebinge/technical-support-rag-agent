@@ -317,7 +317,7 @@ def freeze_primeqa_hybrid_agent_service_entrypoint_protocol(
     started_at = time.perf_counter()
     source = _load_json_object(stage150_validation_path)
     loaded_at = time.perf_counter()
-    source_summary = _stage150_summary(source)
+    source_summary = stage150_service_authorization_summary(source)
     protocol = _frozen_protocol()
     evaluations = _canonical_evaluations(StrictAgentServiceEntrypointProtocolPolicy())
     source_unchanged = _load_json_object(stage150_validation_path) == source
@@ -780,7 +780,9 @@ def _compliant_evidence(**overrides: Any) -> AgentServiceEntrypointProtocolEvide
     return AgentServiceEntrypointProtocolEvidence(**values)
 
 
-def _stage150_summary(source: Mapping[str, Any]) -> dict[str, Any]:
+def stage150_service_authorization_summary(source: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the exact public Stage150 facts required by a service entrypoint."""
+
     decision = source.get("decision") or {}
     public = source.get("public_safe_contract") or {}
     contract = source.get("implementation_contract") or {}

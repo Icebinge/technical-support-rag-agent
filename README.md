@@ -16,7 +16,7 @@ No downloaded dataset files are committed to this repository.
 
 ## Current Status
 
-Stage 151: strict local Agent service-entrypoint composition protocol frozen.
+Stage 152: strict non-default local Agent service entrypoint implemented and validated.
 
 Implemented:
 
@@ -40,11 +40,13 @@ Implemented:
 - disabled-by-default loopback-only FastAPI adapter with exact ASGI schemas
 - real HTTP/1.1 socket, overload, disconnect, readiness, and shutdown validation
 - executable local service-entrypoint composition and fail-closed startup protocol
+- exact `--port` local service CLI with stable startup exit codes
+- built-in label-free warmup, one-shot resource composition, and prebound listener ownership
+- real resource, HTTP/1.1, main-thread Uvicorn, and natural shutdown lifecycle validation
 
 Not implemented yet:
 
 - LangGraph workflow
-- persistent local service entrypoint
 - remote network serving
 - runtime defaultization and final locked-test evaluation
 
@@ -59,18 +61,31 @@ as the default. Stage148 adds a transport-neutral facade over the eligible
 concurrent runtime, but it is still not a network service and is not registered
 as the default. Stage149 freezes the exact local HTTP surface around that
 facade. Stage150 implements the FastAPI adapter and validates it with
-in-process ASGI calls plus a temporary real loopback socket. The adapter is
-still disabled by default, no persistent service entrypoint has been defined,
-and no network service remains running after validation.
+in-process ASGI calls plus a temporary real loopback socket. Stage151 freezes
+the process composition protocol. Stage152 implements its strict local service
+entrypoint and validates one real resource and HTTP lifecycle. The entrypoint
+remains disabled by default, binds loopback only after both explicit flags are
+true, and no network service remains running after validation.
 
 The Stage150 implementation and formal evidence are recorded in
 [docs/primeqa_hybrid_agent_http_transport_validation.md](docs/primeqa_hybrid_agent_http_transport_validation.md).
-Stage151 now freezes the future process entrypoint, explicit port, canonical
+Stage151 freezes the process entrypoint, explicit port, canonical
 source order, label-free synthetic warmup, single-worker socket ownership,
 Uvicorn signal behavior, shutdown ordering, startup exit codes, and public
-startup-event boundary. The entrypoint itself is not implemented yet. The
+startup-event boundary. Stage152 implements and validates that contract. The
 Stage151 protocol is recorded in
 [docs/primeqa_hybrid_agent_service_entrypoint_protocol.md](docs/primeqa_hybrid_agent_service_entrypoint_protocol.md).
+The implementation evidence is recorded in
+[docs/primeqa_hybrid_agent_service_entrypoint_validation.md](docs/primeqa_hybrid_agent_service_entrypoint_validation.md).
+
+Run the non-default local service only with both explicit activation flags and
+an explicit non-privileged port:
+
+```powershell
+$env:TS_RAG_ENABLE_CONCURRENT_SIDECAR_AGENT = "true"
+$env:TS_RAG_ENABLE_LOCAL_AGENT_HTTP_TRANSPORT = "true"
+python -m ts_rag_agent.local_agent_service --port 18152
+```
 
 ## Quickstart
 

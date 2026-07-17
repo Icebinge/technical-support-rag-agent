@@ -52,7 +52,7 @@ from ts_rag_agent.application.primeqa_hybrid_optional_sidecar_agent_runtime impo
 )
 from ts_rag_agent.application.svg_charts import BarDatum, render_horizontal_bar_chart_svg
 from ts_rag_agent.config import ProjectSettings
-from ts_rag_agent.domain.dataset import PrimeQAQuestion
+from ts_rag_agent.domain.dataset import PrimeQARuntimeQuery
 from ts_rag_agent.infrastructure.primeqa_hybrid_split_loader import (
     PrimeQAHybridSplitSample,
     load_primeqa_hybrid_split_samples,
@@ -866,16 +866,12 @@ def _configuration_mutual_exclusion_enforced() -> bool:
     return False
 
 
-def _label_free_question(sample: PrimeQAHybridSplitSample) -> PrimeQAQuestion:
+def _label_free_question(sample: PrimeQAHybridSplitSample) -> PrimeQARuntimeQuery:
     question = sample.to_primeqa_question()
-    return PrimeQAQuestion(
+    return PrimeQARuntimeQuery(
         id="concurrent-application-runtime-warmup",
         title=question.title,
         text=question.text,
-        answer="",
-        answerable=False,
-        answer_doc_id=None,
-        doc_ids=[],
     )
 
 

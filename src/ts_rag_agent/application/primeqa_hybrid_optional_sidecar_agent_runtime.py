@@ -43,7 +43,7 @@ from ts_rag_agent.application.primeqa_hybrid_sidecar_agent_orchestrator_validati
     _stage128_summary,
 )
 from ts_rag_agent.config import ProjectSettings
-from ts_rag_agent.domain.dataset import PrimeQAQuery, PrimeQAQuestion
+from ts_rag_agent.domain.dataset import PrimeQAQuery, PrimeQARuntimeQuery
 from ts_rag_agent.domain.retrieval import RetrievalResult
 from ts_rag_agent.infrastructure.primeqa_loader import (
     load_primeqa_document_sections,
@@ -287,7 +287,7 @@ class PrimeQAHybridOptionalSidecarRuntimeBootstrap:
         settings: ProjectSettings,
         stage142_report: Mapping[str, Any],
         resource_factory: RuntimeResourceFactoryPort,
-        warmup_question: PrimeQAQuestion,
+        warmup_question: PrimeQARuntimeQuery,
         concurrent_request_support_requested: bool = False,
     ) -> PrimeQAHybridOptionalSidecarRuntimeBootstrapResult:
         if self._started:
