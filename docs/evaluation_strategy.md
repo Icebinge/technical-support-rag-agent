@@ -1645,3 +1645,55 @@ Current-source validation is Ruff passing, targeted `65 passed, 1 warning in
 pytest stderr is empty. Stage159 may measure warm multi-turn behavior and one
 real two-request admission rejection on the locked development split only;
 test remains locked.
+
+The current Stage 159 full-development warm multi-turn service validation is
+recorded in:
+
+```text
+docs/primeqa_hybrid_bounded_dynamic_agent_warm_service_validation.md
+```
+
+Stage159 authorizes the exact frozen Stage68 development file by SHA-256 and
+projects only question title and text into runtime requests. The JSON parser
+materializes each authorized dev object, but label fields are not used for
+ordering, runtime projection, or metrics. Test is never loaded. Stable
+SHA-256(sample identity) ordering creates 30 synthetic four-turn threads and
+one synthetic one-turn thread; these groups are explicitly not claimed to be
+natural conversations.
+
+One Stage158 service preparation builds retrieval resources once and loads the
+local Qwen model once. The warm process executes one startup generation, 121
+development generations, and one real capacity-probe generation. All 121 dev
+turns return HTTP 200, all 31 threads grow state monotonically and close, and
+all 121 branches satisfy their call-count protocol. The model chooses compose
+34 times and refusal 87 times. These are operating counts only: no dev gold
+label is used, so answer/refusal distribution and 102 emitted citations are not
+quality metrics.
+
+Median all-turn end-to-end latency is `1977.732ms`, while p95 is
+`11835.247ms`. Per-position average latency rises from `1971.820ms` on turn one
+to `6269.388ms` on turn four; turn-four p95 is `16481.358ms`. Average input
+tokens and retained state also rise by position. This establishes a real warm
+multi-turn long tail but does not identify its semantic cause because the
+public artifact stores no individual rows.
+
+The real two-request capacity probe pauses the first admitted request before
+runtime execution, observes the second request return HTTP 503
+`gpu_capacity_exceeded` in `1.401ms` without downstream dispatch or GPU
+admission, then releases the first request to complete real retrieval and Qwen
+execution with HTTP 200. Final counters show 122 admitted/completed turns, one
+capacity rejection, one maximum in-flight turn, and zero failures, queue,
+retry, or fallback actions.
+
+Formal validation passes `65/65` guards, produces ten parseable SVGs, releases
+port `18159`, and leaves no process or thread open. The artifact SHA-256 is
+`93eb319aeb0c2212f55df0bbb2c2b1790eeba02aa4ec20439464bc72a7f3bfe6`.
+Current-source verification is Ruff passing, targeted `52 passed, 1 existing
+warning in 1.84s`, and full repository `797 passed, 1 existing warning in
+11.52s`; corrected full pytest stderr is empty.
+
+Stage160 remains development-only. It may either analyze the refusal and
+latency-tail patterns with private diagnostics or freeze the validated runtime
+behavior before further integration. Test evaluation, runtime defaultization,
+remote exposure, persistence, queues, retries, fallback, rewrite, and second
+retrieval remain closed.

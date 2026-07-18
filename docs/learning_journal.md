@@ -33291,3 +33291,133 @@ runtime default / remote / persistence: false / false / false
 - Windows 后台执行应优先使用独立脚本文件和简单 argv。复杂 `python -c`、前台长 import 和单 `TestClient` 并发夹具都已用真实失败证明不可靠。
 
 下一步：Stage159 只在 locked development 上测 warm multi-turn service behavior，包括第 1-4 turn 的 history/latency/token 增长、answer/refuse 分布，以及一次真实双请求 admission rejection；test 继续锁定。Runtime defaultization、remote、persistence、queue、retry、fallback、query rewrite 和 second retrieval 继续关闭。
+
+## 2026-07-18 - Stage 159 全量开发集 warm 多轮服务与真实容量拒绝
+
+目标：在 Stage158 已验证的独立、非默认、loopback-only Agent 服务上，用同一次资源构建和同一次 Qwen 加载跑完整冻结 dev；观察第 1-4 turn 的状态、token、延迟和分支分布，并用两个真实 HTTP 请求验证 nonblocking GPU admission。这个阶段只验证执行与运行特性，不打开 test，不使用 dev gold 做质量指标，也不把 runtime 注册成默认。
+
+### 用户确认的全量 dev 协议
+
+dev 文件继续锁定为 `primeqa_hybrid_split_stage68_dev.jsonl`，SHA-256 为 `071c54f80657592bda7f8e4095afc8800a2be112362c3a275191a0fc8e28bd5f`，共 121 行，split/protocol 必须精确等于 `primeqa_hybrid_stage68_v1` / `primeqa_hybrid_split_v1`。
+
+按用户确认，使用 `SHA256(sample_id)` 稳定排序，再连续每四条组成一个显式 thread，得到 30 个四轮 thread 和 1 个单轮 thread。这个分组是为了压力观察而生成的 synthetic grouping，不代表相邻问题具有自然会话语义。分组 SHA-256 为 `7aa271a775c2926b32226e0a4fccc96cff3a7bf98fc90246c8002d79561fd6d0`。
+
+标准 JSON parser 会物理解析每个已授权 dev object；这里只能客观声明 label 字段没有用于排序、runtime projection 或指标，不能声称它们从未被 parser materialize。Runtime 只接收 question title/text，sample identity 只在私有内存中哈希后用于排序。公开 artifact 不保存逐条问题、答案、文档、引用 identity、raw model output 或 private sample identity。
+
+### 实现与严格边界
+
+新增 `warm_service_protocol`、`warm_service_validation`、独立 CLI 和两组测试。Validator 在资源构建前精确授权 Stage158 artifact SHA-256 `12649c087c3140feeb4121837152b41ef4005922eb73931f3770a5fac83889b0`、`51/51` guards、decision status 和 8 个 Stage158 源文件指纹；Stage159 的 protocol、validator、CLI、`pyproject.toml` 也在正式执行前后做指纹核对。
+
+同一服务只构建一次 CPU retrieval resources、加载一次本地 Qwen。模型 generation 由 1 次监听前 warmup、121 次 dev turn、1 次 capacity first request 组成，总计 123 次。没有 queue、retry、fallback、query rewrite、second retrieval、implicit thread creation 或 persistence。
+
+真实容量探针使用 validation-only observation gate：第一请求已经拿到 whole-turn admission、但尚未进入真实 runtime 时暂停；此时发第二个真实 HTTP turn。第二个响应后释放第一请求，让它自然完成真实 retrieval 和 Qwen。Gate、HTTP、Queue、thread join 和 shutdown 都没有 timeout；没有 sleep 监控、运行期限、kill、restart 或自动 retry。
+
+### 正式 GPU 与 HTTP 结果
+
+正式进程只启动一次，端口为 `18159`。它自然完成 31 个线程组、容量探针、报告生成和 Uvicorn shutdown，exit code 为 0；三个相关进程全部退出，listener 数为 0。正式结果：
+
+```text
+guards: 65 / 65
+failed guards: 0
+dev HTTP 200: 121 / 121
+thread open / close: 31 / 31
+branch protocol valid: 121 / 121
+state monotonic threads: 31 / 31
+retrieval / model decisions: 121 / 121
+resource factory builds: 1
+model generations: 123
+maximum in-flight turns: 1
+failed turns: 0
+queue / retry / fallback: 0 / 0 / 0
+opened threads / listener after shutdown: 0 / 0
+formal SVG: 10 / 10 XML-parseable
+```
+
+模型运行分布：
+
+```text
+compose_grounded_answer: 34
+refuse_insufficient_evidence: 87
+answer / refusal rate: 28.0992% / 71.9008%
+complete / refuse terminal: 34 / 87
+citations emitted: 102
+composition / verification / diagnostics: 34 / 34 / 34
+```
+
+这些只是分支计数。没有使用 dev gold，因此 28.0992% 不是 routing accuracy，71.9008% 不是 false-refusal，102 条引用也不是 citation precision/recall。test 没有加载或评估。
+
+全 turn 延迟和状态：
+
+```text
+end-to-end median / p95 / max: 1977.732 / 11835.247 / 16624.877 ms
+end-to-end average: 3675.600 ms
+generation median / p95 / max: 1742.688 / 11501.323 / 16454.567 ms
+generation average: 3418.816 ms
+input tokens median / p95 / max: 2608 / 3194 / 4009
+retained bytes median / p95 / max: 1300 / 2591 / 3045
+```
+
+按 turn position 的平均值：
+
+```text
+turn 1: e2e 1971.820ms, p95 2747.249ms, generation 1747.229ms, input 2444.613, state 652.677B
+turn 2: e2e 2285.573ms, p95 2818.578ms, generation 2075.795ms, input 2574.733, state 1105.533B
+turn 3: e2e 4232.412ms, p95 11835.247ms, generation 3888.975ms, input 2754.967, state 1636.200B
+turn 4: e2e 6269.388ms, p95 16481.358ms, generation 6018.985ms, input 2935.167, state 2119.367B
+```
+
+状态与输入 token 随轮次稳定增长；中位延迟在后两轮温和增加，但第 3、4 轮 average/p95 出现明显 generation 长尾。由于分组是 synthetic，公开结果也没有逐条行，当前不能把长尾归因到某类具体问题。
+
+真实双请求 capacity 结果：第二请求 HTTP `503`、error `gpu_capacity_exceeded`、拒绝延迟 `1.401ms`、downstream dispatched false、GPU admitted false。释放 gate 后第一请求自然完成，HTTP `200`、end-to-end `1962.984ms`、terminal complete。两条 thread 都以 HTTP `200` close。最终 coordinator 为 122 admitted、122 completed、1 rejected、0 failed、最大 1 个 in-flight。
+
+启动与总耗时：
+
+```text
+source authorization: 3.579429s
+retrieval build: 53.747254s
+model load: 7.791960s
+warmup: 3.316405s
+total service prepare: 68.441055s
+full dev workload: 445.539670s
+capacity probe: 2.116151s
+shutdown: 0.169886s
+formal total: 516.365146s
+peak allocated GPU bytes: 7,344,342,016
+```
+
+正式 stderr 不是空。PowerShell 把 Python stderr 的三段成功权重加载进度包装成 `NativeCommandError` 展示，文件共 1536 bytes / 16 lines；没有 runtime traceback，Python exit code 仍为 0，65 guards 全部通过。记录时不能把它写成 stderr empty，也不能把 PowerShell 展示包装误报为 formal 失败。
+
+### 过程失败、确认与完整测试
+
+开始阶段一次读取错误地寻找项目根目录 `AGENTS.md`；该文件不存在，随后读取到了上级目录真实适用的 `AGENTS.md`，没有文件改动。另一次组合只读 `nvidia-smi` 管道打印了设备数据，但因 PowerShell pipeline state 返回 exit 1；它没有影响正式进程，也不能算正式验证结果。
+
+正式进程没有重跑。运行期间只做无 sleep、无时限的只读进度读取，观察到 121 turn 全部自然完成。
+
+正式完成后的第一次完整 pytest 启动尝试使用内嵌 encoded PowerShell wrapper，在执行前被桌面工具策略拒绝，没有 pytest 进程或结果。改为独立 PowerShell wrapper 的第二次启动仍在执行前被同一策略拒绝，也没有进程或结果。
+
+随后使用直接 Python test driver，PID 9648 真实启动，但 driver 把 `pytest.main` 参数写成 tuple `()`；pytest 9 要求 list，因此在 collection 前以 `TypeError` 退出，stdout 为空、stderr 1039 bytes、没有 exit file。这次不能算测试完成，也没有自动重跑。
+
+向用户列出 A“修正为 list 并只运行一次替代完整 pytest”和 B“停止且不声称有 current-source full result”后，用户明确选择 A。只把 driver 改为 `pytest.main([])`，随后唯一 replacement 自然运行完成：
+
+```text
+Stage157-159 targeted pytest: 52 passed, 1 existing warning in 1.84s
+full repository pytest: 797 passed, 1 existing warning in 11.52s
+full pytest exit code / stderr: 0 / empty
+full repository Ruff: passed
+Stage159 five-file Ruff format check: passed
+```
+
+Warning 是既有 FastAPI `TestClient` 的 Starlette deprecation warning。以上测试驱动位于 ignored artifact 目录，不改变 Stage159 正式源码指纹。
+
+正式 artifact SHA-256：`93eb319aeb0c2212f55df0bbb2c2b1790eeba02aa4ec20439464bc72a7f3bfe6`。
+
+### 本步学到
+
+- Warm service 必须把一次性 retrieval build/model load 与每 turn 成本分开；本次 121 turn 共享资源，候选资源不是每个请求重建。
+- 多轮状态的 byte/token 增长本身可控，但模型 generation 在第 3、4 轮产生明显长尾，下一阶段不能只看平均吞吐。
+- `503` 容量拒绝应在 downstream dispatch 前完成；本次真实双请求证明第二请求约 1.4ms 被拒，第一请求仍能自然完成真实推理。
+- 全 dev 执行不等于 dev quality evaluation。没有 gold 的 answer/refusal/citation 数量只能描述运行行为。
+- Synthetic 四轮分组能验证状态和性能边界，但不能代替真实会话数据，也不能用于推断跨轮语义收益。
+- 后台执行证据必须区分“工具在执行前拒绝”“驱动进程启动后失败”和“经用户确认后的替代运行”，不能用最终 797 passed 覆盖前面的真实失败。
+
+下一步：Stage160 继续保持 dev-only，需要明确选择是分析 87 个拒答与第 3、4 轮长尾的私有失败规律，还是先冻结当前 Agent runtime 行为并进入下一项集成。test、runtime defaultization、remote、persistence、queue、retry、fallback、query rewrite 和 second retrieval 继续关闭。
