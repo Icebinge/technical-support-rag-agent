@@ -1770,3 +1770,37 @@ All 18 process guards pass. The formal process exits naturally with code 0 in
 Ten SVGs are XML-parseable. A next protocol may compare untouched RRF with a
 conservative one- or two-swap learned policy using nested train-only CV. Test,
 fallback, and runtime defaultization remain closed.
+
+The completed Stage 162 conservative nested-CV experiment is documented in:
+
+```text
+docs/primeqa_hybrid_conservative_context_swap_training.md
+```
+
+Stage162 evaluates four prefix8/budget2 and prefix9/budget1 swap families with
+pairwise logistic or histogram GBDT scoring. Each outer train partition uses
+four inherited inner folds to choose a zero-or-margin-quantile threshold; the
+held-out outer fold never contributes to threshold selection. Untouched RRF is
+the strict primary control, while current query overlap remains informational.
+
+Prefix9/budget1 pairwise is the only family to strictly improve aggregate RRF
+context hit, reaching `257/370` instead of `255/370`; all-answerable F1 rises
+from `0.201990` to `0.202710`, citations from 177 to 178, and answerable
+refusals fall from one to zero. However, one outer fold has F1 delta
+`-0.002368`, so the strict every-fold guard rejects it. Prefix9/budget1
+histogram performs only six swaps and exactly reproduces RRF, failing the
+strict-improvement guard. No family is selected and development remains closed.
+
+The corrected formal run passes `18/18` process guards, exits naturally with
+code 0 in `380.621178s`, and produces ten XML-parseable SVGs. Its public
+artifact SHA-256 is
+`ff126db5efc2b117ab77cf99a62ec5c399110a938b3a37ea449055e76e622d93`.
+The first formal had identical thresholds and quality but mislabeled 23 reused
+candidate-builder progress events as Stage161. After explicit user choice A,
+the progress-stage ownership was corrected and one current-source formal
+verified 23 Stage162 and zero Stage161 candidate events.
+
+The learned swap family is stopped under this strict protocol. The next
+eligible evaluation freezes untouched RRF Top10 and compares it once on the
+independent development split against current query overlap. Test and runtime
+defaultization remain closed.

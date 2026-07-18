@@ -33653,3 +33653,103 @@ warning 是既有 FastAPI/Starlette `TestClient` deprecation。完整 pytest 只
 - unanswerable `191/192` false answer 是独立且严重的问题；它不能被 Top10 召回提升掩盖，但本阶段也没有被授权调整拒答策略。
 
 下一步候选是 Stage162：先冻结是否把 untouched RRF 恢复为新的非 Agent 基准，再设计 `prefix8/9 + promotion budget 2/1` 的保守 swap selector。若需要学习 threshold 或 swap gate，必须使用 nested train-only CV；dev 只能做一次冻结后验证，test、runtime default、fallback、query rewrite 和 second retrieval 继续关闭。
+
+## 2026-07-19 - Stage 162 保守 swap selector 的 nested train-only CV
+
+目标：不再让学习器重排 3-7 个 Top10 槽位，而是从 untouched RRF Top10 出发，只允许 `prefix8/budget2` 或 `prefix9/budget1` 的保守交换。模型继续比较 pairwise logistic 与 histogram GBDT；threshold 必须在 nested train-only CV 内选择。dev/test 均不加载，runtime default、fallback、query rewrite 和 second retrieval 均关闭。
+
+### 冻结 nested 协议
+
+Stage162 在解析 train 前精确授权 Stage161、Stage80、train 和 technote corpus 的 SHA-256。Stage161 必须是 18/18 guards、`no_train_cv_safe_config`、selected null、dev/test closed。train 仍为 562 行，370 answerable、192 unanswerable；五个 grouped outer fold 行数为 `113/113/112/112/112`，assignment SHA-256 为 `a41cc9c1d00c057c774d9d7e55390c8dfa56699d19513fff205b6d184e7988a8`。
+
+候选池仍是精确 Stage116 original RRF Top200：112,400 条内存候选，所有 pool 深度 200，answerable gold pool hit `345/370 = 93.2432%`，不写 raw candidate 或 case rows。
+
+四个家族：
+
+```text
+prefix8 / budget2 / pairwise logistic
+prefix8 / budget2 / histogram GBDT
+prefix9 / budget1 / pairwise logistic
+prefix9 / budget1 / histogram GBDT
+```
+
+selector 从 untouched RRF Top10 开始，只对未保护的 rank9/10 incumbent 与 rank11-200 challenger 打分；只有 `challenger_score - incumbent_score > threshold` 才交换，输出仍按原始 RRF rank 排序。它不会触发另一条 retrieval、query rewrite 或 fallback。
+
+每个 outer fold 的 threshold 只能由另外四折产生：分别拿其中三折 fit、第四折预测，组成 inner OOF margin。候选 threshold 是固定 `0 + Q50/Q70/Q80/Q90/Q95`。每个家族共有 20 次 inner fit 和 5 次 outer refit。inner threshold 按 hit、all-answerable F1、citation、refusal、unanswerable false answer、swap count、threshold 的冻结字典序选择；真正的家族验收只看外层 OOF。
+
+最终 guard 要求相对 untouched RRF：context hit 必须严格增加；aggregate F1/citation/refusal/false answer 不回退；每一个 outer fold 的 hit 和 F1 都不回退；protected prefix 与 promotion budget 精确。没有放宽阈值或 no-safe-config fallback。
+
+### corrected formal 结果
+
+最终 current-source formal 只启动一次，显式使用 CUDA，未设置运行时限、monitor deadline、kill、restart、retry 或 fallback，并自然结束，exit code 为 0。总耗时 `380.621178s`，其中四个 nested config 为 `287.516420s`。
+
+控制组复现：
+
+```text
+current query-overlap: hit 175, F1 0.194072, citations 151, refusals 1
+untouched RRF:         hit 255, F1 0.201990, citations 177, refusals 1
+```
+
+四个 nested OOF 家族：
+
+```text
+prefix8/budget2 pairwise:
+  hit 255, F1 0.202566, citations 177, swaps 698
+  minimum fold hit/F1 delta: -0.040000 / -0.000917
+
+prefix8/budget2 histogram:
+  hit 251, F1 0.199708, citations 177, swaps 325
+  minimum fold hit/F1 delta: -0.053333 / -0.010966
+
+prefix9/budget1 pairwise:
+  hit 257, F1 0.202710, citations 178, swaps 217
+  minimum fold hit/F1 delta: 0.000000 / -0.002368
+
+prefix9/budget1 histogram:
+  hit 255, F1 0.201990, citations 177, swaps 6
+  minimum fold hit/F1 delta: 0.000000 / 0.000000
+```
+
+prefix9/budget1 pairwise 是最接近成功的一组：相对 RRF 多 2 个 Top10 gold，aggregate F1 增加 `0.000720`，citation 多 1，answerable refusal 从 1 降到 0，所有折 hit 不回退；但一折 F1 下降 `0.002368`，因此严格拒绝。prefix9 histogram 只交换 6/562 条并精确复现 RRF，但没有严格增加 hit，也必须拒绝。最终 `0/4 selectable`、selected null、没有 model artifact、没有打开 dev/runtime。
+
+所有控制与候选的 unanswerable false answer 仍为 `191/192`，只能声明没有恶化，不能声明可接受。
+
+corrected 报告 18/18 process guards 通过，公开安全检查通过，10/10 SVG 可 XML parse；没有逐像素 screenshot 声明。artifact SHA-256 为 `ff126db5efc2b117ab77cf99a62ec5c399110a938b3a37ea449055e76e622d93`。formal stderr 非空 658 bytes，是成功模型权重加载和 PowerShell first-use progress，没有 traceback。
+
+### 错标事件、用户确认和 corrected formal
+
+第一次 formal 算法运行自然完成、exit 0、18/18 guards，质量和门槛与最终结果一致，report SHA-256 为 `8b7c4b1669643b4ab69e43a27b06d943ed6f92ac397e2d628d9d6b9dfb210999`。运行中发现复用的 Stage161 candidate builder 把 23 个 candidate progress event 固定写成 `Stage 161`；进程、算法、输出路径和后续事件实际都是 Stage162。这不改变指标，但会误导过程日志。
+
+没有中断或擅自重跑。向用户明确给出 A“修正共享 builder 的显式 stage 参数并跑一次 current-source corrected formal”、B“修正但不重跑，旧 artifact 只能算修正前证据”、C“不修正标签”三个选项；用户选择 A。
+
+修正前报告、stdout/stderr、exit/PID 和 10 张 SVG 已保存在 ignored `artifacts/stage162/pre_correction_*`。共享 builder 新增 `progress_stage`，默认仍为 Stage161；Stage162 显式传 `_STAGE`。回归测试从 26 增为 28 passed。随后只启动一次 corrected formal：23 个 candidate progress 全是 Stage162，错误 Stage161 为 0，自然 exit 0。
+
+第一次前后对比审计错误地把运行 latency 也要求精确相等，因此打印四个假的 `QUALITY_EQUAL False`；随后又把 PowerShell 重定向日志按 UTF-8 解码，触发 `UnicodeDecodeError`。该审计没有修改 formal。修正审计只比较冻结 threshold、质量、swap audit 与 guards，并按 bytes 扫描日志，确认四个家族全部一致、无 traceback。
+
+### 其他实现与测试过程
+
+- Stage162 core/training 首轮 Ruff 格式化两个文件后发现未使用 import 和 import sorting；修正后一次组合命令的 `ruff format --check` 报告 training 仍需格式化，但后续 `py_compile` 让 shell 最终 exit 0，不能算 format 通过。单独执行 format 后才得到真实通过。
+- CLI 初版把 visualization rows 写成无意义的同值列表推导；自查后在 lint 前改为明确的 typed 转换。
+- 第一轮 Stage162 focused tests 为 `11 passed`。加入 progress-stage 修正测试后，Stage161+162 回归为 `28 passed`。
+
+最终 current-source 验证：
+
+```text
+Stage161/162 six-file Ruff format check: passed
+full repository Ruff lint: passed
+Stage161/162 targeted pytest: 28 passed in 2.94s
+full repository pytest: 843 passed, 1 existing warning in 12.88s
+full pytest exit code: 0
+```
+
+warning 是既有 FastAPI/Starlette `TestClient` deprecation。完整 pytest 只启动一次，没有 test timeout、monitor deadline、kill 或 restart，并自然结束。stderr 不是空，而是 382 bytes 的 PowerShell first-use CLIXML progress；没有 traceback 或 FAILED。
+
+### 本步学到
+
+- nested CV 能区分“aggregate 看起来更好”和“跨组稳定安全”。prefix9 pairwise 的 hit/F1/citation/refusal 全部 aggregate 改善，仍因一折 F1 回退被阻止晋级。
+- promotion budget 从 3 降到 1 后，学习器确实接近 RRF，并出现净 +2 hit；但这仍不足以证明它适合 runtime。
+- 高门槛 histogram 几乎退化为 identity policy，证明 swap gate 能保持 RRF，却没有提供严格增益。
+- 共享组件的 progress ownership 必须显式参数化；复用计算逻辑不能连带复用错误的阶段身份。
+- 运行对比审计必须把确定性质量字段与天然波动的 latency/timing 分开，否则会制造假的不一致。
+
+下一步：停止当前 learned swap 家族，冻结 untouched RRF Top10 为固定 generation-context 候选策略，然后只在独立 dev 上做一次与 current query-overlap 的比较。test、runtime default、fallback、query rewrite 和 second retrieval 继续关闭。

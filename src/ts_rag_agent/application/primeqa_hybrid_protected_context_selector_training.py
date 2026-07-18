@@ -281,11 +281,15 @@ class Stage161TrainCandidateDatasetBuilder:
         channels: Sequence[Any],
         fold_assignments: Mapping[str, str],
         progress_sink: ProgressSink | None = None,
+        progress_stage: str = _STAGE,
     ) -> None:
+        if not progress_stage.strip():
+            raise ValueError("candidate builder progress stage must not be empty")
         self._documents_by_id = documents_by_id
         self._channels = tuple(channels)
         self._fold_assignments = dict(fold_assignments)
         self._progress_sink = progress_sink
+        self._progress_stage = progress_stage
         self._feature_extractor = RuntimeVisibleCandidateFeatureExtractor(
             documents_by_id=documents_by_id,
             sections_by_document=sections_by_document,
@@ -348,7 +352,7 @@ class Stage161TrainCandidateDatasetBuilder:
             if self._progress_sink is not None and (index % 25 == 0 or index == total):
                 self._progress_sink(
                     {
-                        "stage": _STAGE,
+                        "stage": self._progress_stage,
                         "phase": "train_candidate_pool_build",
                         "completed": index,
                         "total": total,
