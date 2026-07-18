@@ -1743,3 +1743,30 @@ second-stage reranker or generation-context selector, with dev held out from
 fit and test still locked. Runtime defaultization, remote exposure,
 persistence, queueing, retry, fallback, query rewrite, and second retrieval
 remain closed.
+
+The completed Stage 161 train-only experiment is documented in:
+
+```text
+docs/primeqa_hybrid_protected_context_selector_training.md
+```
+
+Stage161 builds the exact Stage116 RRF Top200 pool for all 562 train rows and
+uses normalized-question plus answer-document grouping for five-fold
+out-of-fold training. It evaluates protected RRF prefixes `3/5/7` crossed with
+pairwise logistic regression and pointwise histogram GBDT. Development and
+test are not loaded, and no model artifact or runtime integration is produced.
+
+The current query-overlap control places gold in generation Top10 for
+`175/370` answerable rows and has verified all-answerable F1 `0.194072`. The
+untouched RRF control is substantially stronger at `255/370` and F1 `0.201990`.
+All six learned selectors improve the current control, reaching `216-250`
+Top10 gold hits and F1 `0.202255-0.210292`, but none reaches the untouched RRF
+hit count. Five also have a negative minimum-fold F1 delta. The strict protocol
+therefore selects no configuration and does not open development evaluation.
+
+All 18 process guards pass. The formal process exits naturally with code 0 in
+`131.874477s`; the public artifact SHA-256 is
+`a13b8ee5538581f0eb87a649c48fdf4ae715b6cfa8a43a97b5115001f9cd1197`.
+Ten SVGs are XML-parseable. A next protocol may compare untouched RRF with a
+conservative one- or two-swap learned policy using nested train-only CV. Test,
+fallback, and runtime defaultization remain closed.

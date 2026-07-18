@@ -33548,3 +33548,108 @@ private canonical JSON SHA-256：`1c8aa4260be5427e13322cb3304e518dd3609c2e38f839
 - SVG XML 可解析不等于完成视觉验收；工具和安全策略不允许渲染时必须明确限制，不能补写成看过截图。
 
 下一步：设计 Stage161 train + grouped-CV 的快速第二阶段 reranker / generation-context selector 实验，目标是修复 candidate pool 到 generation Top10 的主要损失。dev 只做最终独立比较，test 继续锁定；另开独立分支研究 19 个 gold-visible model refusal。任何默认 runtime、remote、persistence、queue、retry、fallback、query rewrite 或 second retrieval 仍需用户另行确认。
+
+## 2026-07-19 - Stage 161 保护 RRF 前缀的 train-only 五折上下文选择器
+
+目标：针对 Stage160 已定位的 candidate pool 到 generation Top10 损失，只在 train 上训练和选择一个快速第二阶段上下文选择器。dev 与 test 都不加载；不修改默认 runtime，不启用 fallback、query rewrite 或 second retrieval。用户选择路线 A，随后又要求执行严格路线 C，因此选择门槛必须同时胜过当前 query-overlap、不得低于 untouched RRF，并且每折不允许 hit/F1 回退。
+
+### 冻结协议与实现
+
+输入在解析 train 前按 SHA-256 与上游 decision 精确授权：Stage119 `470c02a9...13c1`、Stage121 `f0152eb8...a766b`、Stage160 `e17e5fe...d9377`、Stage80 `2441bb1c...880f`、train `cabd93e0...a155`、technote corpus `f93b5e2d...6722b`。train 共 562 行，answerable/unanswerable 为 370/192；dev/test 行数始终为 0。
+
+沿用项目已有的 `normalized question + answer document / UNANSWERABLE` 分组和五折分配。每个 OOF fold 只使用其余四折 fit。训练标签仅为 train gold document membership；runtime feature 不含 gold。每条 train 问题重建精确 Stage116 original RRF Top200，共 112,400 条候选记录，只保存在内存。
+
+六个冻结配置为 RRF protected prefix `3/5/7` 乘以：
+
+```text
+pairwise logistic regression
+pointwise balanced histogram GBDT
+```
+
+pairwise 使用 gold 与 hard negatives 的对称特征差；pointwise 使用可恢复 gold 和 baseline 前 20、query-overlap 前 20 的去重 hard negatives。Top10 的 protected prefix 保持原 RRF 身份与顺序，模型只填剩余位置。当前 query-overlap 和 untouched RRF Top10 都作为控制组。
+
+严格 guard 要求：相对 current 必须增加 context hit；context hit 不低于 original RRF；all-answerable F1、gold citation 不降；answerable refusal、unanswerable false answer 不升；protected prefix 零破坏；每折 hit 和 F1 都不低于 current。没有 threshold 放宽，也没有 no-safe-config fallback。
+
+### 正式 train-only 结果
+
+正式进程只启动一次，显式使用 `--encoder-device cuda` 和已有本地 dense cache。没有运行时限、监控 deadline、自动终止、kill、restart、retry 或 fallback；同一 wrapper/child 自然结束，exit code 为 0，总耗时 `131.874477s`。
+
+候选池精确复现：
+
+```text
+candidate records: 112400
+pool depth min/max: 200 / 200
+answerable gold in pool: 345 / 370 = 93.2432%
+raw candidate rows written: false
+```
+
+控制组：
+
+```text
+current query-overlap Top10:
+  gold hit: 175 / 370 = 47.2973%
+  all-answerable F1: 0.194072
+  completed-answerable F1: 0.194597
+  gold citations: 151
+  answerable refusals: 1
+
+untouched original RRF Top10:
+  gold hit: 255 / 370 = 68.9189%
+  all-answerable F1: 0.201990
+  completed-answerable F1: 0.202537
+  gold citations: 177
+  answerable refusals: 1
+```
+
+这揭示了一个比“模型是否有效”更重要的事实：当前 query-overlap shortlister 在 train 上比 untouched RRF 少保留 80 个 Top10 gold，而且 verified F1 也更低。
+
+六个 OOF 配置：
+
+```text
+prefix3 + pairwise:  hit 224, F1 0.210249, citations 190, selectable false
+prefix3 + histogram: hit 216, F1 0.208407, citations 188, selectable false
+prefix5 + pairwise:  hit 244, F1 0.210292, citations 189, selectable false
+prefix5 + histogram: hit 233, F1 0.203880, citations 189, selectable false
+prefix7 + pairwise:  hit 250, F1 0.204102, citations 183, selectable false
+prefix7 + histogram: hit 245, F1 0.202255, citations 183, selectable false
+```
+
+六个模型都相对 current 提高 Top10 gold hit、aggregate F1 和 gold citation，并把 answerable refusal 从 1 降到 0；但全部低于 untouched RRF 的 255 hits。除 prefix3 histogram 外，其余五个还有至少一折 F1 回退；prefix3 histogram 虽然每折 F1 不降，但只有 216 hits。因此严格结果是 `0/6 selectable`、`selected_config_id = null`，没有进入 dev、没有 full-train model artifact、没有 runtime 集成。
+
+所有控制和候选的 unanswerable false answer 都是 `191/192`。本阶段只验证它没有恶化，绝不能把这个数描述为可接受的最终行为。
+
+18/18 process guards 通过。公开 artifact SHA-256 为 `a13b8ee5538581f0eb87a649c48fdf4ae715b6cfa8a43a97b5115001f9cd1197`。10 张 SVG 覆盖 hit、F1、citation、refusal、false answer、promotion、selector latency、minimum fold delta、config status 和 process guards，10/10 可 XML parse；没有声称完成逐像素 screenshot review。
+
+### 真实失败、修正与执行事实
+
+- 开始时两次只读搜索猜了不存在的历史模块文件，其中一次 `rg` exit 1；没有文件修改。
+- 第一轮 core Ruff 格式化了两个文件后，因未使用的 `statistics.median` 失败；同时清理了未使用的 private case accumulation，随后通过。
+- CLI patch 的工具输出在上下文截断时被截断；恢复后先检查文件真实存在与大小，没有直接假设成功。
+- CLI 第一次 `ruff format --check` 失败；格式化后 Ruff 又发现 `Mapping` 应来自 `collections.abc`。修正后静态检查和 `py_compile` 通过。
+- 第一次 focused pytest 为 `12 passed, 3 failed`。其中两个是真实实现问题：缺失 route 时冻结特征没有显式补零、SVG renderer 漏传 `x_label`；第三个是测试错误地要求 histogram tree 的 gold 分数必须唯一最高。实现和测试都已修正。
+- 上述修正第一次引入 visualization loop 缩进错误，Ruff 在 parse 阶段拦截，测试没有运行。修正缩进后 focused pytest 为 `15 passed`。
+- 第一次 source authorization preflight 手工猜错 corpus 路径，真实失败为 `FileNotFoundError`。读取 `ProjectSettings.primeqa_raw_dir` 后用真实路径重查，六个 fingerprint 与上游 decision 全部授权成功。
+- formal launcher 没有打印预期 JSON，但写出了 PID。没有重复启动；只读核对 wrapper、child Python command line、stdout progress 和 exit file，跟踪同一个进程自然结束。
+- formal stderr 非空：包含成功的两组 model weight-loading progress，以及 PowerShell 首次模块准备的 CLIXML progress；没有 Python traceback，exit code 为 0。不能写成 stderr empty，也不能把进度包装误报为训练失败。
+
+最终 current-source 验证：
+
+```text
+Stage161 five-file Ruff format check: passed
+full repository Ruff lint: passed
+Stage161 targeted pytest: 15 passed in 2.05s
+full repository pytest: 830 passed, 1 existing warning in 13.66s
+full pytest exit code: 0
+```
+
+warning 是既有 FastAPI/Starlette `TestClient` deprecation。完整 pytest 只启动一次，没有 pytest timeout、监控 deadline、kill 或 restart，并自然结束。pytest stderr 不是空，而是 382 bytes 的 PowerShell 首次模块准备 CLIXML progress；没有测试 traceback。
+
+### 本步学到
+
+- 当前最大的直接改进机会可能不是继续训练更复杂的全 Top200 reranker，而是先停止 query-overlap 对原始 RRF Top10 的大范围重排；untouched RRF 已经把 train hit 从 47.3% 提到 68.9%。
+- “相对 current 有提升”不足以晋级。严格 control 能阻止一个看似提高 F1/citation、但破坏更强 RRF 召回的模型被错误选择。
+- protected prefix 3/5/7 仍给学习器过多强制替换槽位。prefix 越深，hit 越接近 RRF；下一轮更合理的是保护 8/9 个位置、限制 1/2 次 swap，而不是每次重排 3-7 个 tail slot。
+- aggregate F1 提高不保证每折安全；五个配置在至少一折 F1 回退，证明 grouped OOF guard 是必要的。
+- unanswerable `191/192` false answer 是独立且严重的问题；它不能被 Top10 召回提升掩盖，但本阶段也没有被授权调整拒答策略。
+
+下一步候选是 Stage162：先冻结是否把 untouched RRF 恢复为新的非 Agent 基准，再设计 `prefix8/9 + promotion budget 2/1` 的保守 swap selector。若需要学习 threshold 或 swap gate，必须使用 nested train-only CV；dev 只能做一次冻结后验证，test、runtime default、fallback、query rewrite 和 second retrieval 继续关闭。
