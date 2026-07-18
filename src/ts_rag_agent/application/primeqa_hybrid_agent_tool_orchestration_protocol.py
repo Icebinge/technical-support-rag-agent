@@ -18,8 +18,10 @@ from ts_rag_agent.application.svg_charts import BarDatum, render_horizontal_bar_
 
 _STAGE = "Stage 153"
 _CREATED_AT = "2026-07-18"
-_PROTOCOL_ID = "primeqa_hybrid_local_agent_tool_orchestration_protocol_v1"
-_GRAPH_ID = "primeqa_hybrid_deterministic_tool_workflow_v1"
+AGENT_TOOL_ORCHESTRATION_PROTOCOL_ID = "primeqa_hybrid_local_agent_tool_orchestration_protocol_v1"
+AGENT_TOOL_WORKFLOW_GRAPH_ID = "primeqa_hybrid_deterministic_tool_workflow_v1"
+_PROTOCOL_ID = AGENT_TOOL_ORCHESTRATION_PROTOCOL_ID
+_GRAPH_ID = AGENT_TOOL_WORKFLOW_GRAPH_ID
 _SOURCE_STAGE152_ANALYSIS_ID = "primeqa_hybrid_local_agent_service_entrypoint_validation_v1"
 _SOURCE_STAGE152_STATUS = "primeqa_hybrid_local_agent_service_entrypoint_implemented_and_validated"
 _SOURCE_STAGE139_ANALYSIS_ID = (

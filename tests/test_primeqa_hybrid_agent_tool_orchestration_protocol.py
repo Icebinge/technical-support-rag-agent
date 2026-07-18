@@ -27,6 +27,7 @@ _STAGE139 = (
     / "artifacts"
     / "primeqa_hybrid_optional_sidecar_agent_entrypoint_validation_stage139.json"
 )
+_STAGE153 = _ROOT / "artifacts" / "primeqa_hybrid_agent_tool_orchestration_protocol_stage153.json"
 _PATH_PREFIX = [
     AgentToolWorkflowAction.VALIDATE_REQUEST,
     AgentToolWorkflowAction.RETRIEVE_CANDIDATE_POOL,
@@ -173,15 +174,16 @@ def test_strict_policy_rejects_unauthorized_behavior(
     assert reason in result.rejection_reasons
 
 
-def test_preflight_fails_only_confirmation_guard_and_does_not_mutate_sources() -> None:
+def test_stage153_recomputation_fails_closed_after_stage154_dependency_install() -> None:
     stage152_before = _STAGE152.read_bytes()
     stage139_before = _STAGE139.read_bytes()
 
     report = _freeze(confirmed=False, note="test preflight")
 
     failed = [check["name"] for check in report["guard_checks"] if not check["passed"]]
-    assert failed == ["stage153_user_confirmed"]
+    assert failed == ["stage153_user_confirmed", "dependency_install_closed"]
     assert report["decision"]["protocol_frozen"] is False
+    assert report["local_framework_observation"]["langgraph_installed"] is True
     assert report["public_safe_contract"]["questions_loaded"] is False
     assert report["public_safe_contract"]["documents_loaded"] is False
     assert report["public_safe_contract"]["langgraph_dependency_installed"] is False
@@ -189,8 +191,8 @@ def test_preflight_fails_only_confirmation_guard_and_does_not_mutate_sources() -
     assert _STAGE139.read_bytes() == stage139_before
 
 
-def test_formal_protocol_passes_all_guards_and_keeps_boundaries_closed() -> None:
-    report = _freeze(confirmed=True, note="user confirmed Stage153 protocol")
+def test_saved_stage153_formal_protocol_preserves_its_historical_environment() -> None:
+    report = json.loads(_STAGE153.read_text(encoding="utf-8"))
 
     assert len(report["guard_checks"]) == 46
     assert all(check["passed"] for check in report["guard_checks"])
@@ -200,6 +202,7 @@ def test_formal_protocol_passes_all_guards_and_keeps_boundaries_closed() -> None
     assert report["decision"]["workflow_implementation_allowed_next"] is True
     assert report["decision"]["workflow_implemented"] is False
     assert report["decision"]["langgraph_dependency_installed"] is False
+    assert report["local_framework_observation"]["langgraph_installed"] is False
     assert report["decision"]["test_gate_opened"] is False
     assert report["decision"]["runtime_registered_as_default"] is False
     assert report["frozen_protocol"]["execution_contract"]["retry_action_count"] == 0

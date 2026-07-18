@@ -28,9 +28,7 @@ rag = [
   "sentence-transformers>=3.0",
 ]
 agent = [
-  "langchain>=0.3",
-  "langgraph>=0.2",
-  "langchain-community>=0.3",
+  "langgraph==1.2.9",
 ]
 app = [
   "fastapi>=0.115",
@@ -40,6 +38,7 @@ dev = [
   "httpx>=0.28",
   "pytest>=8.2",
   "ruff>=0.6",
+  "tomli>=2.0; python_version < '3.11'",
 ]
 
 [tool.setuptools.packages.find]

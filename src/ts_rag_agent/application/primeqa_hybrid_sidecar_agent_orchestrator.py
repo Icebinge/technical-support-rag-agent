@@ -208,7 +208,7 @@ class PrimeQAHybridSidecarAgentOrchestrator:
     ) -> PrimeQAHybridSidecarAgentRun:
         """Run one answer while keeping sidecar candidates out of answer paths."""
 
-        _validate_candidate_pool(candidate_pool_results)
+        validate_primeqa_hybrid_candidate_pool(candidate_pool_results)
         bundle = self._observation_adapter.observe(
             question=question,
             candidate_pool_results=candidate_pool_results,
@@ -228,17 +228,11 @@ class PrimeQAHybridSidecarAgentOrchestrator:
             original_answer,
             verification_context,
         )
-        trace = _build_public_safe_trace(
+        return assemble_primeqa_hybrid_sidecar_agent_run(
             bundle=bundle,
             verification_context=verification_context,
             original_answer=original_answer,
             verification=verification,
-        )
-        return PrimeQAHybridSidecarAgentRun(
-            original_answer=original_answer,
-            verification_result=verification,
-            observation_bundle=bundle,
-            public_safe_trace=trace,
         )
 
 
@@ -313,6 +307,29 @@ def sidecar_agent_orchestrator_contract() -> dict[str, Any]:
             "retrieval_improvement_claim_allowed": False,
         },
     }
+
+
+def assemble_primeqa_hybrid_sidecar_agent_run(
+    *,
+    bundle: SidecarObservationBundle,
+    verification_context: Sequence[RetrievalResult],
+    original_answer: GeneratedAnswer,
+    verification: AnswerVerificationResult,
+) -> PrimeQAHybridSidecarAgentRun:
+    """Assemble the shared sidecar result after generation and verification."""
+
+    trace = _build_public_safe_trace(
+        bundle=bundle,
+        verification_context=verification_context,
+        original_answer=original_answer,
+        verification=verification,
+    )
+    return PrimeQAHybridSidecarAgentRun(
+        original_answer=original_answer,
+        verification_result=verification,
+        observation_bundle=bundle,
+        public_safe_trace=trace,
+    )
 
 
 def _build_public_safe_trace(
@@ -397,9 +414,11 @@ def _evidence_gap_trace_status(
     return "sidecar_observed_without_novel_query_coverage"
 
 
-def _validate_candidate_pool(
+def validate_primeqa_hybrid_candidate_pool(
     candidate_pool_results: Sequence[RetrievalResult],
 ) -> None:
+    """Enforce the frozen rank contract before any answer-path operation."""
+
     ranks = [result.rank for result in candidate_pool_results]
     if any(rank <= 0 for rank in ranks):
         raise ValueError("candidate ranks must be positive")

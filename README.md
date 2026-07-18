@@ -16,7 +16,7 @@ No downloaded dataset files are committed to this repository.
 
 ## Current Status
 
-Stage 153: deterministic local Agent tool-orchestration protocol frozen and validated.
+Stage 154: LangGraph Agent tool workflow implemented, integrated, and validated.
 
 Implemented:
 
@@ -45,11 +45,14 @@ Implemented:
 - real resource, HTTP/1.1, main-thread Uvicorn, and natural shutdown lifecycle validation
 - executable nine-state Agent tool-workflow protocol with strict transition guards
 - frozen three-tool context authority, private state, and public trace contracts
-- current LangGraph `StateGraph` adapter research with implementation still gated
+- LangGraph 1.2.9 `StateGraph` adapter compiled once per workflow instance
+- framework-neutral and LangGraph engine equivalence for complete/refuse paths
+- request-isolated four-way graph execution with exact error propagation
+- active facade, FastAPI, and local service request paths using the graph workflow
 
 Not implemented yet:
 
-- LangGraph workflow
+- autonomous LLM tool selection, memory, and repeated retrieval
 - remote network serving
 - runtime defaultization and final locked-test evaluation
 
@@ -67,9 +70,10 @@ facade. Stage150 implements the FastAPI adapter and validates it with
 in-process ASGI calls plus a temporary real loopback socket. Stage151 freezes
 the process composition protocol. Stage152 implements its strict local service
 entrypoint and validates one real resource and HTTP lifecycle. Stage153 freezes
-the request-local tool workflow around that service without implementing or
-installing LangGraph. The entrypoint remains disabled by default, binds
-loopback only after both explicit flags are true, and no network service
+the request-local tool workflow. Stage154 installs LangGraph 1.2.9, implements
+the framework-neutral and `StateGraph` engines, and routes the concurrent
+runtime through the compiled graph. The entrypoint remains disabled by default,
+binds loopback only after both explicit flags are true, and no network service
 remains running after validation.
 
 The Stage150 implementation and formal evidence are recorded in
@@ -82,6 +86,9 @@ Stage151 protocol is recorded in
 [docs/primeqa_hybrid_agent_service_entrypoint_protocol.md](docs/primeqa_hybrid_agent_service_entrypoint_protocol.md).
 The implementation evidence is recorded in
 [docs/primeqa_hybrid_agent_service_entrypoint_validation.md](docs/primeqa_hybrid_agent_service_entrypoint_validation.md).
+The Stage154 graph implementation and current-code lifecycle evidence are
+recorded in
+[docs/primeqa_hybrid_agent_tool_workflow_validation.md](docs/primeqa_hybrid_agent_tool_workflow_validation.md).
 
 Run the non-default local service only with both explicit activation flags and
 an explicit non-privileged port:
@@ -101,7 +108,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
 pip install -U pip
-pip install -e ".[app,dev,data]"
+pip install -e ".[agent,app,dev,data]"
 ```
 
 Download the lightweight RAG evaluation dataset:

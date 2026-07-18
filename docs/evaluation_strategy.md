@@ -1390,3 +1390,45 @@ parseable SVG files. No split, document, model, index, candidate pool, socket,
 or service is opened, and test remains locked. Stage154 may implement and prove
 the deterministic workflow plus LangGraph adapter; remote serving,
 defaultization, test, queues, retries, and fallback remain closed.
+
+The current Stage 154 LangGraph Agent tool-workflow implementation is recorded
+in:
+
+```text
+docs/primeqa_hybrid_agent_tool_workflow_validation.md
+```
+
+Stage154 pins the sole direct `agent` dependency to `langgraph==1.2.9` and
+records the exact installed transitive versions. Full LangChain and
+langchain-community are not direct dependencies. Installation changed
+`websockets` from 16.1 to 15.0.1 under the LangGraph SDK constraint; `pip check`
+passes.
+
+The implementation uses one shared node executor behind a framework-neutral
+reference engine and a `StateGraph` engine. The graph compiles once per
+workflow instance, creates a new exact 13-field private state per request, has
+seven nodes and one conditional terminal route, and attaches no checkpointer or
+cache. The concurrent runtime factory now uses this graph, so the existing
+facade, FastAPI adapter, and local service path execute it when their existing
+explicit activation gates pass.
+
+Complete and refuse outputs are equal across both engines. Successful requests
+make exactly one retrieval, answer, and verification call over Top400, Top10,
+rank-200, and three-sidecar contexts. Invalid node order is rejected before a
+tool call. Four simultaneous graph invocations remain isolated with one compile.
+The same original retrieval exception reaches the caller; only a public-safe
+failure-stage snapshot is recorded and immediately consumed, with zero retry or
+fallback actions.
+
+The corrected unconfirmed preflight passes `46/54` guards. One confirmed
+current-code real resource and loopback lifecycle ran once on port 18154 and
+passes the supporting Stage152 `46/46` guards in `49.813499s`; HTTP/1.1 live,
+ready, and answer are `200/200/200`, three citations are returned, and the
+listener and transport close. That artifact does not save the real request's
+candidate-pool depth, so no real-depth claim is made; separate synthetic HTTP
+evidence directly observes Top400. The Stage154 formal report passes `54/54`
+in `0.204824s`, and full repository validation is `700 passed` with one known
+dependency warning. No evaluation split is loaded and test remains locked.
+Stage155 may freeze graph runtime activation and operational observability;
+remote serving, defaultization, test, queues, retries, and fallback remain
+closed.

@@ -32847,3 +32847,107 @@ git diff --cached --check: passed, with a CRLF-to-LF normalization warning for t
 - 审计脚本本身也会犯 schema 假设错误；失败必须记录，并在读取真实容器结构后重跑，不能把脚本失败误写成 artifact 失败或悄悄省略。
 
 下一步：Stage154 安装并记录精确的 LangGraph 本地版本，实现 framework-neutral deterministic workflow 与 `StateGraph` adapter，使用同一组 complete/refuse/invalid-transition/concurrency/error-propagation 契约做等价性验证，并接入现有 facade/service 的 request path。test、remote、默认化、queue、retry 和 fallback 继续关闭。
+
+## 2026-07-18 - Stage 154 LangGraph Agent 工具工作流实现与真实服务链验证
+
+目标：把 Stage153 冻结的确定性工具协议真正实现为 framework-neutral reference engine 与 LangGraph `StateGraph` engine，并让现有 concurrent runtime、facade、FastAPI 和本地 service request path 执行该图；不打开 test，不引入自动工具循环、query rewrite、二次召回、memory、queue、retry 或 fallback。
+
+### 依赖调研与真实安装
+
+再次核对了 LangGraph 官方 Graph API、workflow/agent 区分、tools/ToolNode 说明和 PyPI。2026-07-18 观察到的当前 LangGraph 版本是 1.2.9，官方 Graph API 要求先定义 state、nodes、edges，再 compile 后 invoke。当前路径是预定 workflow，不是 LLM 动态选择工具的 autonomous agent，因此没有采用 `ToolNode` 或 `create_agent`。
+
+本机初始事实：Python 3.10.20，`langgraph`、`langchain`、`langchain-core` 都未安装；原 `agent` extra 是会漂移的 `langchain>=0.3`、`langgraph>=0.2`、`langchain-community>=0.3`。先执行 `pip install --dry-run langgraph==1.2.9`，确认真实解析集合后，把直接依赖收敛为唯一的 `langgraph==1.2.9`。Python 3.10 的结构化 TOML validator 使用 `dev` extra 中显式声明的 `tomli>=2.0`。
+
+第一次正式 editable 安装自然运行 `20.1s` 后成功，没有安装重试。它真实地把环境已有 `websockets` 从 16.1 调整为 15.0.1，以满足 `langgraph-sdk<0.5.0`；该变化没有隐藏。主要实际版本为 LangGraph 1.2.9、langchain-core 1.4.9、langgraph-checkpoint 4.1.1、langgraph-prebuilt 1.1.0、langgraph-sdk 0.4.2。`pip check` 为 `No broken requirements found`。加入 `tomli` 声明后又执行一次 editable `[agent,dev]` 元数据同步，所有包均已满足，没有更换 LangGraph 版本。
+
+### 实现结构
+
+新增 `PrimeQAHybridAgentToolset`、共享 `AgentToolWorkflowNodeExecutor`、`DeterministicAgentToolWorkflowEngine`、`LangGraphAgentToolWorkflowEngine` 和统一 workflow facade。两个 engine 调用完全相同的节点方法；StateGraph 每个 workflow instance 只 compile 一次，每个请求新建精确 13 字段 private state。
+
+图有 7 个节点：validate、retrieve、prepare context、compose、verify、observe、finalize。observe 后只有 complete/refuse 条件路由。成功路径精确调用 retrieve、answer、verify 各一次，继续使用 Top400 candidate pool、Top10 generation context、rank-200 verification context 和 3 个只读 sidecar observation。
+
+旧 sidecar orchestrator 的结果组装逻辑提炼为共享公开 assembler，旧 Stage139 entrypoint 与新 graph 不各自复制 telemetry 组装。concurrent runtime factory 现在构建 LangGraph workflow；facade、HTTP 和 service 外部 schema 不变，仍由已有两个显式 activation flag 控制，默认不启动。
+
+每个节点在工具执行前先验证 transition。错误节点顺序会在零工具调用、零 state mutation 时抛出。工具异常对象不包装、不吞掉、不转换、不重试。
+
+### LangGraph context 边界发现与修正
+
+首轮现有 concurrent/facade 回归真实结果为 `10 passed, 4 failed`。四个失败都不是答案或召回错误，而是 LangGraph 在复制的执行 context 内运行节点：旧 profiling retriever 在节点内写 `ContextVar`，图外 runtime 再读取时得到空值。
+
+修正为调用方先创建唯一 private token，graph node 继承 token 并把 profile 写入加锁的 token-to-profile map，图外按同一 token 消费并删除。token/profile 不进入 graph public state 或 telemetry。修正后原 14 个 concurrent/facade 测试全部通过。
+
+Stage154 新测试第一轮真实结果是 Ruff 报 2 个未使用 import，同时 pytest `8 passed, 1 failed`。失败表明 failure snapshot 的节点内 `ContextVar` 更新也不会回写图外，虽然原始异常对象已经正确穿透。最终改为按 inherited invocation token + 原异常对象身份存一次性加锁 snapshot；外层捕获同一异常后立即消费删除，仍然原样 `raise`。修正后新 workflow 测试 `9 passed`，与回归组合为 `23 passed`。
+
+### Formal validator、preflight 与可视化修正
+
+- validator 首轮 formatter 重排 2 个文件，Ruff 报 1 个未使用 import 和 1 行 105 字符，修正后通过。
+- 第一次 preflight synthetic/HTTP 已执行，但审计代码把真实 HTTP route ID `agent_answer` 写成 `answer`，在 JSON 落盘前 `IndexError` 退出，不能算 preflight 通过。
+- 第二次 preflight synthetic/HTTP 再次完成，但 SVG wrapper 使用了 helper 不支持的 `row_height` 参数，仍在 JSON 落盘前退出，也不能算通过。
+- 按真实 route ID 与 chart helper 签名修正后，最终未确认 preflight 为 `46/54`。8 个失败项精确是 user confirmation 与缺少 current real support 时的 7 类 lifecycle evidence；synthetic live/ready/answer 已为 `200/200/200`，10 张 SVG 已生成。
+
+### 唯一一次当前代码真实资源/service 生命周期
+
+用户本轮“好下一大步”作为正式确认。使用固定 `127.0.0.1:18154`，没有备用端口、bind retry、应用 timeout、强制取消或进程重启。进程自然运行约 `52.3s` 后退出 0；artifact 内 real lifecycle 为 `49.813499s`。
+
+```text
+Stage152 current-code support: 46 / 46
+HTTP/1.1 live / ready / answer: 200 / 200 / 200
+answer refused / citations: false / 3
+listener released / transport closed: true / true
+exit code: 0
+test metrics run: false
+```
+
+支持 artifact 的首次精简审计先确认了 `46/46` 与 `200/200/200`，随后因错误假设 `candidate_pool_depth` 位于 `http_probe` 而 `KeyError` 退出。读取真实 schema 后确认它保存的是 `answer_citation_count=3`，没有保存 real request candidate depth。Stage154 删除了无法直接支持的 `real_candidate_pool_exact` guard，没有从 synthetic 或代码常量倒填；Top400 只由独立 synthetic HTTP 证据直接观察，real support 只证明当前 graph-integrated 代码完成真实 technote/model/index/HTTP/shutdown 生命周期。
+
+### 正式结果与全仓回归
+
+confirmed formal 第一次即通过：
+
+```text
+Stage153 source: 46 / 46
+Stage154 formal: 54 / 54
+reference / StateGraph complete equivalence: passed
+reference / StateGraph refuse equivalence: passed
+invalid transition zero tool call: passed
+same exception object propagation: passed
+four concurrent request isolation / compile count: 4 / 1
+synthetic HTTP live / ready / answer: 200 / 200 / 200
+real support: 46 / 46
+first formal time: 0.165285s
+```
+
+第一次 formal artifact SHA-256 为 `d21341683902932dc67f5424ad8c66db47c644a0b8ad2ee5c4445e955de0b51e`，当时 preflight SHA-256 为 `59c29217132cc874611902931ad052b2dece434d083db25b0a9816eab8c01730`。
+
+提交前维护性审查又把 concurrent runtime contract 中重复写死的 protocol/graph ID 改为引用 Stage153 公开常量，并补全 execution port 的 `GeneratedAnswer` 类型。相关行为测试仍为 `23 passed`，但同一命令中 Ruff 报 1 个 import order，因此不能称整条全绿；Ruff 自动整理该 import 后通过。因为 concurrent runtime 是 formal fingerprint source，即使行为不变，第一次 formal 也不再匹配最终源码。没有重跑真实资源 lifecycle，而是读取同一个已完成 support artifact，重新生成 formal/preflight。最终 formal 仍为 `54/54`，时间 `0.204824s`，SHA-256 为 `ed7ce5b99be2c31e045d1c20d0f0965f2cbf99c0f5c89414158c2bab8c773a5d`；最终 preflight 为 `46/54`，时间 `0.092058s`，SHA-256 为 `4020845a899421d61b06c7673d918e93f3707d39447bf9b624aa35e7012f63f1`。旧 SHA 保留为过程事实，但不再作为最终证据。
+
+current-code real support SHA-256：`639a71ac921ebec2c06378fb06e9f48eb4798bb38612a6682f391901e34e8e40`。最终 formal/preflight 各 10 张 SVG 均可 XML 解析。
+
+最终 fingerprint-source 维护完成后的提交前全仓验收为：9 个 Stage154 Python 文件已格式化、full Ruff passed、`700 passed, 1 warning in 11.14s`。这是最终源码对应的测试结果。
+
+validator 自身测试为 `4 passed`。第一次全仓 pytest 真实结果为 `698 passed, 2 failed`：两个历史 Stage153 测试仍假设 LangGraph 永远未安装。没有篡改 Stage153 artifact；测试改为分别验证“保存的 Stage153 环境快照仍为 46/46、LangGraph 当时未安装”和“Stage154 当前环境重算会精确因 `dependency_install_closed` fail-closed”。Stage153 定向测试恢复 `29 passed` 后，最终结果：
+
+```text
+full repository Ruff: passed
+first full repository pytest after historical-test correction: 700 passed, 1 existing Starlette TestClient deprecation warning in 6.43s
+pip check: passed
+formal / preflight guards: 54 / 54 and 46 / 54
+formal / preflight SVG XML: 10 / 10 and 10 / 10
+real support guards: 46 / 46
+```
+
+全过程没有加载 train/dev/test 问题 split，也没有运行 test metric。唯一长资源进程被自然等待到结束，没有监控超时、主动终止或重跑。
+
+提交前文档审计中，四个文档均可按 UTF-8 读取，evaluation strategy 的 Stage153→Stage154 顺序正确；但经 PowerShell here-string 传给 Python 的中文标题 literal 精确比较返回 false。随后直接输出文件中所有 Stage154 行的 `repr`，确认实际标题完整存在，问题属于审计脚本文字传递，不是文档乱码或内容缺失。最终审计改用 ASCII 阶段标识与结构条件。
+
+最终独立产物审计确认 formal 的 4 个 source fingerprint、real support 的 6 个来源 fingerprint（包含 239 MB technote）均与当前文件 size/SHA 一致；formal、preflight、support 共 30 张 SVG 可解析，真实服务退出后端口 18154 可重新绑定。3 个 JSON/SVG 目录继续按仓库既有 `artifacts/*` 规则忽略，没有提交生成数据。
+
+### 本步学到
+
+- `ContextVar` 能把父 context 的值传播进 LangGraph 节点，但节点在复制 context 中写回的值不会自动回到调用方；跨 graph boundary 的 request-local side channel 必须有显式 token ownership。
+- “原异常传播”与“记录失败阶段”可以同时满足：按 invocation token 和原异常对象身份保存一次性公开安全 snapshot，消费后删除，不需要包装异常或引入恢复策略。
+- 历史 stage validator 的环境 guard 是时间快照。后续阶段合法改变环境后，应验证保存 artifact 的历史事实与当前重算的 fail-closed 行为，不能要求旧 validator 在新环境里继续假装全绿。
+- supporting artifact 没有字段就没有证据。即使代码常量和 synthetic 路径都知道 Top400，也不能把 real candidate depth 写成已观测。
+- 先让 framework-neutral 与 framework adapter 共用同一 node executor，可以把等价性问题缩小为调度语义，而不是维护两套业务逻辑。
+
+下一步：Stage155 冻结 graph workflow 的 runtime activation evidence 与 operational observability，明确 workflow trace 如何与现有 runtime/facade/HTTP telemetry 关联、如何观测 compile/invocation/failure/concurrency，而不公开 request 内容。test、remote、默认化、queue、retry 和 fallback 继续关闭。

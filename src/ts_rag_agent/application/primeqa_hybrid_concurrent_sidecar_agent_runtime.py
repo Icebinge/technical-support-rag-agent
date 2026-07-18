@@ -8,6 +8,13 @@ from enum import Enum
 from threading import BoundedSemaphore, Lock
 from typing import Any, Protocol
 
+from ts_rag_agent.application.primeqa_hybrid_agent_tool_orchestration_protocol import (
+    AGENT_TOOL_ORCHESTRATION_PROTOCOL_ID,
+    AGENT_TOOL_WORKFLOW_GRAPH_ID,
+)
+from ts_rag_agent.application.primeqa_hybrid_agent_tool_workflow import (
+    create_primeqa_hybrid_langgraph_agent_tool_workflow,
+)
 from ts_rag_agent.application.primeqa_hybrid_nondefault_runtime_activation_protocol import (
     RuntimeActivationState,
 )
@@ -15,16 +22,12 @@ from ts_rag_agent.application.primeqa_hybrid_online_candidate_pool_retriever imp
     CandidatePoolRetrievalRun,
     PrimeQAHybridOnlineCandidatePoolRetriever,
 )
-from ts_rag_agent.application.primeqa_hybrid_optional_sidecar_agent_entrypoint import (
-    OptionalSidecarAgentEntrypointRun,
-    PrimeQAHybridOptionalSidecarAgentEntrypoint,
-    create_primeqa_hybrid_optional_sidecar_agent_entrypoint,
-)
 from ts_rag_agent.application.primeqa_hybrid_optional_sidecar_agent_runtime import (
     PrimeQAHybridRuntimeResourceSummary,
     PrimeQAHybridSharedRuntimeResources,
     _forbidden_keys_found,
 )
+from ts_rag_agent.domain.answer import GeneratedAnswer
 from ts_rag_agent.domain.dataset import PrimeQAQuery
 from ts_rag_agent.domain.retrieval import RetrievalResult
 
@@ -68,6 +71,22 @@ class AdmissionProbePort(Protocol):
     def on_admitted(self, in_flight_at_admission: int) -> None: ...
 
 
+class AgentExecutionPublicTracePort(Protocol):
+    terminal_state: str
+
+
+class AgentExecutionRunPort(Protocol):
+    candidate_pool_results: tuple[RetrievalResult, ...]
+    public_safe_trace: AgentExecutionPublicTracePort
+
+    @property
+    def verified_answer(self) -> GeneratedAnswer: ...
+
+
+class AgentExecutionPort(Protocol):
+    def run(self, question: PrimeQAQuery) -> AgentExecutionRunPort: ...
+
+
 @dataclass(frozen=True)
 class PublicSafeConcurrentRuntimeRequestTrace:
     """Stage144 allowlisted public trace for one concurrent runtime attempt."""
@@ -109,7 +128,7 @@ class PrimeQAHybridConcurrentCapacityExceededError(RuntimeError):
 class ConcurrentSidecarAgentRuntimeRun:
     """Private Agent result paired with the Stage144 public runtime trace."""
 
-    entrypoint_run: OptionalSidecarAgentEntrypointRun
+    entrypoint_run: AgentExecutionRunPort
     public_safe_trace: PublicSafeConcurrentRuntimeRequestTrace
 
     @property
@@ -140,31 +159,53 @@ class RequestLocalProfiledCandidatePoolRetriever:
 
     def __init__(self, delegate: PrimeQAHybridOnlineCandidatePoolRetriever) -> None:
         self._delegate = delegate
-        self._pending_run: ContextVar[CandidatePoolRetrievalRun | None] = ContextVar(
-            f"primeqa_hybrid_pending_retrieval_run_{id(self)}",
+        self._request_token: ContextVar[object | None] = ContextVar(
+            f"primeqa_hybrid_retrieval_request_token_{id(self)}",
             default=None,
         )
+        self._pending_lock = Lock()
+        self._pending_runs: dict[object, CandidatePoolRetrievalRun] = {}
 
     def prepare_request(self) -> None:
-        if self._pending_run.get() is not None:
+        if self._request_token.get() is not None:
             raise RuntimeError("previous request-local retrieval profile was not consumed")
+        self._request_token.set(object())
 
     def retrieve(self, question: PrimeQAQuery) -> Sequence[RetrievalResult]:
-        if self._pending_run.get() is not None:
-            raise RuntimeError("one retrieval profile is allowed per request context")
+        token = self._request_token.get()
+        if token is None:
+            raise RuntimeError("retrieval profile requires a prepared request token")
+        with self._pending_lock:
+            if token in self._pending_runs:
+                raise RuntimeError("one retrieval profile is allowed per request context")
         run = self._delegate.retrieve_profiled(question)
-        self._pending_run.set(run)
+        with self._pending_lock:
+            if token in self._pending_runs:
+                raise RuntimeError("one retrieval profile is allowed per request context")
+            self._pending_runs[token] = run
         return run.results
 
     def take_run(self) -> CandidatePoolRetrievalRun:
-        run = self._pending_run.get()
-        if run is None:
-            raise RuntimeError("entrypoint completed without a request-local retrieval profile")
-        self._pending_run.set(None)
-        return run
+        token = self._request_token.get()
+        try:
+            if token is None:
+                raise RuntimeError("retrieval profile request token is missing")
+            with self._pending_lock:
+                try:
+                    return self._pending_runs.pop(token)
+                except KeyError:
+                    raise RuntimeError(
+                        "entrypoint completed without a request-local retrieval profile"
+                    ) from None
+        finally:
+            self._request_token.set(None)
 
     def discard_run(self) -> None:
-        self._pending_run.set(None)
+        token = self._request_token.get()
+        if token is not None:
+            with self._pending_lock:
+                self._pending_runs.pop(token, None)
+        self._request_token.set(None)
 
 
 @dataclass(frozen=True)
@@ -172,7 +213,7 @@ class PrimeQAHybridConcurrentRuntimeResourceBundle:
     """One shared entrypoint over process-owned retrieval resources."""
 
     profiled_retriever: RequestLocalProfiledCandidatePoolRetriever
-    entrypoint: PrimeQAHybridOptionalSidecarAgentEntrypoint
+    entrypoint: AgentExecutionPort
     summary: PrimeQAHybridRuntimeResourceSummary
 
 
@@ -301,7 +342,7 @@ def create_primeqa_hybrid_concurrent_sidecar_agent_runtime(
     profiled_retriever = RequestLocalProfiledCandidatePoolRetriever(
         shared_resources.candidate_pool_retriever
     )
-    entrypoint = create_primeqa_hybrid_optional_sidecar_agent_entrypoint(
+    entrypoint = create_primeqa_hybrid_langgraph_agent_tool_workflow(
         candidate_pool_retriever=profiled_retriever,
     )
     return PrimeQAHybridConcurrentSidecarAgentRuntime(
@@ -327,6 +368,10 @@ def concurrent_sidecar_runtime_contract() -> dict[str, Any]:
         "shared_process_resources": True,
         "request_local_retrieval_profile": True,
         "request_local_agent_state_machine": True,
+        "agent_workflow_adapter": "langgraph.graph.StateGraph",
+        "agent_workflow_graph_compiled_once": True,
+        "agent_workflow_protocol_id": AGENT_TOOL_ORCHESTRATION_PROTOCOL_ID,
+        "agent_workflow_graph_id": AGENT_TOOL_WORKFLOW_GRAPH_ID,
         "shared_pending_retrieval_profile_allowed": False,
         "registered_as_runtime_default": False,
         "test_access_allowed": False,
