@@ -1471,3 +1471,53 @@ queues, retries, fallback, LLM-selected tools, and multi-turn memory remain
 closed. Final repository validation is Ruff passing and `712 passed` with one
 existing FastAPI `TestClient` deprecation warning. The next direction is to design the local tool-selection and
 multi-turn-state boundary before implementation.
+
+The current Stage 156 bounded Agent tool-selection and volatile multi-turn-state
+protocol is recorded in:
+
+```text
+docs/primeqa_hybrid_bounded_agent_state_protocol.md
+```
+
+Stage156 reads only the saved Stage155 public aggregate. It freezes one
+structured model decision after the system-owned retrieval and context
+preparation steps. The exact model actions are `compose_grounded_answer` and
+`refuse_insufficient_evidence`. The model cannot own retrieval, rewrite the
+query, request a second retrieval, create tools, execute parallel tools, loop,
+or own the final answer. The compose branch runs composition, verification,
+read-only diagnostics, and verified finalization once each. The early-refuse
+branch skips those operations and uses a fixed system refusal constructor.
+
+The executable `VolatileThreadStateLedger` isolates state by exact opaque thread
+handle and retains only completed terminal turns in process memory. Candidate
+pools, document contexts, unverified responses, diagnostics, exceptions, and
+model reasoning are discarded at the turn boundary. Both turn-count and byte
+limits are mandatory constructor inputs, but Stage156 does not claim production
+values. Overflow rejects before mutation; no truncation, eviction, implicit
+thread creation, reconstruction, retry, or fallback occurs. Explicit close
+clears state and process restart loses it because checkpointers and persistent
+stores remain disabled.
+
+The preflight passes `42/43` guards with only confirmation false. The confirmed
+formal artifact passes `43/43`; two bounded policy cases are eligible, six
+unsafe cases are rejected, and all five synthetic thread-state cases pass.
+Targeted validation is `24 passed`, and formal/preflight each produce ten
+parseable SVGs. No model, split, corpus, index, candidate pool, socket, or
+runtime is loaded or changed, and test remains locked. Stage157 may implement a
+local structured decision-router adapter after explicit model/provider and
+thread-limit selection.
+
+The first full-suite command was externally stopped after about 14 milliseconds
+because the shell interpreted `timeout_ms=0` as an immediate timeout rather
+than unlimited execution. It produced no pytest result and left no pytest
+process. After explicit user confirmation, exactly one hidden replacement
+process ran naturally and completed with `736 passed, 1 warning in 12.72s`.
+The warning is the existing FastAPI `TestClient` deprecation warning.
+Formal and preflight visualization directories each contain ten parseable SVGs.
+The formal artifact SHA-256 is
+`1057cd70ed0ce872529bdc04d1182b84327a50cf6f9bcce9fedb76a4f2952a97`.
+
+A pre-commit node audit then corrected the early-refusal diagnostics branch, so
+the `12.72s` suite is retained only as pre-correction history. Exactly one
+current-source hidden pytest process subsequently exited naturally with
+`736 passed, 1 warning in 7.31s`.

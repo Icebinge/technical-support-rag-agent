@@ -33027,3 +33027,78 @@ formal SHA-256 为 `25ac42e3573f6c6d86fb367cabef7fe83955f17ed79bb86b53585823fb42
 - warmup 与 warm request 的分节点对比比单一 end-to-end 数字更可操作：本次真实证据把冷启动 retrieval 和稳定请求 retrieval 明确分开。
 
 下一步：先设计 local Agent 的 tool selection 与 multi-turn state boundary，再决定是否引入 LLM 动态路由。test、remote、runtime defaultization、queue、retry、fallback、observation sampling/batching/export 继续关闭。
+
+## 2026-07-18 - Stage 156 有界动态工具选择与多轮状态边界冻结
+
+目标：在 Stage155 已经真实接通并可观测的确定性 LangGraph workflow 上，冻结第一层真正动态但不失控的 Agent 能力；同时明确多轮对话中哪些状态允许跨轮保留、哪些必须在本轮结束时销毁。本阶段只读取 Stage155 正式公开聚合，不加载题目、文档、模型、索引、候选池，不改 runtime，也不打开 test。
+
+### 官方接口调研与设计选择
+
+2026-07-18 再次核对了 LangGraph 官方 workflows/agents、persistence 以及 LangChain agents/tools 文档。官方路由示例支持用结构化输出和 conditional edges 选择下一节点；常规 Agent/ToolNode 形态则允许工具循环。Persistence 通过 checkpointer 和 thread identifier 保存图状态，工具还可以访问 runtime state、context 和 store。这意味着如果直接接入通用 Agent loop，会同时扩大工具权限、循环边界和状态可见范围，不符合当前严格路径。
+
+Stage156 因此采用 `structured_single_decision_router_with_conditional_edges`：系统仍强制执行一次 retrieval 和 context preparation，之后模型每轮只能做一次结构化选择：
+
+```text
+compose_grounded_answer | refuse_insufficient_evidence
+```
+
+模型不能调用 retrieval、改写 query、发起第二次 retrieval、创建新工具、并行调用工具或进入循环。选择 compose 后，系统各执行一次 compose、verify、只读 diagnostics 和 verified finalize；选择 refuse 后不执行这三项处理，改由固定的 system refusal constructor 直接 finalize。Diagnostics 不再作为模型可选工具，因为它消费的是 answer/verification 之后的观测，让模型在此前“请求诊断”会制造错误的数据顺序。Compose 分支最终回答权属于 system verifier，refuse 分支终态权属于固定系统拒答构造器。
+
+### 可执行状态边界
+
+新增 `BoundedDynamicToolSelectionPolicy` 和 `VolatileThreadStateLedger`。后者按 opaque thread handle 严格隔离，只允许完成后的 terminal turn 跨轮保留：序号、用户本轮输入、已验证终态响应和终态。Candidate pool、generation/verification context、未验证响应、verification details、diagnostics、exception details 和 model internal reasoning 必须在本轮结束时销毁。
+
+Ledger 构造时强制调用方显式提供正数的 completed-turn limit 和 retained-byte limit。本阶段没有擅自选择 production 数值；测试中的 `2 turns / 512 bytes` 等只是 synthetic fixture，不是 runtime 参数。超出轮数或字节、序号不连续、thread 未显式打开、非 terminal turn 都在任何 mutation 前拒绝；不静默截断、不淘汰旧轮次、不隐式创建 thread、不做状态重建、retry 或 fallback。显式 close 会清空状态，进程重启也会丢失，因为本阶段没有选择 checkpointer 或 persistent store。
+
+### Preflight、正式结果与真实修正记录
+
+第一轮 targeted 验证真实结果为 `23 passed, 1 failed`，同时 Ruff 报告 9 个长行。唯一测试失败来自新 SVG wrapper 错把项目 helper 的真实参数 `bars=` 写成 `data=`，不是策略或状态隔离失败。修正参数并整理长行后，targeted Ruff 通过，`24 passed in 0.24s`。
+
+提交前第一次启动完整 pytest 时，我尝试用 shell 参数 `timeout_ms=0` 表达“无限等待”，但工具真实语义是约 14 毫秒后立即 timeout，命令返回 exit 124。该次没有 pytest 输出、没有完整测试结果，也没有残留 pytest 进程，不能记为运行完成。由于项目禁止未经确认的 retry，当时先停止并向用户列明真实原因。用户随后明确回复“确认”，授权启动一个替代进程。替代运行只启动了一个隐藏 pytest 进程 PID 49504，没有 pytest timeout、等待期限、kill、进程切换或再次重跑；等待该进程自然结束后，真实结果为 `736 passed, 1 warning in 12.72s`，exit code 0。Warning 仍是既有 FastAPI `TestClient` 的 Starlette deprecation warning。
+
+该次 full-suite 之后、提交之前继续逐节点审计 Stage154 现有实现，发现初版协议写了“early refuse 不执行 compose/verify，但 diagnostics 每轮固定 1 次”。真实 `observe_diagnostics` 明确要求 original answer 和 verification 已存在，因此这个组合无法落地。没有提交这个纸面通过的协议，而是把 compose 分支冻结为 compose→verify→diagnostics→verified finalize，把 refuse 分支冻结为 fixed system refusal finalize；同时新增 `branch_system_actions_exact` 守卫。修正后的首轮 targeted 真实结果是 `23 passed, 1 failed`，失败只因测试仍断言旧的 42 项守卫，而真实协议已增加到 43 项。保留新增守卫并更新测试期望后为 `24 passed in 0.22s`。随后重新生成 preflight/formal，这属于对修正后新协议的首次正式生成，不是把旧结果倒填成新结果。
+
+因为 PID 49504 的 `736 passed in 12.72s` 发生在上述语义修正前，它只保留为旧源码历史结果，不能当作当前源码验证。修正后又只启动一个隐藏完整 pytest 进程 PID 49644；同样没有 pytest timeout、等待期限、kill、进程切换或自动重跑。该进程自然退出，当前源码真实结果为 `736 passed, 1 warning in 7.31s`，exit code 0。
+
+未确认 preflight：
+
+```text
+Stage155 source: 57 / 57
+Stage156 preflight: 42 / 43
+failed: stage156_user_confirmed
+dynamic policy cases: 2 eligible / 6 rejected
+thread-state cases: 5 / 5 eligible
+```
+
+用户本轮“好下一大步”作为明确确认后，正式结果：
+
+```text
+Stage156 formal: 43 / 43
+failed guards: 0
+model actions: 2
+model decisions per turn: 1
+retrieval calls per turn: 1, system-owned
+dynamic policy cases: 2 eligible / 6 rejected
+thread-state cases: 5 / 5 eligible
+formal SVG: 10
+formal / preflight SVG XML: 10 / 10 and 10 / 10
+full repository Ruff: passed
+full repository pytest: 736 passed, 1 existing warning in 7.31s
+train / dev / test loaded: false / false / false
+model / index / candidate pool loaded: false / false / false
+runtime changed / test metrics run: false / false
+```
+
+正式 artifact SHA-256：`1057cd70ed0ce872529bdc04d1182b84327a50cf6f9bcce9fedb76a4f2952a97`。
+
+两项 eligible 是受限 compose 与 refuse；六项 rejected 覆盖 unauthorized tool、repeated retrieval、decision loop、model final authority、hidden retry/fallback 和 default/remote/test open。五项状态案例覆盖 terminal turn 留存、跨 thread 隔离、byte overflow 拒绝且不变更、禁止隐式建 thread、close 后清空。公开 artifact 不保存 synthetic private string。
+
+### 本步学到
+
+- 真正的 Agent 能力不要求从“完全确定性 workflow”一步跳到“模型拥有全部工具循环”；结构化单次路由能先验证动态价值，同时保留召回与验证的系统权威。
+- Tool authority、final-answer authority 和 state visibility 是三个独立维度，不能因为框架允许 ToolNode/store 就一起开放。
+- 多轮 memory 不是简单加一个 message list。必须先定义跨轮 allowlist、逐轮 discard list、线程隔离、close 语义和 overflow 原子性。
+- 无 fallback 的严格状态策略不能在超限时偷偷截断或淘汰；应在 mutation 前明确拒绝，并保留原状态。
+- 测试 fixture 的 history limit 和 private text 不能被写成生产配置或真实用户数据；本阶段只证明策略可执行，具体 runtime 数值仍需下一阶段明确选择。
+
+下一步：Stage157 选择本地 structured decision router 的具体 model/provider 与明确的 thread history 限制，实现 router port 和 LangGraph conditional branch，并用 synthetic complete/refuse/schema-error/unauthorized-action/state-isolation case 加真实非 test runtime probe 验证。Test、remote、runtime defaultization、query rewrite、二次 retrieval、queue、retry、fallback 和持久化继续关闭。
