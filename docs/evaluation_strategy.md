@@ -1592,3 +1592,56 @@ existing FastAPI `TestClient` Starlette deprecation. All Stage157 Python files
 pass Ruff formatting and the complete repository passes Ruff lint. A global
 format-only audit also identifies 311 historical Python files that would be
 reformatted; Stage157 does not rewrite those unrelated files.
+
+The current Stage 158 explicit bounded dynamic Agent local service validation
+is recorded in:
+
+```text
+docs/primeqa_hybrid_bounded_dynamic_agent_service_validation.md
+```
+
+Stage158 adds a separate two-flag activation boundary and exact open, turn, and
+close HTTP routes. It does not change the existing answer route or register the
+new runtime as default. Startup authorizes the exact Stage157 artifact,
+router/runtime sources, and local model files before building one CPU retrieval
+resource set, loading Qwen on CUDA, running one label-free warmup, closing the
+temporary thread, composing FastAPI, and opening the loopback listener.
+
+Whole-turn GPU admission is one global nonblocking slot acquired before the
+single executor submission, so the executor cannot create an application
+waiting queue. Same-thread parallel turn and close are `409`; a different
+thread arriving while the slot is occupied is `503`; unknown and duplicate
+thread lifecycle operations are `404` and `409`. Shutdown drains an admitted
+turn naturally and clears process-local threads without an implicit timeout.
+
+The current-source corrected formal real loopback lifecycle passes `51/51`
+guards and returns HTTP `200/200/201/200/200` for live, ready, open, turn, and
+close. Warmup and the real HTTP turn each execute one retrieval and one model
+decision; both select `refuse_insufficient_evidence`. The real turn uses
+`2117/11` input/output tokens and `1055.072ms` model generation. Resources build
+once, model generation count is two, peak allocated GPU memory is
+`5,358,983,168` bytes, the server thread joins, and port `18158` is released.
+Formal total time is `68.564630s`, including `53.588927s` retrieval resource
+construction and `7.472638s` model loading.
+
+The capacity-rejection boundary is proven with deterministic synthetic overlap,
+not two simultaneous real Qwen HTTP requests. The real request is generated and
+label-free, so the result proves execution only. Train, dev, test, gold labels,
+and quality metrics remain untouched. The artifact SHA-256 is
+`12649c087c3140feeb4121837152b41ef4005922eb73931f3770a5fac83889b0`.
+
+A pre-correction formal had already passed `51/51` with artifact SHA-256
+`1358ce88bd494079dfc806ad3416e87c279f14947436122e89d6452e68d937b1`, and the
+then-current full suite was `783 passed, 1 warning in 15.94s`. A pre-commit audit
+then found inaccurate terminal progress for source-authorized startup failures.
+The failure remained fail-closed, but the event could incorrectly report source
+authorization as incomplete. The entrypoint and three failure-stage tests were
+corrected. Because this changed current source, the old formal and full suite
+are retained only as pre-correction history. After explicit user approval,
+exactly one corrected formal ran naturally and replaced the artifact.
+
+Current-source validation is Ruff passing, targeted `65 passed, 1 warning in
+1.33s`, and full repository `786 passed, 1 existing warning in 10.80s`; full
+pytest stderr is empty. Stage159 may measure warm multi-turn behavior and one
+real two-request admission rejection on the locked development split only;
+test remains locked.

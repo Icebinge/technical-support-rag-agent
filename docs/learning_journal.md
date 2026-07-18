@@ -33178,3 +33178,116 @@ full repository pytest: 758 passed, 1 existing warning in 15.73s
 - 失败的正式运行、被外部停止的独立监控命令和经用户确认后的 corrected formal 必须分别记录，不能用最终成功覆盖真实过程。
 
 下一步：Stage158 将 Stage157 独立 runtime 接到显式、非默认、loopback-only 的 service activation boundary，并验证启动证据、并发拒绝、thread lifecycle 与 warm request；test、remote、runtime defaultization、query rewrite、second retrieval、queue、retry、fallback 和持久化继续关闭。
+
+## 2026-07-18 - Stage 158 显式线程生命周期与本地 Agent 服务接入
+
+目标：把 Stage157 已通过真实 GPU 执行验证、但仍在 HTTP 之外的 bounded dynamic Agent runtime 接到独立、非默认、仅 loopback 的本地服务；冻结 GPU admission、thread open/turn/close transport、启动 source gate、warmup、shutdown 和公开日志边界。本阶段不替换既有 `/v1/agent/answers`，不打开 test，也不做答案质量调参。
+
+### 用户确认的严格协议 A
+
+用户明确选择 A，采用三个独立命令，而不是一个带 `action` 字段的复合 endpoint：
+
+```text
+POST /v1/bounded-agent/threads/open
+POST /v1/bounded-agent/threads/turn
+POST /v1/bounded-agent/threads/close
+GET  /health/live
+GET  /health/ready
+```
+
+新增两个默认 false 的显式开关和一个必须提供的本地 model snapshot 路径。Bounded dynamic runtime 与既有 optional/concurrent sidecar runtime 互斥；transport 不能脱离对应 runtime 单独开启。服务只绑定 `127.0.0.1`，单 worker、HTTP/1.1、无 access log。
+
+Coordinator 在同一把锁内维护 open handle、active turn 和一个全局 whole-turn GPU admission。Turn 必须先拿到 admission 才能提交给单 worker，因此线程池不能变成隐式等待队列。不同 thread 的第二个 turn 立即 `503`，同 thread 的并发 turn 或 busy close 为 `409`，duplicate open 为 `409`，unknown thread 为 `404`。Open/close 不占 GPU。Shutdown 先 draining，自然等待已接纳 turn，再关闭全部进程内 thread；无 request/shutdown timeout、queue、retry、fallback、截断、淘汰、隐式建 thread 或持久化。
+
+### 启动证据链
+
+启动顺序冻结为：两个开关和 snapshot 配置授权 → Stage157 artifact 精确 SHA/47 guards/status → Stage157 router/runtime 源码精确指纹 → model config/weights/tokenizer 精确指纹 → CPU retrieval resources → Qwen GPU load → 临时显式 thread warmup → warmup thread close → FastAPI app → loopback listener。
+
+Source gate 在资源构建之前；CPU retrieval 在 GPU 模型加载之前；warmup 完成并 close 前不监听。Stage157 正式 artifact 继续要求 SHA-256 `2351015d2c7447e6a5e1c2fe99b6583f0b9067e126ef2bfdd87b0b80c725c3e1`。
+
+公开 HTTP event 只含 route/status、coordinator/admission 状态、thread 聚合计数、branch call count、token/latency 和 recovery 零计数，不保存 thread handle、question、answer、citation、document id、raw model output、header 或 client identity。
+
+### 测试死锁与真实修正
+
+第一轮 targeted 后台 pytest 到第 8 个通过点后停住。PID 50464 的 CPU 和 stdout 长时间不再变化。审查确认不是产品 coordinator 死锁，而是 concurrency fixture 在同一个 `TestClient` 上并发请求；client 串行等待第二个 request，但测试要等第二个 response 才 release 第一个 synthetic turn，形成闭环。没有擅自 kill，向用户说明后获得明确 A 确认。执行 `Stop-Process` 后第一次立即查询仍看到 Windows 进程对象，随后的独立查询确认 PID 已退出；该次只有 8 个点，没有完整 pytest 结果。
+
+修正没有改产品 admission：并发 overlap 改为直接驱动 coordinator 的原子 admission，HTTP `503` 映射另做独立测试。修正后先得到 `41 passed, 1 warning in 0.93s`，加入 validator 覆盖后为 `44 passed, 1 warning in 1.12s`，提交前终态进度审计之前的 targeted 为 `47 passed, 1 warning in 1.26s`。
+
+### GPU app 环境与两次无结果检查
+
+Stage157 `.venv` 真实缺少 FastAPI。安装仓库已声明的 `.[app]` extra 自然完成，新增 FastAPI `0.139.2`、Uvicorn `0.51.0`、Starlette 和声明依赖，没有改动 CUDA torch。
+
+安装后的第一次组合环境检查错误地以前台命令运行，CUDA import 尚未完成时被 shell wrapper 在约 14 秒后外部终止；没有结果，进程没有残留。用户确认 A 允许 detached replacement 后，第一次 replacement 又因为把大段 `python -c` 交给 PowerShell `Start-Process -ArgumentList`，实际只执行了不完整的 `python -c import`，以 `SyntaxError` 自然退出，没有检查环境，也没有启动 formal。用户询问失败原因后，确认停止内联命令方案。
+
+随后新增独立 `scripts/verify_stage158_environment.py`，只用脚本文件路径启动一次隐藏进程并自然等待。真实结果：
+
+```text
+torch: 2.11.0+cu128
+torchvision: 0.26.0+cu128
+transformers: 5.13.1
+fastapi: 0.139.2
+uvicorn: 0.51.0
+CUDA: true / 12.8
+GPU: NVIDIA GeForce RTX 5060
+capability: 12.0
+pip check: no broken requirements
+```
+
+### 修正前 formal、提交前审计与经确认后的 corrected formal
+
+环境脚本通过后启动的第一轮 Stage158 formal 没有 runtime timeout、monitor deadline、kill、restart 或自动 retry。Validator 使用事件队列无 timeout 等待 Uvicorn startup；HTTP connection、server shutdown 和 thread join 也没有 timeout。该进程自然结束并通过 `51/51` guards，artifact SHA-256 为 `1358ce88bd494079dfc806ad3416e87c279f14947436122e89d6452e68d937b1`。当时 current-source full pytest 为 `783 passed, 1 warning in 15.94s`。
+
+提交前继续审计发现一个事实准确性缺陷：如果 source authorization 已完成、但 resource 或 model stage 随后失败，terminal event 仍可能报告 `source_authorized=false`。启动本身仍然 fail-closed，没有错误地打开 listener；问题在于公开终态进度不能准确表达已经完成的阶段。实现新增显式 startup progress tracking，并在 `server.run` 返回后检查 `server.started`；测试新增 source、resource、model 三种失败阶段的精确 progress 断言。该修正改变了 service entrypoint 当前源码，因此上面的 artifact 与 `783 passed` 只能保留为修正前历史证据。
+
+没有擅自重跑。向用户列出 A“基于修正后源码正式重跑”和 B“停止但不能把旧 formal 当当前源码证据”后，用户明确回复 A。随后只启动一个 corrected formal 进程；进程自然运行到结束，没有运行时限、监控 deadline、kill、restart、fallback 或自动 retry。结果：
+
+```text
+Stage158 corrected formal guards: 51 / 51
+failed guards: 0
+HTTP live / ready / open / turn / close: 200 / 200 / 201 / 200 / 200
+public events: 5
+resource factory builds: 1
+model generations: 2
+maximum observed in-flight turns: 1
+opened threads after shutdown: 0
+server thread alive after shutdown: false
+formal process / port 18158 listener after shutdown: 0 / 0
+port rebind after shutdown: true
+queue / retry / fallback: 0 / 0 / 0
+peak allocated GPU bytes: 5,358,983,168
+formal SVG: 10 / 10 XML-parseable
+formal total: 68.564630s
+```
+
+监听前 warmup 选择 `refuse_insufficient_evidence`，retrieval/decision 为 `1/1`，输入/输出 `2190/11` tokens，generation `1883.706ms`，close 前 `1 turn / 158 bytes`，close 后 opened false。
+
+真实 HTTP label-free turn 也选择 `refuse_insufficient_evidence`，retrieval/decision 为 `1/1`，compose/verify/diagnostics 为 `0/0/0`，输入/输出 `2117/11` tokens，generation `1055.072ms`，close 前 `1 turn / 188 bytes`，引用 0。Startup 中 source authorization `3.563386s`、retrieval build `53.588927s`、model load `7.472638s`、warmup `2.435760s`、app composition `0.001807s`，total prepare `67.062519s`；server start `0.025108s`，真实 HTTP sequence 与 shutdown `1.409058s`。
+
+当前正式 artifact SHA-256：`12649c087c3140feeb4121837152b41ef4005922eb73931f3770a5fac83889b0`。
+
+必须限制结论：真实 socket lifecycle、source gate、warmup、单 turn 和 shutdown 已验证；nonblocking capacity rejection 使用 deterministic synthetic overlap 和 targeted test 验证，本阶段没有同时发两个真实 Qwen HTTP turn，因此没有真实 GPU capacity rejection latency。两次真实模型 decision 都面对 generated label-free query，不能声称路由 accuracy、false-refusal、F1 或 citation quality。
+
+修正后最终验证：
+
+```text
+full repository Ruff: passed
+Stage157+158 targeted pytest: 65 passed, 1 existing warning in 1.33s
+full repository pytest: 786 passed, 1 existing warning in 10.80s
+full pytest exit code / stderr: 0 / empty
+train / dev / test loaded: false / false / false
+gold labels / quality metrics: false / false
+runtime default / remote / persistence: false / false / false
+```
+
+提交前一组组合只读审计命令因为 PowerShell 正则字符串引号未闭合，在 shell 解析阶段以 exit 1 结束；该命令没有执行检查、没有修改文件，也不算审计通过。将检查拆成简单命令后重新执行，确认 Stage158 代码和测试没有 skip/xfail、sleep 或数值 timeout，train/dev/test/gold 仅以显式关闭守卫出现，暂存范围之外没有未跟踪文件。
+
+### 本步学到
+
+- GPU admission 必须覆盖整个 turn 并在 executor submission 前完成，否则即使模型 backend 自己 nonblocking，前面的 retrieval 和线程池也可能形成隐式等待。
+- 多轮 HTTP 不应把 thread lifecycle 隐藏进 answer endpoint；显式 open/turn/close 让冲突、close、overflow 和 shutdown 语义可独立验证。
+- 启动 warmup 必须使用临时显式 thread 并在监听前 close，否则服务会带着不可见状态开始接流量。
+- Fail-closed 只是启动安全的一部分；terminal event 还必须逐阶段准确表达已经完成的授权、资源和模型状态，不能用最终失败覆盖中间事实。
+- 真实服务通过不等于决策质量通过；当前两个拒答只证明严格分支能从 GPU model 穿过真实 socket。
+- Windows 后台执行应优先使用独立脚本文件和简单 argv。复杂 `python -c`、前台长 import 和单 `TestClient` 并发夹具都已用真实失败证明不可靠。
+
+下一步：Stage159 只在 locked development 上测 warm multi-turn service behavior，包括第 1-4 turn 的 history/latency/token 增长、answer/refuse 分布，以及一次真实双请求 admission rejection；test 继续锁定。Runtime defaultization、remote、persistence、queue、retry、fallback、query rewrite 和 second retrieval 继续关闭。
