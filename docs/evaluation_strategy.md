@@ -1697,3 +1697,49 @@ latency-tail patterns with private diagnostics or freeze the validated runtime
 behavior before further integration. Test evaluation, runtime defaultization,
 remote exposure, persistence, queues, retries, fallback, rewrite, and second
 retrieval remain closed.
+
+The selected Stage 160 path is documented in:
+
+```text
+docs/primeqa_hybrid_bounded_dynamic_agent_failure_diagnostics.md
+```
+
+Stage160 runs the exact Stage159 warm workload once on the frozen 121-row
+development split, then joins dev gold to validation-only private observations.
+Gold is not projected into runtime. Train and test are not loaded. The grouped
+five-fold layer contains 117 normalized-question plus answer-document groups
+with row counts `25/24/24/24/24`; it reports stability only and performs no
+model fitting, policy selection, or threshold tuning.
+
+The formal service completes all 121 HTTP turns and passes `57/57` guards. The
+answerable gold candidate-pool hit rate is `92.1053%`, while generation-Top10
+hit rate is only `47.3684%`. Among 52 answerable refusals, 5 are candidate-pool
+misses, 28 lose gold before generation Top10, and 19 show gold to the model but
+still refuse. The primary measured loss is therefore the second-stage context
+selection boundary, not first-stage candidate construction.
+
+Average generation accounts for `93.0286%` of end-to-end latency. Router input
+token count has Spearman correlation `0.915809` with generation latency,
+compared with `0.627997` for retained state bytes and `0.566652` for synthetic
+turn position. This is diagnostic association, not causal evidence.
+
+The public artifact SHA-256 is
+`e17e5fe5bbc5fef4e25e41234e47b89daf19ea4ef18f3c7270601f0fee7d9377`.
+The ignored private artifact has 121 hashed rows, byte SHA-256
+`3f10cffe245a4405dfc56044f2a3c0d364fdd0f8723e6cc3ae401260199652db`,
+and canonical content SHA-256
+`1c8aa4260be5427e13322cb3304e518dd3609c2e38f839cda4f10ce01c911a0d`.
+Ten SVGs are XML-parseable and structurally valid. Pixel-level browser review
+is not claimed because the local SVG viewer could not process the files and
+the in-app browser blocked local-file navigation.
+
+Current-source verification is Stage160 five-file Ruff format passing,
+full-repository Ruff lint passing, targeted `70 passed, 1 existing warning in
+2.00s`, and full-repository `815 passed, 1 existing warning in 13.84s`. The
+full pytest process exits 0 with empty stderr and no imposed runtime deadline.
+
+The next eligible experiment is train plus grouped-CV design for a fast
+second-stage reranker or generation-context selector, with dev held out from
+fit and test still locked. Runtime defaultization, remote exposure,
+persistence, queueing, retry, fallback, query rewrite, and second retrieval
+remain closed.
