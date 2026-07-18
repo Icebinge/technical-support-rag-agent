@@ -33102,3 +33102,79 @@ runtime changed / test metrics run: false / false
 - 测试 fixture 的 history limit 和 private text 不能被写成生产配置或真实用户数据；本阶段只证明策略可执行，具体 runtime 数值仍需下一阶段明确选择。
 
 下一步：Stage157 选择本地 structured decision router 的具体 model/provider 与明确的 thread history 限制，实现 router port 和 LangGraph conditional branch，并用 synthetic complete/refuse/schema-error/unauthorized-action/state-isolation case 加真实非 test runtime probe 验证。Test、remote、runtime defaultization、query rewrite、二次 retrieval、queue、retry、fallback 和持久化继续关闭。
+
+## 2026-07-18 - Stage 157 本地结构化路由与有界动态 Agent runtime
+
+目标：把 Stage156 冻结的单次结构化决策协议实现为独立、非默认的真实本地模型 runtime，并验证 GPU 模型加载、严格 JSON 路由、LangGraph 条件分支、进程内多轮状态和真实 technote 检索能够端到端协同。本阶段不打开 test，不做质量调参，也不接入现有 HTTP 默认路径。
+
+### 环境与明确选择
+
+本阶段按用户选择使用项目独立 `.venv`、本地 `Qwen/Qwen3-VL-2B-Instruct`、严格 prompt profile A，以及 `4 completed turns / 32 KiB` 的生产 thread history 上限。Prompt 固定为 Top10、每条 evidence 最多 600 字符、输入最多 12,288 tokens、输出最多 32 tokens、greedy、strict JSON；超限直接拒绝，不截断、不 retry、不 fallback。
+
+第一次环境安装的真实结果是 CPU 版 PyTorch `2.13.0+cpu`，CUDA 为 false。随后按用户决定删除重建；工具侧递归删除命令被策略拦截且没有改动环境，用户在终端完成重建和修复。最终独立验证结果为 PyTorch `2.11.0+cu128`、torchvision `0.26.0+cu128`、Transformers `5.13.1`、CUDA 12.8、NVIDIA GeForce RTX 5060、compute capability `(12, 0)`，`pip check` 无损坏依赖。`.venv` 继续被 git 忽略。模型只从本地缓存读取，revision 为 `89644892e4d85e24eaac8bacfd4f463576704203`。
+
+### 实现边界
+
+新增本地 Transformers router backend、严格结构化 decision router、九节点独立 LangGraph runtime 和正式验证器。模型只有两个合法 action：
+
+```text
+compose_grounded_answer
+refuse_insufficient_evidence
+```
+
+系统先且只执行一次 retrieval 和 context preparation，再允许模型做一次决定。Compose 分支依次执行 compose、verify、diagnostics、verified finalize；refuse 分支直接生成固定 system refusal，并跳过 compose、verify 和 diagnostics。模型不拥有 retrieval、query rewrite、second retrieval、final answer、循环或任意工具调用权。Router 拒绝 malformed JSON、Markdown fence、extra field、trailing content 和 unauthorized action；只开放一个 nonblocking GPU slot，不排队。
+
+`VolatileThreadStateLedger` 使用显式 opaque handle 隔离，只保留最多四个完成终态 turn、总计最多 32 KiB。超限在 mutation 前拒绝，不截断、不淘汰、不隐式创建 thread；close 后清空，进程退出后丢失。没有 checkpointer、persistent store、queue、retry 或 fallback。
+
+### 测试修正与真实 GPU 探针
+
+第一轮 targeted 测试真实结果为 `41 passed, 2 failed`：一项是 LangGraph 节点 context 导致失败 snapshot 未回传，一项是 conditional target 被按两条 route 计数。修正为 exception-keyed snapshot 和唯一 conditional source 计数后得到 `43 passed`。扩大测试第一次在 collection 阶段因为 `.venv` 没有 Uvicorn 而失败；该依赖来自验证器不必要地间接导入 service entrypoint，移除这条不相关依赖后继续。下一轮为 `45 passed, 1 failed`，原因是 Python 3.10 没有 `hashlib.file_digest`，改为 streaming SHA-256 后得到 `46 passed in 0.83s`。正式修正后的 targeted 结果为 `46 passed in 1.01s`，Ruff 通过。
+
+生成的 synthetic GPU probe 不读取 split、文档库、索引或 gold label。真实结果是模型选择 compose、schema valid、输入/输出 `696/9` tokens、generation `905.026ms`、model load `12199.471ms`、peak allocated GPU bytes `4,463,856,128`。这只证明本地 GPU 路由可执行，不是质量指标。
+
+### 正式运行、失败与经确认重跑
+
+第一次 Stage157 正式进程自然完成模型加载、真实 technote retrieval 构建、一个 graph turn 和 thread close，但在组装报告时失败：`router.last_metrics` 使用的 `ContextVar` 没有跨过 LangGraph node context，因此 validator 报 `formal local router call produced no metrics`。该次没有正式 artifact，不能算通过。期间一个独立监控命令因为自身包含十秒 sleep，被 shell 外部停止；它没有影响仍在后台自然运行的正式进程。之后没有擅自重跑，而是向用户说明原因并获得明确 `A` 确认。
+
+修正方式是把 router metrics 作为 private graph state 从 decision node 显式带回 workflow run。经确认后只启动一次完整 corrected formal 进程，并等待其自然结束，没有运行 timeout、kill、restart 或自动 retry。
+
+正式结果：
+
+```text
+Stage157 formal guards: 47 / 47
+failed guards: 0
+selected action: refuse_insufficient_evidence
+terminal: refuse
+retrieval / model decision calls: 1 / 1
+composition / verification / diagnostics calls: 0 / 0 / 0
+router input / output tokens: 2190 / 11
+router generation latency: 1793.562ms
+model load / generation count: 1 / 1
+peak allocated GPU bytes: 5,358,983,168
+thread before close: 1 turn / 158 bytes / opened
+thread after close: closed
+candidate / generation / verification limit: 400 / 10 / 200
+formal total time: 60.651182s
+formal SVG: 10 / 10 XML-parseable
+train / dev / test loaded: false / false / false
+gold labels / test metrics used: false / false
+queue / retry / fallback: 0 / 0 / 0
+runtime default / HTTP / socket / remote / persistence: false
+Stage157 Python Ruff format: passed
+full repository Ruff lint: passed
+full repository pytest: 758 passed, 1 existing warning in 15.73s
+```
+
+本次单条真实语料查询是 validator 生成的 label-free runtime query，模型选择 refuse。它证明真实检索、GPU decision、条件分支和状态 close 能协同执行，但没有人工标签，不能据此声称 decision accuracy、F1、false-refusal 或 Agent 质量。正式 artifact SHA-256 为 `2351015d2c7447e6a5e1c2fe99b6583f0b9067e126ef2bfdd87b0b80c725c3e1`。
+
+正式运行后，只启动了一个隐藏的 current-source full pytest 进程 PID 47116；没有 pytest timeout、监控 deadline、kill、restart 或自动重跑。该进程自然退出，真实结果是 `758 passed, 1 warning in 15.73s`，stderr 为空。Warning 是既有 FastAPI `TestClient` 的 Starlette deprecation warning。Stage157 的全部新增 Python 文件通过 Ruff format check，全仓 Ruff lint 通过。另一次只读的全仓 formatter audit 报告 311 个历史 Python 文件会被当前 Ruff 重排；这些不是 Stage157 改动，本阶段没有批量改写它们，也不把 lint 通过表述成全仓历史格式已经统一。
+
+### 本步学到
+
+- 本地小模型接入成功不等于质量通过；无标签 runtime probe 只能证明执行链，不能替代 dev 评估。
+- `ContextVar` 不应被假设为跨 LangGraph node 的结果回传通道；需要把允许公开的指标显式放进 private graph state。
+- 严格 Agent 边界可以在真实 LLM 上保持：模型做一次结构化选择，系统继续拥有检索、验证和终态权。
+- GPU 峰值、冷启动和 retrieval 构建时间必须分开记录。本次正式总时长中 retrieval build 为 `40.714994s`，model load 为 `13.835044s`，real turn 为 `2.686443s`；它们不是每个 warm turn 都重复发生的同一项成本。
+- 失败的正式运行、被外部停止的独立监控命令和经用户确认后的 corrected formal 必须分别记录，不能用最终成功覆盖真实过程。
+
+下一步：Stage158 将 Stage157 独立 runtime 接到显式、非默认、loopback-only 的 service activation boundary，并验证启动证据、并发拒绝、thread lifecycle 与 warm request；test、remote、runtime defaultization、query rewrite、second retrieval、queue、retry、fallback 和持久化继续关闭。

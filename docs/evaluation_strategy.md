@@ -1521,3 +1521,74 @@ A pre-commit node audit then corrected the early-refusal diagnostics branch, so
 the `12.72s` suite is retained only as pre-correction history. Exactly one
 current-source hidden pytest process subsequently exited naturally with
 `736 passed, 1 warning in 7.31s`.
+
+The current Stage 157 local structured-router and bounded dynamic Agent runtime
+validation is recorded in:
+
+```text
+docs/primeqa_hybrid_bounded_dynamic_agent_runtime_validation.md
+```
+
+Stage157 provisions a separate ignored `.venv` with exact CUDA packages:
+PyTorch `2.11.0+cu128`, torchvision `0.26.0+cu128`, and Transformers `5.13.1`.
+The verified device is an NVIDIA GeForce RTX 5060 with CUDA available and
+compute capability `(12, 0)`. The local-files-only model is
+`Qwen/Qwen3-VL-2B-Instruct` at revision
+`89644892e4d85e24eaac8bacfd4f463576704203`. The model is the sole GPU
+workload; existing dense retrievers remain on CPU.
+
+The runtime is a separate, nondefault nine-node LangGraph. It performs exactly
+one system-owned retrieval and one structured model decision. The only valid
+actions remain `compose_grounded_answer` and
+`refuse_insufficient_evidence`. The compose branch runs composition,
+verification, diagnostics, and verified finalization once each. The refusal
+branch uses the fixed system refusal and skips those three operations. The
+strict JSON schema rejects malformed, fenced, extra-field, trailing-content,
+and unauthorized-action output. One nonblocking GPU slot is exposed; there is
+no queue, retry, fallback, loop, query rewrite, or second retrieval.
+
+The production thread ledger is fixed at four completed terminal turns and
+32 KiB per explicit process-local thread handle. Overflow rejects before
+mutation. No checkpointer, persistent store, implicit thread creation,
+truncation, or eviction is enabled. The selected prompt profile uses Top10
+evidence, at most 600 characters per item, 12,288 input tokens, 32 output
+tokens, greedy decoding, strict JSON, and rejection rather than truncation.
+
+A generated synthetic GPU probe selected the compose action with valid schema,
+used `696/9` input/output tokens, generated in `905.026ms`, loaded the model in
+`12199.471ms`, and reached `4,463,856,128` peak allocated GPU bytes. This probe
+contains no dataset split, document corpus, index, or gold label and is not a
+quality evaluation.
+
+The first formal process ran naturally through model loading, real technote
+retrieval construction, one graph turn, and thread close, but report assembly
+then failed because a `ContextVar` metric snapshot did not cross the LangGraph
+node context. It produced no formal artifact. One separate monitor command was
+externally stopped after its own ten-second sleep; the detached formal process
+was unaffected. After explicit user approval, the metric snapshot was carried
+in private graph state and exactly one corrected formal process ran naturally.
+
+The corrected formal artifact passes `47/47` guards. On the single generated,
+label-free real-corpus runtime query, the model selected
+`refuse_insufficient_evidence`; the terminal was refusal, with retrieval/model
+calls `1/1` and composition/verification/diagnostics calls `0/0/0`. It used
+`2190/11` input/output tokens, generated in `1793.562ms`, loaded the model once,
+generated once, and reached `5,358,983,168` peak allocated GPU bytes. Total
+formal time was `60.651182s`, including `40.714994s` retrieval construction and
+`13.835044s` model loading. Ten SVGs are XML-parseable. The artifact SHA-256 is
+`2351015d2c7447e6a5e1c2fe99b6583f0b9067e126ef2bfdd87b0b80c725c3e1`.
+
+Stage157 loads no train, dev, or test split; reads no gold label; and computes
+no accuracy, F1, or false-refusal metric. The real turn proves execution only,
+not router quality. HTTP integration, runtime defaultization, sockets, remote
+models, persistence, queues, retries, fallback, loops, rewrite, and second
+retrieval remain closed. Stage158 may integrate this separate runtime behind an
+explicit local service activation boundary while preserving these constraints.
+
+Final current-source validation uses one hidden pytest process with no pytest
+timeout, monitoring deadline, termination, or restart. It exits naturally with
+`758 passed, 1 warning in 15.73s`; stderr is empty, and the warning is the
+existing FastAPI `TestClient` Starlette deprecation. All Stage157 Python files
+pass Ruff formatting and the complete repository passes Ruff lint. A global
+format-only audit also identifies 311 historical Python files that would be
+reformatted; Stage157 does not rewrite those unrelated files.

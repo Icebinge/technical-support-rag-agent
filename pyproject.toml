@@ -30,6 +30,9 @@ rag = [
 agent = [
   "langgraph==1.2.9",
 ]
+local-router = [
+  "transformers==5.13.1",
+]
 app = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
