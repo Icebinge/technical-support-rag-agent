@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
+from functools import partial
 from threading import Lock
 from typing import Any, Literal, Protocol, TypedDict
 
@@ -17,6 +18,12 @@ from ts_rag_agent.application.primeqa_hybrid_agent_retrieval_integration_validat
     _DEFAULT_MIN_EVIDENCE_SCORE,
     _DEFAULT_MIN_SENTENCE_SCORE,
     _answer_generator,
+)
+from ts_rag_agent.application.primeqa_hybrid_agent_runtime_observability import (
+    AgentWorkflowObservationCounters,
+    AgentWorkflowObservationSink,
+    JsonLineAgentWorkflowObservationSink,
+    PrimeQAHybridAgentWorkflowObserver,
 )
 from ts_rag_agent.application.primeqa_hybrid_agent_tool_orchestration_protocol import (
     AGENT_TOOL_ORCHESTRATION_PROTOCOL_ID,
@@ -221,8 +228,16 @@ class PrimeQAHybridAgentToolset:
 class AgentToolWorkflowNodeExecutor:
     """Shared node semantics used by both execution engines."""
 
-    def __init__(self, *, toolset: PrimeQAHybridAgentToolset) -> None:
+    def __init__(
+        self,
+        *,
+        toolset: PrimeQAHybridAgentToolset,
+        observer: PrimeQAHybridAgentWorkflowObserver | None = None,
+    ) -> None:
         self._toolset = toolset
+        self._observer = observer or PrimeQAHybridAgentWorkflowObserver(
+            sink=JsonLineAgentWorkflowObservationSink()
+        )
         self._transition_policy = FrozenAgentToolWorkflowTransitionPolicy()
         self._failure_lock = Lock()
         self._failure_snapshots: dict[
@@ -240,6 +255,46 @@ class AgentToolWorkflowNodeExecutor:
     @property
     def last_snapshot(self) -> AgentToolWorkflowPrivateState | None:
         return self._last_snapshot.get()
+
+    @property
+    def observer(self) -> PrimeQAHybridAgentWorkflowObserver:
+        return self._observer
+
+    def execute_observed(
+        self,
+        node_id: str,
+        state: AgentToolWorkflowPrivateState,
+    ) -> dict[str, Any]:
+        handlers = {
+            "validate_request": self.validate_request,
+            "retrieve_candidate_pool": self.retrieve_candidate_pool,
+            "prepare_context": self.prepare_context,
+            "compose_grounded_answer": self.compose_grounded_answer,
+            "verify_grounded_answer": self.verify_grounded_answer,
+            "observe_diagnostics": self.observe_diagnostics,
+            "finalize_response": self.finalize_response,
+        }
+        try:
+            handler = handlers[node_id]
+        except KeyError:
+            raise ValueError("observed node is not in the frozen Agent graph") from None
+        started_at = self._observer.node_started()
+        try:
+            updates = handler(state)
+        except BaseException:
+            snapshot = self._last_snapshot.get() or state
+            self._observer.node_failed(
+                node_id=node_id,
+                state=snapshot,
+                started_at=started_at,
+            )
+            raise
+        self._observer.node_completed(
+            node_id=node_id,
+            state={**state, **updates},
+            started_at=started_at,
+        )
+        return updates
 
     def begin(self, state: AgentToolWorkflowPrivateState) -> None:
         if self._invocation_token.get() is not None:
@@ -526,17 +581,17 @@ class DeterministicAgentToolWorkflowEngine:
         state: AgentToolWorkflowPrivateState,
     ) -> AgentToolWorkflowPrivateState:
         current = _copy_state(state)
-        for node in (
-            self._executor.validate_request,
-            self._executor.retrieve_candidate_pool,
-            self._executor.prepare_context,
-            self._executor.compose_grounded_answer,
-            self._executor.verify_grounded_answer,
-            self._executor.observe_diagnostics,
+        for node_id in (
+            "validate_request",
+            "retrieve_candidate_pool",
+            "prepare_context",
+            "compose_grounded_answer",
+            "verify_grounded_answer",
+            "observe_diagnostics",
         ):
-            current.update(node(current))
+            current.update(self._executor.execute_observed(node_id, current))
         self._executor.route_terminal(current)
-        current.update(self._executor.finalize_response(current))
+        current.update(self._executor.execute_observed("finalize_response", current))
         return current
 
     def topology(self) -> dict[str, Any]:
@@ -585,13 +640,11 @@ class LangGraphAgentToolWorkflowEngine:
 
     def _compile_graph(self) -> CompiledAgentToolGraphPort:
         builder = StateGraph(AgentToolWorkflowPrivateState)
-        builder.add_node("validate_request", self._executor.validate_request)
-        builder.add_node("retrieve_candidate_pool", self._executor.retrieve_candidate_pool)
-        builder.add_node("prepare_context", self._executor.prepare_context)
-        builder.add_node("compose_grounded_answer", self._executor.compose_grounded_answer)
-        builder.add_node("verify_grounded_answer", self._executor.verify_grounded_answer)
-        builder.add_node("observe_diagnostics", self._executor.observe_diagnostics)
-        builder.add_node("finalize_response", self._executor.finalize_response)
+        for node_id in agent_tool_workflow_state_contract()["nodes"]:
+            builder.add_node(
+                node_id,
+                partial(self._executor.execute_observed, node_id),
+            )
         builder.add_edge(START, "validate_request")
         builder.add_edge("validate_request", "retrieve_candidate_pool")
         builder.add_edge("retrieve_candidate_pool", "prepare_context")
@@ -686,6 +739,7 @@ class PrimeQAHybridAgentToolWorkflow:
     ) -> None:
         self._executor = executor
         self._engine = engine
+        self._observer = executor.observer
         self._counter_lock = Lock()
         self._last_public_trace: ContextVar[PublicSafeAgentToolWorkflowTrace | None] = ContextVar(
             f"primeqa_hybrid_agent_tool_trace_{id(self)}",
@@ -721,10 +775,12 @@ class PrimeQAHybridAgentToolWorkflow:
     def topology(self) -> dict[str, Any]:
         return self._engine.topology()
 
+    def observation_counters(self) -> AgentWorkflowObservationCounters:
+        return self._observer.counters()
+
     def run(self, question: PrimeQAQuery) -> PrimeQAHybridAgentToolWorkflowRun:
         self._last_public_trace.set(None)
         state = _initial_state(question)
-        self._executor.begin(state)
         with self._counter_lock:
             self._invocation_count += 1
             self._current_in_flight += 1
@@ -732,37 +788,50 @@ class PrimeQAHybridAgentToolWorkflow:
                 self._max_observed_in_flight,
                 self._current_in_flight,
             )
+        executor_started = False
+        observer_started = False
+        final_state: AgentToolWorkflowPrivateState | None = None
         try:
+            self._executor.begin(state)
+            executor_started = True
+            self._observer.begin(state)
+            observer_started = True
             try:
                 final_state = self._engine.invoke(state)
+                response = final_state["terminal_response"]
+                if response is None:
+                    raise RuntimeError("workflow completed without a terminal response")
+                trace = _public_trace(final_state)
+                trace.to_public_dict()
+                self._last_public_trace.set(trace)
+                self._observer.complete(final_state)
+                with self._counter_lock:
+                    self._completed_count += 1
+                    if response.verified_answer.refused:
+                        self._refused_count += 1
+                return PrimeQAHybridAgentToolWorkflowRun(
+                    candidate_pool_results=final_state["candidate_pool_results"],
+                    agent_run=response,
+                    generation_context_results=final_state["generation_context_results"],
+                    verification_context_results=final_state["verification_context_results"],
+                    public_safe_trace=trace,
+                )
             except Exception as error:
                 snapshot = self._executor.consume_failure_snapshot(error)
                 if snapshot is None:
-                    snapshot = state
+                    snapshot = final_state or self._executor.last_snapshot or state
                 trace = _public_trace(snapshot)
                 self._last_public_trace.set(trace)
+                if observer_started:
+                    self._observer.fail(snapshot)
                 with self._counter_lock:
                     self._failed_count += 1
                 raise
-            response = final_state["terminal_response"]
-            if response is None:
-                raise RuntimeError("workflow completed without a terminal response")
-            trace = _public_trace(final_state)
-            trace.to_public_dict()
-            self._last_public_trace.set(trace)
-            with self._counter_lock:
-                self._completed_count += 1
-                if response.verified_answer.refused:
-                    self._refused_count += 1
-            return PrimeQAHybridAgentToolWorkflowRun(
-                candidate_pool_results=final_state["candidate_pool_results"],
-                agent_run=response,
-                generation_context_results=final_state["generation_context_results"],
-                verification_context_results=final_state["verification_context_results"],
-                public_safe_trace=trace,
-            )
         finally:
-            self._executor.end()
+            if observer_started:
+                self._observer.end()
+            if executor_started:
+                self._executor.end()
             with self._counter_lock:
                 self._current_in_flight -= 1
 
@@ -776,6 +845,7 @@ def create_primeqa_hybrid_langgraph_agent_tool_workflow(
     max_sentences: int = _DEFAULT_MAX_SENTENCES,
     min_sentence_score: float = _DEFAULT_MIN_SENTENCE_SCORE,
     min_evidence_score: float = _DEFAULT_MIN_EVIDENCE_SCORE,
+    observation_sink: AgentWorkflowObservationSink | None = None,
 ) -> PrimeQAHybridAgentToolWorkflow:
     toolset = PrimeQAHybridAgentToolset(
         candidate_pool_retriever=candidate_pool_retriever,
@@ -791,7 +861,7 @@ def create_primeqa_hybrid_langgraph_agent_tool_workflow(
             min_evidence_score=min_evidence_score,
         ),
     )
-    executor = AgentToolWorkflowNodeExecutor(toolset=toolset)
+    executor = _observed_executor(toolset=toolset, observation_sink=observation_sink)
     return PrimeQAHybridAgentToolWorkflow(
         executor=executor,
         engine=LangGraphAgentToolWorkflowEngine(executor=executor),
@@ -801,8 +871,9 @@ def create_primeqa_hybrid_langgraph_agent_tool_workflow(
 def create_primeqa_hybrid_reference_agent_tool_workflow(
     *,
     toolset: PrimeQAHybridAgentToolset,
+    observation_sink: AgentWorkflowObservationSink | None = None,
 ) -> PrimeQAHybridAgentToolWorkflow:
-    executor = AgentToolWorkflowNodeExecutor(toolset=toolset)
+    executor = _observed_executor(toolset=toolset, observation_sink=observation_sink)
     return PrimeQAHybridAgentToolWorkflow(
         executor=executor,
         engine=DeterministicAgentToolWorkflowEngine(executor=executor),
@@ -812,8 +883,9 @@ def create_primeqa_hybrid_reference_agent_tool_workflow(
 def create_primeqa_hybrid_langgraph_agent_tool_workflow_from_toolset(
     *,
     toolset: PrimeQAHybridAgentToolset,
+    observation_sink: AgentWorkflowObservationSink | None = None,
 ) -> PrimeQAHybridAgentToolWorkflow:
-    executor = AgentToolWorkflowNodeExecutor(toolset=toolset)
+    executor = _observed_executor(toolset=toolset, observation_sink=observation_sink)
     return PrimeQAHybridAgentToolWorkflow(
         executor=executor,
         engine=LangGraphAgentToolWorkflowEngine(executor=executor),
@@ -832,6 +904,10 @@ def agent_tool_workflow_implementation_contract() -> dict[str, Any]:
         "graph_compiled_once_per_workflow_instance": True,
         "new_private_state_per_request": True,
         "shared_node_executor_uses_context_local_snapshots": True,
+        "operational_observability_always_attached": True,
+        "operational_observability_delivery": "synchronous_validated_json_line",
+        "node_latency_observed": True,
+        "request_content_observed": False,
         "tool_ids": list(_TOOL_IDS),
         "successful_tool_call_count": 3,
         "conditional_route_source": "observe_diagnostics",
@@ -852,6 +928,18 @@ def agent_tool_workflow_implementation_contract() -> dict[str, Any]:
         "test_gate_opened": False,
         "test_metrics_run": False,
     }
+
+
+def _observed_executor(
+    *,
+    toolset: PrimeQAHybridAgentToolset,
+    observation_sink: AgentWorkflowObservationSink | None,
+) -> AgentToolWorkflowNodeExecutor:
+    sink = observation_sink or JsonLineAgentWorkflowObservationSink()
+    return AgentToolWorkflowNodeExecutor(
+        toolset=toolset,
+        observer=PrimeQAHybridAgentWorkflowObserver(sink=sink),
+    )
 
 
 def _initial_state(question: PrimeQAQuery) -> AgentToolWorkflowPrivateState:

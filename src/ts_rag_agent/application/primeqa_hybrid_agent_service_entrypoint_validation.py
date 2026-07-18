@@ -15,6 +15,9 @@ from typing import Any
 
 import uvicorn
 
+from ts_rag_agent.application.primeqa_hybrid_agent_runtime_observability import (
+    AgentWorkflowObservationSink,
+)
 from ts_rag_agent.application.primeqa_hybrid_agent_service_entrypoint import (
     AgentServiceSourceFingerprint,
     CanonicalAgentServiceSourcePaths,
@@ -61,11 +64,12 @@ class _SyntheticSourceRepository:
     def load_json(self, source_key: str, path: Path) -> LoadedJsonSource:
         _ = path
         self.calls.append(f"load:{source_key}")
-        report = (
-            self.stage150
-            if source_key == "stage150_http_transport_validation"
-            else {"stage": "Stage 145"}
-        )
+        if source_key == "stage150_http_transport_validation":
+            report = self.stage150
+        elif source_key == "stage154_agent_tool_workflow_validation":
+            report = _synthetic_stage154_report()
+        else:
+            report = {"stage": "Stage 145"}
         return LoadedJsonSource(report=report, fingerprint=_synthetic_fingerprint(source_key))
 
     def fingerprint(self, source_key: str, path: Path) -> AgentServiceSourceFingerprint:
@@ -567,13 +571,19 @@ def _run_synthetic_case(
     }
 
 
-def _run_real_lifecycle(*, settings: ProjectSettings, port: int) -> dict[str, Any]:
+def _run_real_lifecycle(
+    *,
+    settings: ProjectSettings,
+    port: int,
+    workflow_observation_sink: AgentWorkflowObservationSink | None = None,
+) -> dict[str, Any]:
     sink = _RecordingEventSink()
     server_factory = _LifecycleProbeServerFactory(port=port)
     entrypoint = PrimeQAHybridLocalAgentServiceEntrypoint(
         settings=settings,
         server_factory=server_factory,
         event_sink=sink,
+        workflow_observation_sink=workflow_observation_sink,
     )
     result = entrypoint.run(port=port)
     server = server_factory.server
@@ -687,10 +697,10 @@ def _guard_checks(report: Mapping[str, Any]) -> list[dict[str, Any]]:
         ),
         _check("real_lifecycle_executed_once", real.get("executed") is True),
         _check("real_clean_exit_zero", real.get("exit_code") == 0),
-        _check("real_six_sources_fingerprinted", len(fingerprints) == 6),
+        _check("real_eleven_sources_fingerprinted", len(fingerprints) == 11),
         _check(
             "real_source_fingerprints_sha256",
-            len(fingerprints) == 6
+            len(fingerprints) == 11
             and all(len(row.get("sha256", "")) == 64 for row in fingerprints),
         ),
         _check("real_server_run_on_main_thread", real.get("server_run_on_main_thread") is True),
@@ -892,6 +902,38 @@ def _synthetic_config_factory(**kwargs: Any) -> Any:
 
 def _synthetic_fingerprint(source_key: str) -> AgentServiceSourceFingerprint:
     return AgentServiceSourceFingerprint(source_key=source_key, size_bytes=1, sha256="0" * 64)
+
+
+def _synthetic_stage154_report() -> dict[str, Any]:
+    source = {"size_bytes": 1, "sha256": "0" * 64}
+    return {
+        "stage": "Stage 154",
+        "analysis_id": "primeqa_hybrid_langgraph_agent_tool_workflow_validation_v1",
+        "source_unchanged_after_validation": True,
+        "source_files": {
+            "stage153_protocol": dict(source),
+            "pyproject": dict(source),
+            "workflow_source": dict(source),
+            "concurrent_runtime_source": dict(source),
+        },
+        "guard_checks": [
+            {"name": f"synthetic_stage154_guard_{index}", "passed": True} for index in range(54)
+        ],
+        "decision": {
+            "status": ("primeqa_hybrid_langgraph_agent_tool_workflow_implemented_and_validated"),
+            "workflow_implemented": True,
+            "langgraph_adapter_validated": True,
+            "facade_http_request_path_validated": True,
+            "real_resource_service_lifecycle_validated": True,
+            "runtime_registered_as_default": False,
+            "remote_exposure_authorized": False,
+            "test_gate_opened": False,
+            "test_metrics_run": False,
+            "queue_actions_enabled": False,
+            "retry_actions_enabled": False,
+            "fallback_strategies_enabled": False,
+        },
+    }
 
 
 def _load_json_object(path: Path) -> dict[str, Any]:

@@ -39,6 +39,7 @@ class _SourceRepository:
     def __init__(self, *, stage150: dict[str, Any], fail_key: str | None = None) -> None:
         self._reports = {
             "stage150_http_transport_validation": stage150,
+            "stage154_agent_tool_workflow_validation": _valid_stage154(),
             "stage145_concurrent_runtime_validation": {"stage": "Stage 145"},
         }
         self._fail_key = fail_key
@@ -212,6 +213,35 @@ def test_disabled_activation_stops_after_stage150_authorization() -> None:
     _assert_one_event(harness, code=4)
 
 
+def test_stage154_rejection_stops_before_stage145_resources_and_bind() -> None:
+    harness = _harness(fail_source_key="stage154_agent_tool_workflow_validation")
+
+    result = harness.entrypoint.run(port=18080)
+
+    assert result.exit_code is AgentServiceExitCode.STAGE154_WORKFLOW_AUTHORIZATION_REJECTED
+    assert harness.sources.calls == [
+        "load:stage150_http_transport_validation",
+        "load:stage154_agent_tool_workflow_validation",
+    ]
+    assert harness.resources.create_count == 0
+    assert harness.listener.create_count == 0
+    event = _assert_one_event(harness, code=9)
+    assert event.source_validation_state == "stage154_rejected"
+    assert event.runtime_activation_state == "rejected"
+
+
+def test_stage154_current_source_mismatch_is_rejected_before_stage145() -> None:
+    harness = _harness(fail_source_key="workflow_source")
+
+    result = harness.entrypoint.run(port=18080)
+
+    assert result.exit_code is AgentServiceExitCode.STAGE154_WORKFLOW_AUTHORIZATION_REJECTED
+    assert "load:stage145_concurrent_runtime_validation" not in harness.sources.calls
+    assert harness.resources.create_count == 0
+    assert harness.listener.create_count == 0
+    _assert_one_event(harness, code=9)
+
+
 def test_stage145_rejection_does_not_build_or_bind() -> None:
     bootstrap = _Bootstrap(eligible=False)
     harness = _harness(bootstrap=bootstrap)
@@ -301,6 +331,11 @@ def test_clean_lifecycle_uses_all_sources_warmup_bind_server_and_close_once() ->
     assert result.exit_code is AgentServiceExitCode.CLEAN_SERVER_RETURN
     assert harness.sources.calls == [
         "load:stage150_http_transport_validation",
+        "load:stage154_agent_tool_workflow_validation",
+        "fingerprint:stage153_protocol",
+        "fingerprint:pyproject",
+        "fingerprint:workflow_source",
+        "fingerprint:concurrent_runtime_source",
         "load:stage145_concurrent_runtime_validation",
         "fingerprint:stage128_agent_retrieval_protocol",
         "fingerprint:stage125_recall_expansion_protocol",
@@ -309,6 +344,11 @@ def test_clean_lifecycle_uses_all_sources_warmup_bind_server_and_close_once() ->
     ]
     assert [row.source_key for row in result.source_fingerprints] == [
         "stage150_http_transport_validation",
+        "stage154_agent_tool_workflow_validation",
+        "stage153_protocol",
+        "pyproject",
+        "workflow_source",
+        "concurrent_runtime_source",
         "stage145_concurrent_runtime_validation",
         "stage128_agent_retrieval_protocol",
         "stage125_recall_expansion_protocol",
@@ -388,6 +428,38 @@ def test_cli_main_rejects_unknown_option_with_exit_two(capsys: pytest.CaptureFix
 
 def _valid_stage150() -> dict[str, Any]:
     return json.loads(_STAGE150_PATH.read_text(encoding="utf-8"))
+
+
+def _valid_stage154() -> dict[str, Any]:
+    source = {"size_bytes": 1, "sha256": "0" * 64}
+    return {
+        "stage": "Stage 154",
+        "analysis_id": "primeqa_hybrid_langgraph_agent_tool_workflow_validation_v1",
+        "source_unchanged_after_validation": True,
+        "source_files": {
+            "stage153_protocol": dict(source),
+            "pyproject": dict(source),
+            "workflow_source": dict(source),
+            "concurrent_runtime_source": dict(source),
+        },
+        "guard_checks": [
+            {"name": f"synthetic_stage154_guard_{index}", "passed": True} for index in range(54)
+        ],
+        "decision": {
+            "status": ("primeqa_hybrid_langgraph_agent_tool_workflow_implemented_and_validated"),
+            "workflow_implemented": True,
+            "langgraph_adapter_validated": True,
+            "facade_http_request_path_validated": True,
+            "real_resource_service_lifecycle_validated": True,
+            "runtime_registered_as_default": False,
+            "remote_exposure_authorized": False,
+            "test_gate_opened": False,
+            "test_metrics_run": False,
+            "queue_actions_enabled": False,
+            "retry_actions_enabled": False,
+            "fallback_strategies_enabled": False,
+        },
+    }
 
 
 def _fingerprint(source_key: str) -> AgentServiceSourceFingerprint:

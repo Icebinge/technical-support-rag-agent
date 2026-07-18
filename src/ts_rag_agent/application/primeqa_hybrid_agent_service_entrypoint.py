@@ -16,6 +16,9 @@ from ts_rag_agent.application.primeqa_hybrid_agent_http_transport import (
     create_primeqa_hybrid_agent_http_app,
     create_primeqa_hybrid_agent_uvicorn_config,
 )
+from ts_rag_agent.application.primeqa_hybrid_agent_runtime_observability import (
+    AgentWorkflowObservationSink,
+)
 from ts_rag_agent.application.primeqa_hybrid_agent_service_entrypoint_protocol import (
     stage150_service_authorization_summary,
 )
@@ -35,6 +38,9 @@ _BINDING_HOST = "127.0.0.1"
 _MIN_PORT = 1024
 _MAX_PORT = 65535
 _EXPECTED_STAGE150_GUARDS = 37
+_EXPECTED_STAGE154_GUARDS = 54
+_STAGE154_ANALYSIS_ID = "primeqa_hybrid_langgraph_agent_tool_workflow_validation_v1"
+_STAGE154_STATUS = "primeqa_hybrid_langgraph_agent_tool_workflow_implemented_and_validated"
 _PUBLIC_EVENT_FIELDS = frozenset(
     {
         "entrypoint_id",
@@ -71,6 +77,7 @@ class AgentServiceExitCode(IntEnum):
     RESOURCE_OR_WARMUP_FAILURE = 6
     SOCKET_BIND_OR_LISTEN_FAILURE = 7
     SERVER_OR_LIFESPAN_FAILURE = 8
+    STAGE154_WORKFLOW_AUTHORIZATION_REJECTED = 9
 
 
 @dataclass(frozen=True)
@@ -90,6 +97,11 @@ class CanonicalAgentServiceSourcePaths:
     """Canonical read-only Stage151 sources derived from ProjectSettings."""
 
     stage150_http_transport_validation: Path
+    stage154_agent_tool_workflow_validation: Path
+    stage153_agent_tool_orchestration_protocol: Path
+    pyproject: Path
+    agent_tool_workflow_source: Path
+    concurrent_runtime_source: Path
     stage145_concurrent_runtime_validation: Path
     stage128_agent_retrieval_protocol: Path
     stage125_recall_expansion_protocol: Path
@@ -99,9 +111,31 @@ class CanonicalAgentServiceSourcePaths:
     @classmethod
     def from_settings(cls, settings: ProjectSettings) -> CanonicalAgentServiceSourcePaths:
         artifact_dir = settings.artifact_dir.resolve()
+        project_root = Path(__file__).resolve().parents[3]
         return cls(
             stage150_http_transport_validation=(
                 artifact_dir / "primeqa_hybrid_agent_http_transport_validation_stage150.json"
+            ),
+            stage154_agent_tool_workflow_validation=(
+                artifact_dir / "primeqa_hybrid_agent_tool_workflow_validation_stage154.json"
+            ),
+            stage153_agent_tool_orchestration_protocol=(
+                artifact_dir / "primeqa_hybrid_agent_tool_orchestration_protocol_stage153.json"
+            ),
+            pyproject=project_root / "pyproject.toml",
+            agent_tool_workflow_source=(
+                project_root
+                / "src"
+                / "ts_rag_agent"
+                / "application"
+                / "primeqa_hybrid_agent_tool_workflow.py"
+            ),
+            concurrent_runtime_source=(
+                project_root
+                / "src"
+                / "ts_rag_agent"
+                / "application"
+                / "primeqa_hybrid_concurrent_sidecar_agent_runtime.py"
             ),
             stage145_concurrent_runtime_validation=(
                 artifact_dir / "primeqa_hybrid_concurrent_runtime_validation_stage145.json"
@@ -328,6 +362,7 @@ class PrimeQAHybridLocalAgentServiceEntrypoint:
         listener_factory: AgentServiceListenerFactory | None = None,
         server_factory: AgentServiceServerFactory | None = None,
         event_sink: AgentServiceTerminalEventSink | None = None,
+        workflow_observation_sink: AgentWorkflowObservationSink | None = None,
     ) -> None:
         self._settings = settings
         self._paths = paths or CanonicalAgentServiceSourcePaths.from_settings(settings)
@@ -341,6 +376,7 @@ class PrimeQAHybridLocalAgentServiceEntrypoint:
         self._listener_factory = listener_factory or LoopbackAgentServiceListenerFactory()
         self._server_factory = server_factory or UvicornAgentServiceServerFactory()
         self._event_sink = event_sink or JsonLineAgentServiceTerminalEventSink()
+        self._workflow_observation_sink = workflow_observation_sink
 
     def run(self, *, port: int) -> AgentServiceEntrypointResult:
         state = _ExecutionState()
@@ -405,6 +441,37 @@ class PrimeQAHybridLocalAgentServiceEntrypoint:
         state.runtime_activation_state = "configuration_authorized"
 
         try:
+            stage154 = self._source_repository.load_json(
+                "stage154_agent_tool_workflow_validation",
+                self._paths.stage154_agent_tool_workflow_validation,
+            )
+            state.source_fingerprints.append(stage154.fingerprint)
+            stage154_sources = self._fingerprint_stage154_sources()
+            state.source_fingerprints.extend(stage154_sources)
+        except Exception:
+            state.source_validation_state = "stage154_rejected"
+            state.runtime_activation_state = "rejected"
+            return self._result(
+                code=AgentServiceExitCode.STAGE154_WORKFLOW_AUTHORIZATION_REJECTED,
+                outcome="stage154_workflow_authorization_rejected",
+                port=port,
+                state=state,
+                shutdown_trigger="startup_rejected",
+            )
+
+        if not _stage154_authorized(stage154.report, stage154_sources):
+            state.source_validation_state = "stage154_rejected"
+            state.runtime_activation_state = "rejected"
+            return self._result(
+                code=AgentServiceExitCode.STAGE154_WORKFLOW_AUTHORIZATION_REJECTED,
+                outcome="stage154_workflow_authorization_rejected",
+                port=port,
+                state=state,
+                shutdown_trigger="startup_rejected",
+            )
+        state.source_validation_state = "stage154_authorized"
+
+        try:
             stage145 = self._source_repository.load_json(
                 "stage145_concurrent_runtime_validation",
                 self._paths.stage145_concurrent_runtime_validation,
@@ -439,6 +506,7 @@ class PrimeQAHybridLocalAgentServiceEntrypoint:
                 stage145_report=stage145.report,
                 resource_factory=resource_factory,
                 warmup_question=builtin_label_free_agent_service_warmup_query(),
+                observation_sink=self._workflow_observation_sink,
             )
         except Exception:
             build_count = int(getattr(resource_factory, "build_count", 0))
@@ -566,6 +634,20 @@ class PrimeQAHybridLocalAgentServiceEntrypoint:
             ),
             ("stage80_dense_sparse_report", self._paths.stage80_dense_sparse_report),
             ("primeqa_technote_documents", self._paths.primeqa_technote_documents),
+        )
+        return tuple(
+            self._source_repository.fingerprint(source_key, path) for source_key, path in sources
+        )
+
+    def _fingerprint_stage154_sources(self) -> tuple[AgentServiceSourceFingerprint, ...]:
+        sources = (
+            (
+                "stage153_protocol",
+                self._paths.stage153_agent_tool_orchestration_protocol,
+            ),
+            ("pyproject", self._paths.pyproject),
+            ("workflow_source", self._paths.agent_tool_workflow_source),
+            ("concurrent_runtime_source", self._paths.concurrent_runtime_source),
         )
         return tuple(
             self._source_repository.fingerprint(source_key, path) for source_key, path in sources
@@ -707,6 +789,50 @@ def _stage150_authorized(report: Mapping[str, Any]) -> bool:
         and summary.get("test_split_loaded") is False
         and summary.get("test_metrics_run") is False
         and summary.get("private_keys_found") == []
+    )
+
+
+def _stage154_authorized(
+    report: Mapping[str, Any],
+    current_sources: Sequence[AgentServiceSourceFingerprint],
+) -> bool:
+    checks = report.get("guard_checks") or []
+    decision = report.get("decision") or {}
+    expected_sources = report.get("source_files") or {}
+    current_by_key = {row.source_key: row for row in current_sources}
+    source_keys = (
+        "stage153_protocol",
+        "pyproject",
+        "workflow_source",
+        "concurrent_runtime_source",
+    )
+    sources_exact = all(
+        key in current_by_key
+        and (expected_sources.get(key) or {}).get("size_bytes") == current_by_key[key].size_bytes
+        and (expected_sources.get(key) or {}).get("sha256") == current_by_key[key].sha256
+        for key in source_keys
+    )
+    return bool(
+        report.get("stage") == "Stage 154"
+        and report.get("analysis_id") == _STAGE154_ANALYSIS_ID
+        and report.get("source_unchanged_after_validation") is True
+        and len(checks) == _EXPECTED_STAGE154_GUARDS
+        and all(row.get("passed") is True for row in checks)
+        and decision.get("status") == _STAGE154_STATUS
+        and decision.get("workflow_implemented") is True
+        and decision.get("langgraph_adapter_validated") is True
+        and decision.get("facade_http_request_path_validated") is True
+        and decision.get("real_resource_service_lifecycle_validated") is True
+        and decision.get("runtime_registered_as_default") is False
+        and decision.get("remote_exposure_authorized") is False
+        and decision.get("test_gate_opened") is False
+        and decision.get("test_metrics_run") is False
+        and decision.get("queue_actions_enabled") is False
+        and decision.get("retry_actions_enabled") is False
+        and decision.get("fallback_strategies_enabled") is False
+        and set(expected_sources) == set(source_keys)
+        and set(current_by_key) == set(source_keys)
+        and sources_exact
     )
 
 

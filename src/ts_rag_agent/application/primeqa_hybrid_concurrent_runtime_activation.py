@@ -5,6 +5,9 @@ from dataclasses import asdict, dataclass
 from threading import Lock
 from typing import Any, Protocol
 
+from ts_rag_agent.application.primeqa_hybrid_agent_runtime_observability import (
+    AgentWorkflowObservationSink,
+)
 from ts_rag_agent.application.primeqa_hybrid_concurrent_runtime_validation_protocol import (
     ConcurrentRuntimeValidationEvaluation,
     ConcurrentRuntimeValidationEvidence,
@@ -115,6 +118,7 @@ class PrimeQAHybridConcurrentRuntimeBootstrap:
         stage145_report: Mapping[str, Any],
         resource_factory: ConcurrentRuntimeSharedResourceFactoryPort,
         warmup_question: PrimeQARuntimeQuery,
+        observation_sink: AgentWorkflowObservationSink | None = None,
     ) -> PrimeQAHybridConcurrentRuntimeBootstrapResult:
         with self._start_lock:
             if self._started:
@@ -167,7 +171,8 @@ class PrimeQAHybridConcurrentRuntimeBootstrap:
             raise RuntimeError("concurrent runtime resource inventory does not match Stage145")
 
         runtime = create_primeqa_hybrid_concurrent_sidecar_agent_runtime(
-            shared_resources=shared_resources
+            shared_resources=shared_resources,
+            observation_sink=observation_sink,
         )
         warmup_run = runtime.run(
             warmup_question,

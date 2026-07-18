@@ -8,6 +8,10 @@ from enum import Enum
 from threading import BoundedSemaphore, Lock
 from typing import Any, Protocol
 
+from ts_rag_agent.application.primeqa_hybrid_agent_runtime_observability import (
+    AGENT_RUNTIME_OBSERVABILITY_PROTOCOL_ID,
+    AgentWorkflowObservationSink,
+)
 from ts_rag_agent.application.primeqa_hybrid_agent_tool_orchestration_protocol import (
     AGENT_TOOL_ORCHESTRATION_PROTOCOL_ID,
     AGENT_TOOL_WORKFLOW_GRAPH_ID,
@@ -336,6 +340,7 @@ class PrimeQAHybridConcurrentSidecarAgentRuntime:
 def create_primeqa_hybrid_concurrent_sidecar_agent_runtime(
     *,
     shared_resources: PrimeQAHybridSharedRuntimeResources,
+    observation_sink: AgentWorkflowObservationSink | None = None,
 ) -> PrimeQAHybridConcurrentSidecarAgentRuntime:
     """Assemble one concurrent runtime without duplicating heavy resources."""
 
@@ -344,6 +349,7 @@ def create_primeqa_hybrid_concurrent_sidecar_agent_runtime(
     )
     entrypoint = create_primeqa_hybrid_langgraph_agent_tool_workflow(
         candidate_pool_retriever=profiled_retriever,
+        observation_sink=observation_sink,
     )
     return PrimeQAHybridConcurrentSidecarAgentRuntime(
         resources=PrimeQAHybridConcurrentRuntimeResourceBundle(
@@ -372,6 +378,8 @@ def concurrent_sidecar_runtime_contract() -> dict[str, Any]:
         "agent_workflow_graph_compiled_once": True,
         "agent_workflow_protocol_id": AGENT_TOOL_ORCHESTRATION_PROTOCOL_ID,
         "agent_workflow_graph_id": AGENT_TOOL_WORKFLOW_GRAPH_ID,
+        "agent_workflow_observability_protocol_id": (AGENT_RUNTIME_OBSERVABILITY_PROTOCOL_ID),
+        "agent_workflow_observability_always_attached": True,
         "shared_pending_retrieval_profile_allowed": False,
         "registered_as_runtime_default": False,
         "test_access_allowed": False,

@@ -16,7 +16,7 @@ No downloaded dataset files are committed to this repository.
 
 ## Current Status
 
-Stage 154: LangGraph Agent tool workflow implemented, integrated, and validated.
+Stage 155: strict Agent runtime activation and node observability implemented and validated.
 
 Implemented:
 
@@ -49,6 +49,9 @@ Implemented:
 - framework-neutral and LangGraph engine equivalence for complete/refuse paths
 - request-isolated four-way graph execution with exact error propagation
 - active facade, FastAPI, and local service request paths using the graph workflow
+- strict Stage154 formal-evidence and current-source fingerprint activation gate
+- synchronous 22-field public-safe workflow and node observation events
+- request-isolated node timing across complete, refuse, failure, and four-way concurrency
 
 Not implemented yet:
 
@@ -72,7 +75,9 @@ the process composition protocol. Stage152 implements its strict local service
 entrypoint and validates one real resource and HTTP lifecycle. Stage153 freezes
 the request-local tool workflow. Stage154 installs LangGraph 1.2.9, implements
 the framework-neutral and `StateGraph` engines, and routes the concurrent
-runtime through the compiled graph. The entrypoint remains disabled by default,
+runtime through the compiled graph. Stage155 requires current Stage154 evidence
+before resource construction or socket binding and emits content-free timing
+events for every graph node. The entrypoint remains disabled by default,
 binds loopback only after both explicit flags are true, and no network service
 remains running after validation.
 
@@ -89,6 +94,8 @@ The implementation evidence is recorded in
 The Stage154 graph implementation and current-code lifecycle evidence are
 recorded in
 [docs/primeqa_hybrid_agent_tool_workflow_validation.md](docs/primeqa_hybrid_agent_tool_workflow_validation.md).
+The strict activation and operational observation evidence is recorded in
+[docs/primeqa_hybrid_agent_runtime_observability_validation.md](docs/primeqa_hybrid_agent_runtime_observability_validation.md).
 
 Run the non-default local service only with both explicit activation flags and
 an explicit non-privileged port:

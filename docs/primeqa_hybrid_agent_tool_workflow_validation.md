@@ -199,3 +199,14 @@ the default runtime and is not remotely exposed. Stage155 may freeze runtime
 activation evidence and operational observability for the graph workflow.
 Test, remote serving, defaultization, queues, retries, and fallback remain
 closed.
+
+## Stage155 Compatibility Note
+
+The SHA values above remain the historical Stage154 completion evidence for
+commit `9815a79`. Stage155 later added workflow observation and a stricter
+service activation chain, changing two Stage154 fingerprint sources. Stage155
+therefore regenerated a current-source compatibility formal (`54/54`) and
+preflight (`46/54`) by reading the same previously completed real support
+artifact; it did not rerun the Stage154 real lifecycle. The compatibility
+hashes and that process distinction are recorded in
+`docs/primeqa_hybrid_agent_runtime_observability_validation.md`.

@@ -32951,3 +32951,79 @@ real support guards: 46 / 46
 - 先让 framework-neutral 与 framework adapter 共用同一 node executor，可以把等价性问题缩小为调度语义，而不是维护两套业务逻辑。
 
 下一步：Stage155 冻结 graph workflow 的 runtime activation evidence 与 operational observability，明确 workflow trace 如何与现有 runtime/facade/HTTP telemetry 关联、如何观测 compile/invocation/failure/concurrency，而不公开 request 内容。test、remote、默认化、queue、retry 和 fallback 继续关闭。
+
+## 2026-07-18 - Stage 155 严格激活证据链与节点级运行可观测性
+
+目标：把 Stage154 已接入 LangGraph 的本地 Agent runtime 进一步收紧为“只有正式证据仍与当前源码一致才允许启动”，并实现不暴露请求、答案或文档内容的节点级耗时观测。继续保持双显式开关、loopback-only、默认关闭、test 封闭、无 queue/retry/fallback。
+
+### 审计发现与方案选择
+
+Stage154 的 workflow trace 已能说明终态、候选深度、工具次数和失败阶段，但不能说明每个节点耗时、整条 workflow 累计耗时、并发 invocation 关联与失败节点时间线。更关键的是，当前 service startup 仍只校验 Stage150 与 Stage145 artifact；即使 Stage154 的 LangGraph 正式证据缺失或已与当前代码不一致，服务也会继续构建资源。这说明只加日志不能算完成 Stage155，必须同时补上 Stage154 正式证据门。
+
+最终采用严格方案：不增加第三个环境开关；两个现有 flag 显式为 true 后，先读取 Stage154 formal，再独立 fingerprint Stage153 protocol artifact、`pyproject.toml`、workflow source 和 concurrent runtime source。Stage154 identity、54 个 guard、关闭边界或任一 size/SHA 不匹配，均在 Stage145、资源构建、warmup 和 socket bind 前拒绝，专用 exit code 为 9。没有引入备用 artifact、备用端口或宽松比较。
+
+### 观测实现
+
+新增 `primeqa_hybrid_agent_runtime_observability.py`，封装 22 字段 `PublicSafeAgentWorkflowObservationEvent`、同步 sink、observer、并发计数器和 Stage155 activation/observability contract。默认 sink 把每个已验证事件作为一行 JSON 写入 stderr；注入的 recording sink 只用于验证。
+
+每次 complete/refuse invocation 精确发出 9 个事件：workflow start、7 个 node terminal、workflow terminal。事件只包含 protocol/graph ID、进程内 invocation sequence、invocation 内 event sequence、event/node/outcome、单节点与累计 monotonic elapsed ms、当前状态、transition/tool count、candidate/generation/verification depth、failure stage 和 in-flight 数。没有 wall-clock timestamp、request handle、question、answer、document/citation ID 或正文。
+
+LangGraph 节点运行在复制的 context 中，因此 observer 沿用 Stage154 学到的 ownership 模式：调用方创建 private token，节点继承 token，实际 invocation observation state 保存到加锁 token map。节点事件可以并发写入同一 sink，但每个 invocation 的 1..9 sequence 独立。observer 被贯穿 workflow、concurrent runtime、bootstrap 与 service composition root；eligible runtime 没有关闭观测的 flag。
+
+### 首轮测试与真实修正
+
+第一轮格式化真实结果为 3 个文件被调整，Ruff 发现并自动修复 4 个问题。相关旧测试中 workflow、concurrent runtime 和 bootstrap 均通过，但 service 组为 `34 passed, 9 failed`；9 个失败全部因为旧 synthetic source fixture 不提供新增 Stage154 evidence，被严格 gate 正确拒绝。更新 fixture 并新增 Stage154 缺失、篡改、source stale 的拒绝测试后，核心观测与 service 组合测试为 `34 passed`。
+
+Stage155 validator 首轮相关结果为 `27 passed, 2 failed`。第一项是代码把真实 Stage154 analysis ID 少写了 `langgraph_`，导致当前证据被错误拒绝；读取真实 artifact 后改为 `primeqa_hybrid_langgraph_agent_tool_workflow_validation_v1`。第二项是测试用字符串包含关系检查 `document_id`，误伤公开安全布尔字段名 `document_identifiers_recorded`；改为检查精确 JSON key 后通过。修正结果为 `29 passed`，随后扩大 facade/HTTP/service/Stage154 回归为 `98 passed`。
+
+### Stage154 当前源码兼容证据
+
+Stage155 合法修改了 workflow 和 concurrent runtime，旧 Stage154 formal 的两项 source fingerprint 因此不再描述当前源码。按原 Stage154 validator 重新生成 formal/preflight；读取的是 Stage154 已经完成的 real support artifact，没有重跑 Stage154 真实资源 lifecycle，也没有把旧 support 伪装成新执行。
+
+```text
+Stage154 current-source compatibility formal: 54 / 54
+Stage154 current-source compatibility preflight: 46 / 54
+formal SHA-256: af80d1dd9ba6b5ee7bc0e4f767182e922536d0f1547c86df1310a0d73b9bb416
+preflight SHA-256: bfebe4f38b5e0fa27a0c72882623a4f6ae8c3b8992e85137e66848db22c2a504
+```
+
+这些是 Stage155 的 current-source compatibility support，不倒改 commit `9815a79` 完成时已经记录的 Stage154 历史 SHA。
+
+### Preflight 与真实生命周期
+
+Stage155 未确认 preflight 为 `48/57`。9 个失败精确是 user confirmation 和尚不可用的 8 项 real lifecycle/observation 证据；source、activation、complete/refuse、failure、concurrency、HTTP、privacy 与关闭边界全部通过。preflight SHA-256 为 `72e512c243fc7bb97a9a1e3e844508cfc05e78e09db59c688ce29e399911c4ec`。
+
+第一次 formal 命令本身没有设置 timeout，但 shell 工具仍施加了约 14 秒的默认上限，返回 exit 124。该次被外部中断，没有 formal artifact，端口 18155 没有监听残留，不能算通过。根据“禁止擅自 retry”的约束，先向用户列出 A 重跑/B 停止；用户明确回复 A。
+
+第二次使用隐藏独立进程、同一固定端口 18155 执行。启动编排层没有成功解析 `Start-Process` 返回文本，但没有立即再启动，而是先检查目标命令行和端口；确认只有一个目标 Python PID 28788 正在运行后，仅等待该现有进程自然退出。没有创建重复进程、没有换端口、没有应用 timeout、没有强制终止。
+
+```text
+Stage155 formal: 57 / 57
+total validation time: 40.741661s
+service exit: 0
+HTTP/1.1 live / ready / answer: 200 / 200 / 200
+authorized source fingerprints: 11
+listener released / transport closed: true / true
+port 18155 rebind: true
+test metrics run: false
+
+real invocations / events / node events / failures: 2 / 18 / 14 / 0
+warmup workflow total: 679.789ms
+warmup retrieval / prepare / compose: 614.917 / 48.781 / 6.958ms
+answer workflow total: 59.595ms
+answer retrieval / prepare / compose: 46.777 / 2.143 / 6.684ms
+```
+
+formal SHA-256 为 `25ac42e3573f6c6d86fb367cabef7fe83955f17ed79bb86b53585823fb423eef`。warmup 的主要成本是首次 retrieval；资源热起来后，真实 answer request 仍由 retrieval 主导，compose 是第二大节点。这个结论来自本次真实事件，不是代码常量或估算。
+
+提交前曾误把 `ruff format` 作用到全仓，真实产生 321 个 tracked diff，其中 311 个是与 Stage155 无关的历史文件格式/换行变化，并使 4 个历史长行触发 Ruff。工作区开始时为 clean，这 311 个变更可确认全部由本轮 formatter 产生；随后仅恢复这 311 个非目标文件，保留 10 个目标 tracked 文件和 6 个目标新增文件。定向格式化 11 个 Python 文件均为 unchanged，仓库级 Ruff 只读检查通过。完整 pytest 使用唯一独立进程自然跑完：`712 passed, 1 warning in 11.37s`；warning 仍是既有 FastAPI `TestClient` 的 Starlette deprecation warning。
+
+### 本步学到
+
+- runtime activation artifact 只检查“曾经通过”不够；如果 artifact 声称约束当前实现，就必须在启动时重新匹配它声明的 source fingerprints。
+- 可观测性不应把 private request ID 当 correlation ID。进程内单调 invocation sequence 足以关联节点时间线，同时避免把用户输入或数据集 identity 写进日志。
+- graph copied context 适合传播 immutable token，不适合作为节点到调用方的可变回传通道；加锁 token map 既能跨边界又能在 invocation end 精确删除。
+- 首次被外部工具 timeout 中断与应用自己 timeout 是不同事实，但二者都不能伪装成自然结束；retry 必须单独记录原因和用户确认。
+- warmup 与 warm request 的分节点对比比单一 end-to-end 数字更可操作：本次真实证据把冷启动 retrieval 和稳定请求 retrieval 明确分开。
+
+下一步：先设计 local Agent 的 tool selection 与 multi-turn state boundary，再决定是否引入 LLM 动态路由。test、remote、runtime defaultization、queue、retry、fallback、observation sampling/batching/export 继续关闭。

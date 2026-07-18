@@ -1432,3 +1432,42 @@ dependency warning. No evaluation split is loaded and test remains locked.
 Stage155 may freeze graph runtime activation and operational observability;
 remote serving, defaultization, test, queues, retries, and fallback remain
 closed.
+
+The current Stage 155 strict Agent activation and operational-observability
+validation is recorded in:
+
+```text
+docs/primeqa_hybrid_agent_runtime_observability_validation.md
+```
+
+Stage155 adds Stage154 formal evidence and its four current source
+fingerprints to the service startup chain. Missing, tampered, or stale evidence
+is rejected with exit code 9 before Stage145 loading, resource construction,
+warmup, or listener binding. The existing concurrent-runtime and local-HTTP
+flags remain the only activation flags; both must be explicitly true. The
+runtime remains nondefault and loopback-only.
+
+Every graph invocation now emits one start event, one event for each of the
+seven frozen nodes, and one terminal event. The exact 22-field event schema
+contains only process-local sequence numbers, monotonic elapsed times, state,
+counts, depths, failure stage, and in-flight level. It contains no wall-clock
+timestamp, request identifier, question, answer, document identifier, or raw
+content. Four simultaneous calls produce 36 isolated events, and a retrieval
+failure produces four events while preserving the same original exception and
+performing one retrieval with no retry or fallback.
+
+The unconfirmed preflight passes `48/57` guards. The first formal real command
+was externally interrupted by the shell tool's approximately 14-second default
+limit and produced no formal artifact. After explicit user approval, exactly
+one replacement process ran naturally on fixed port 18155. It passes `57/57`
+in `40.741661s`, returns HTTP/1.1 `200/200/200`, fingerprints eleven sources,
+releases the listener and transport, and emits 18 events for the warmup and
+answer request. The warm answer request completes in `59.595ms`, of which
+retrieval is `46.777ms` and composition is `6.684ms`.
+
+Stage155 loads no evaluation rows and runs no test metric. Remote serving,
+runtime defaultization, test access, observation sampling/batching/export,
+queues, retries, fallback, LLM-selected tools, and multi-turn memory remain
+closed. Final repository validation is Ruff passing and `712 passed` with one
+existing FastAPI `TestClient` deprecation warning. The next direction is to design the local tool-selection and
+multi-turn-state boundary before implementation.
