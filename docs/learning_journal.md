@@ -33753,3 +33753,104 @@ warning 是既有 FastAPI/Starlette `TestClient` deprecation。完整 pytest 只
 - 运行对比审计必须把确定性质量字段与天然波动的 latency/timing 分开，否则会制造假的不一致。
 
 下一步：停止当前 learned swap 家族，冻结 untouched RRF Top10 为固定 generation-context 候选策略，然后只在独立 dev 上做一次与 current query-overlap 的比较。test、runtime default、fallback、query rewrite 和 second retrieval 继续关闭。
+
+## 2026-07-19 - Stage 163 untouched RRF 独立 dev 验证与契约纠正
+
+目标：执行 Stage162 已冻结的下一步，只在独立 dev 上比较一个固定候选 `untouched original RRF Top10` 与当前 `query-overlap Top10`。本阶段不训练、不搜索 policy、不调 threshold、不运行 Qwen Agent、不加载 test、不注册默认 runtime，也不启用 fallback、query rewrite 或 second retrieval。
+
+### 冻结协议与实现
+
+在解析 dev 前精确授权 Stage162、Stage160、Stage80、Stage68 dev 和 technote corpus 五份来源。dev SHA-256 仍为 `071c54f80657592bda7f8e4095afc8800a2be112362c3a275191a0fc8e28bd5f`，共 121 行，其中 answerable/unanswerable 为 `76/45`。五个 normalized-question + answer-document 分组 fold 行数为 `25/24/24/24/24`，group violation 为 0；fold 只用于稳定性门禁，不参与 fit、selection 或 tuning。
+
+共享候选构建器从 Stage161 专用类泛化为 `PrimeQAHybridCandidateDatasetBuilder`，同时保留 Stage161 alias。新增显式 `progress_stage` 和 `progress_phase`，Stage163 的 23 个候选构建进度事件全部标为 `Stage 163 / dev_candidate_pool_build`。
+
+Stage163 重建 Stage116 offline original-RRF Top200，每行精确 200 条，共 24,200 条内存记录，不写 raw candidate rows。控制组和候选都使用既有 deterministic answer generator + verifier；只有一个候选策略，dev 不参与任何选择。
+
+### 唯一一次正式 dev 结果
+
+正式进程只启动一次，使用 `--encoder-device cuda`，没有运行时限、monitor deadline、kill、restart、retry 或 fallback，并自然结束。detached launcher 没有保留可复用 exit code，因此不能声称 formal exit code 为 0；真实证据是最终 saved-report 消息、可解析 JSON、10/10 可解析 SVG、进程终止且 stderr 无 traceback。stderr 非空，是两组成功的 Transformers weight-loading progress。总用时 `74.246744s`。
+
+```text
+current query-overlap Top10:
+  context gold hit: 36 / 76 = 47.3684%
+  all-answerable F1: 0.187282
+  gold citations: 33
+  answerable refusals: 0
+  unanswerable false answers: 45 / 45
+
+untouched original RRF Top10:
+  context gold hit: 55 / 76 = 72.3684%
+  all-answerable F1: 0.186694
+  gold citations: 42
+  answerable refusals: 0
+  unanswerable false answers: 45 / 45
+```
+
+RRF 净增加 19 个 Top10 gold hit 和 9 个 gold citation，但 aggregate F1 下降 `0.000588`。76 个 answerable 中，F1 improvement/regression/tie 为 `37/20/19`。
+
+```text
+fold_1: hit +0.052632, F1 +0.012525
+fold_2: hit +0.437500, F1 +0.006367
+fold_3: hit +0.400000, F1 +0.006969
+fold_4: hit +0.133333, F1 -0.013365
+fold_5: hit +0.312500, F1 -0.015860
+```
+
+8 个 strict policy guard 只有 6 个通过：`verified_f1_all_not_below_current` 和 `every_fold_f1_not_below_current` 失败。结果是 `primeqa_hybrid_untouched_rrf_not_dev_safe`，不进入 Agent 集成。两组 deterministic policy 的 unanswerable false answer 都是 `45/45`，这个结果严重且不可接受，不能被召回提升掩盖。
+
+原始 formal report 保持不变，SHA-256 为 `66f3b3185d4a7a3447fc9524a78729bc1e307f5feab04b6308268cdb06642e05`。
+
+### Top400 / Top200 过程门禁错误与用户选择 A
+
+原始 formal report 的 process guard 是 `16/17`，因此当时正确标记为 invalid。唯一失败项 `candidate_pool_exact` 错误要求 Stage163 Top200 gold pool hit 等于 Stage160 的 70。
+
+只读追溯 Stage160 public 与 hashed private artifact 后确认：Stage160 每个 runtime candidate pool 深度是 400，verification context 深度是 200，generation context 深度是 10；Stage163 的 offline Stage116 pool 深度是 200。Stage160 的 Top400 gold hit `70/76` 与 Stage163 的 Top200 `69/76` 属于不同契约，不能做相等性门禁。这不是把运行漂移修饰成成功，而是冻结协议本身引用了错误层级。
+
+向用户列出 A“保留原报告，新增只读纠正审计，不重跑 dev”、B“保持 Stage163 process invalid”、C“修改后重跑 dev”后，用户明确选择 A。
+
+纠正审计锁定原始 Stage163 report、Stage160 public report 和 Stage160 hashed diagnostics；不接收任何 split 参数，不加载 dev，不重建 retrieval，不重建 candidate pool，不重新评估任何 case，也不更改任何质量指标。原始 metric snapshot 修正前后 SHA-256 都是 `ab176cacba2a844b998e49744626a9555a0c30dda61e0935cdb999f410e4a147`。
+
+纠正后的过程门禁只验证 Stage116 Top200 shape：121 个 pool、24,200 条记录、min/max depth 均为 200。结果为：
+
+```text
+contract-correction guards: 12 / 12
+corrected Stage163 process guards: 17 / 17
+strict policy guards: 6 / 8
+dev rows loaded during correction: 0
+dev cases reevaluated during correction: 0
+candidate policy adopted: false
+```
+
+纠正报告 SHA-256 为 `f31efd39fc87f3c9289d2cc2521d0928e283a2535418565cf6d1d668565da15b`。新增 2 张契约 SVG，2/2 可 XML parse；连同原 formal 共有 12 张结构可验证 SVG。没有声称完成 pixel-level screenshot review。
+
+### 真实失败、修正与最终验证
+
+- 第一次 Stage163 新模块 Ruff format check 报告需要格式化；机械排版后通过。
+- 两次只读源码搜索分别因猜错历史脚本文件名和 Windows wildcard 路径语法失败；改为读取真实文件列表并使用目录加 `-g`，没有文件改动。
+- 第一次 source authorization preflight 手工猜错 corpus 路径，在 dev 评估前以 `FileNotFoundError` 停止；读取 `ProjectSettings.primeqa_raw_dir` 后五份 SHA-256 精确授权。它不是 formal dev 运行。
+- 原 formal 暴露 `candidate_pool_exact` 的 Top400/Top200 契约错误；没有静默改写原报告，也没有重跑 dev。
+- correction 模块第一次 Ruff lint 因 `Mapping/Sequence` 导入来源和 import ordering 共 3 项失败；修正后通过。随后 format check 要求两个模块机械排版，完成后通过。
+- 一次只读 `rg` 在查找现有 pytest driver 时无匹配并 exit 1，没有文件改动。
+- 第一次完整 pytest 驱动位于 `artifacts`，未把仓库根加入 `sys.path`，导致 collection 阶段 3 个 `ModuleNotFoundError: scripts`，真实结果是 `exit 2`、`1 warning, 3 errors in 2.21s`。这不是代码测试通过，也没有自动重跑。
+- 向用户给出 A“修正 ignored driver 并运行一次 replacement full pytest”和 B“停止且不声称 full pass”后，用户明确选择 A。旧 driver、PID、stdout/stderr 和 exit 证据全部保留；replacement 只增加仓库根 `sys.path`，随后自然运行一次并 exit 0。
+
+最终 current-source 验证：
+
+```text
+Stage162/163 targeted pytest: 19 passed in 1.40s
+Stage163 six-file Ruff format check: passed
+full repository Ruff lint: passed
+replacement full repository pytest: 854 passed, 1 existing warning in 12.14s
+replacement full pytest exit code / stderr bytes: 0 / 0
+```
+
+warning 是既有 FastAPI/Starlette `TestClient` deprecation。replacement full pytest 没有 test timeout、monitor deadline、kill 或 restart，并自然结束。
+
+### 本步学到
+
+- 高 Top10 gold recall 不保证 verified answer quality。RRF 把 hit 提高 25 个百分点，aggregate F1 仍略降，并在两个 fold 明显回退。
+- process reproducibility guard 必须比较同一层级、同一深度、同一语义的对象；runtime Top400 candidate pool 和 offline Top200 pool 的 aggregate count 不能直接判等。
+- 发现预先冻结的过程门禁错误后，应保留原始 artifact，再用单独标注的 correction audit 修正；不能覆盖原始 invalid 状态，也不能借纠正之名重新使用 dev 调参。
+- 当前 context policy 家族已经没有达到严格门槛的候选。下一步应转向 Stage160 的 19 个“gold 已进入 generation Top10，但 Qwen Agent 仍拒答”问题，研究 generation decision，而不是继续把召回率当成最终答案质量。
+
+下一步：Stage164 只基于既有 Stage160 诊断证据设计 gold-visible Agent refusal 分析协议。test、runtime default、fallback、query rewrite 和 second retrieval 继续关闭；任何 Agent runtime 新实验都必须先冻结协议并单独确认。

@@ -1804,3 +1804,39 @@ The learned swap family is stopped under this strict protocol. The next
 eligible evaluation freezes untouched RRF Top10 and compares it once on the
 independent development split against current query overlap. Test and runtime
 defaultization remain closed.
+
+The completed Stage 163 one-shot development comparison is documented in:
+
+```text
+docs/primeqa_hybrid_untouched_rrf_dev_validation.md
+```
+
+Stage163 compares exactly one frozen untouched-RRF Top10 candidate with the
+current query-overlap Top10 control on the 121-row development split. It does
+not train, tune, search policies, run Qwen Agent, or load test. Grouped folds
+are used only as strict non-regression checks.
+
+Untouched RRF raises answerable Top10 gold hit from `36/76` to `55/76` and gold
+citations from 33 to 42. However, all-answerable F1 decreases from `0.187282`
+to `0.186694`; fold 4 and fold 5 have F1 deltas `-0.013365` and `-0.015860`.
+Only six of eight policy guards pass, so the candidate is not development-safe
+and is not integrated.
+
+The immutable original report SHA-256 is
+`66f3b3185d4a7a3447fc9524a78729bc1e307f5feab04b6308268cdb06642e05`.
+It originally passed 16/17 process guards because one frozen check incorrectly
+compared the Stage160 runtime Top400 gold-hit count `70` with the Stage163
+Stage116 offline Top200 count `69`.
+
+After explicit user choice A, a separate correction audit preserved the
+original report and all metrics, loaded no data split, rebuilt no retrieval,
+and reevaluated zero cases. Stage160's hashed diagnostics prove all 121 runtime
+candidate pools had depth 400, verification contexts depth 200, and generation
+contexts depth 10. The corrected shape-only process audit passes `17/17`, while
+the policy result remains `6/8` and rejected. The correction report passes
+`12/12` own guards and has SHA-256
+`f31efd39fc87f3c9289d2cc2521d0928e283a2535418565cf6d1d668565da15b`.
+
+Test remains locked. The next eligible analysis concerns Stage160's
+gold-visible Qwen Agent refusals; context-policy changes, runtime
+defaultization, fallback, query rewrite, and second retrieval remain closed.

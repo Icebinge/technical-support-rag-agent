@@ -270,8 +270,8 @@ class RuntimeVisibleCandidateFeatureExtractor:
         return features
 
 
-class Stage161TrainCandidateDatasetBuilder:
-    """Build the exact Stage116 top200 records for every frozen train row."""
+class PrimeQAHybridCandidateDatasetBuilder:
+    """Build exact Stage116 Top200 records for an authorized split."""
 
     def __init__(
         self,
@@ -282,14 +282,18 @@ class Stage161TrainCandidateDatasetBuilder:
         fold_assignments: Mapping[str, str],
         progress_sink: ProgressSink | None = None,
         progress_stage: str = _STAGE,
+        progress_phase: str = "train_candidate_pool_build",
     ) -> None:
         if not progress_stage.strip():
             raise ValueError("candidate builder progress stage must not be empty")
+        if not progress_phase.strip():
+            raise ValueError("candidate builder progress phase must not be empty")
         self._documents_by_id = documents_by_id
         self._channels = tuple(channels)
         self._fold_assignments = dict(fold_assignments)
         self._progress_sink = progress_sink
         self._progress_stage = progress_stage
+        self._progress_phase = progress_phase
         self._feature_extractor = RuntimeVisibleCandidateFeatureExtractor(
             documents_by_id=documents_by_id,
             sections_by_document=sections_by_document,
@@ -316,7 +320,7 @@ class Stage161TrainCandidateDatasetBuilder:
                 rrf_k=_RRF_K,
             )[:CANDIDATE_POOL_DEPTH]
             if len(ranked_pool_doc_ids) != CANDIDATE_POOL_DEPTH:
-                raise ValueError("Stage161 candidate builder did not produce exact top200")
+                raise ValueError("candidate builder did not produce exact Top200")
             route_rank_maps = {
                 channel_id: {result.document.id: result.rank for result in results}
                 for channel_id, results in results_by_channel.items()
@@ -353,12 +357,15 @@ class Stage161TrainCandidateDatasetBuilder:
                 self._progress_sink(
                     {
                         "stage": self._progress_stage,
-                        "phase": "train_candidate_pool_build",
+                        "phase": self._progress_phase,
                         "completed": index,
                         "total": total,
                     }
                 )
         return tuple(records)
+
+
+Stage161TrainCandidateDatasetBuilder = PrimeQAHybridCandidateDatasetBuilder
 
 
 def run_primeqa_hybrid_protected_context_selector_training(
