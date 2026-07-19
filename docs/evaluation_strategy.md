@@ -1840,3 +1840,40 @@ the policy result remains `6/8` and rejected. The correction report passes
 Test remains locked. The next eligible analysis concerns Stage160's
 gold-visible Qwen Agent refusals; context-policy changes, runtime
 defaultization, fallback, query rewrite, and second retrieval remain closed.
+
+The completed Stage 164 diagnostic is documented in:
+
+```text
+docs/primeqa_hybrid_gold_visible_refusal_diagnostics.md
+```
+
+Stage164 joins the existing Stage160 development evidence for the 36
+answerable cases whose gold document was already in the generation context.
+The Agent refused 19 and answered 17. No Agent or retrieval execution, model
+fit, threshold tuning, policy selection, or test load occurs.
+
+Only 11 of 36 gold prompt excerpts contain the exact answer span, even though
+all 36 full documents contain it and 33 documents are truncated by the fixed
+600-character excerpt. Exact-span absence has a `+10.5455` percentage-point
+aggregate refusal association, but only two of five folds point in that
+direction while three point in the opposite direction. It is therefore not a
+stable basis for a prompt policy.
+
+Lower question-to-gold-prompt token recall has the strongest observed numeric
+association at risk-aligned AUC `0.730650`. Post-first-turn cases have a
+`+23.6364` percentage-point refusal difference with all five folds aligned,
+but Stage160 histories are synthetic unrelated-question groupings, not natural
+conversations. These observations are diagnostic and non-causal.
+
+The original formal process wrote ten SVGs but exited 1 at 15/16 guards because
+it incorrectly bounded preserved candidate rank to the ten-item generation
+list. After explicit user choice A, a separate correction audit preserved the
+original report and metric snapshot, loaded no data, recomputed no features,
+and reran neither Agent nor retrieval. The corrected process is 16/16 and the
+correction audit is 11/11. Its SHA-256 is
+`d80b786c32462cb9032e657ee1d1abc67f5cd995da66c1abd3831b3067c299fa`.
+
+No policy is selected. The next eligible work is a train-only diagnostic
+protocol for synthetic history isolation and question-evidence alignment.
+Test, runtime defaultization, fallback, query rewrite, and second retrieval
+remain closed.

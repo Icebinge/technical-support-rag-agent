@@ -33854,3 +33854,146 @@ warning 是既有 FastAPI/Starlette `TestClient` deprecation。replacement full 
 - 当前 context policy 家族已经没有达到严格门槛的候选。下一步应转向 Stage160 的 19 个“gold 已进入 generation Top10，但 Qwen Agent 仍拒答”问题，研究 generation decision，而不是继续把召回率当成最终答案质量。
 
 下一步：Stage164 只基于既有 Stage160 诊断证据设计 gold-visible Agent refusal 分析协议。test、runtime default、fallback、query rewrite 和 second retrieval 继续关闭；任何 Agent runtime 新实验都必须先冻结协议并单独确认。
+
+## 2026-07-19 - Stage 164 gold-visible Agent 拒答诊断与契约纠正
+
+目标：停止继续调整未通过 Stage163 的 context policy，转而只读分析
+Stage160 已有的 36 条“gold 文档已进入 generation context”的 answerable
+开发集结果，解释其中 19 条拒答和 17 条正常回答的差异。本阶段不是新的
+开发集评估：不重跑 Agent、不重建召回、不拟合模型、不调阈值、不选 policy、
+不加载 test，也不启用 runtime default、fallback、query rewrite 或 second
+retrieval。
+
+### 冻结诊断契约
+
+Stage164 精确授权 Stage163 correction、Stage160 public/hashed-private、冻结
+dev、technote corpus 和 router prompt 源码。36 条样本按 normalized question +
+answer document 形成 35 个诊断组和 5 个固定 fold；fold 只用于观察方向稳定性，
+不参与训练或选择。
+
+实际 prompt contract 是最多 10 条 evidence，每条只放 title 和文档前 600 个
+字符。因此 gold 文档在 generation context 中，不等于答案片段一定出现在模型
+实际看到的 prompt 中。公开报告不写逐条 case；ignored private artifact 只保存
+36 条 hashed feature profile，不含 raw question、answer、document id 或 document
+text。
+
+### 正式诊断结果
+
+```text
+gold document visible: 36
+Agent refused/answered: 19 / 17
+refusal rate: 52.7778%
+diagnostic groups/folds: 35 / 5
+
+exact answer span visible: 11 / 36
+all answer tokens visible: 11 / 36
+partial/no answer tokens: 24 / 1
+answer found in full document: 36 / 36
+gold document truncated: 33 / 36
+```
+
+无 exact span 的 25 条中拒答 14 条，拒答率 56%；有 exact span 的 11 条中
+拒答 5 条，拒答率 45.4545%。aggregate 差值是 `+10.5455pp`，修正 OR 为
+`1.490119`。但五折差值是 `-0.5/+0.5/-0.066667/-0.5/+0.75`，只有 2 折
+与 aggregate 风险方向一致，3 折相反。因此“答案被 600 字符截断”是真实现象，
+却不是 fold-stable 的拒答解释，不能据此选择 prompt 干预。
+
+最强 numeric association 是 question token 在 gold prompt 中的 recall：拒答
+median `0.461538`，回答 median `0.692308`，risk-aligned AUC `0.730650`。
+answer-token visibility AUC 是 `0.609907`，保留的 gold candidate rank AUC 只有
+`0.530960`。这些都是 aggregate 诊断，不是交叉验证模型结果，也不支持因果结论。
+
+后续轮次 25 条中拒答 15 条，首轮 11 条中拒答 4 条，差值 `+23.6364pp`；
+五个可比较 fold 全部同向，差值为 `0.1/0.5/0.25/0.166667/0.5`。但是
+Stage160 history 是把互不相关问题组成的合成线程，不是真实自然对话，所以不能
+直接解释为“轮次越后越容易拒答”。它只支持下一步在 train-only 数据上研究
+history contamination/isolation 与 question-evidence alignment。
+
+### 正式失败与用户选择 A
+
+唯一一次正式 aggregate diagnostic 完成了只读 join，写出 public/private 报告和
+10 张 SVG，随后因 process guard 只有 `15/16` 而自然 exit 1。失败 guard
+`gold_generation_ranks_bounded` 错把 `RetrievalResult.rank` 当成 generation
+列表内的 dense 位置 `1..10`。实际 rank 保留 candidate-pool rank，因此有 1 条
+gold rank 是 14；与此同时所有 36 条 generation context 仍然精确包含 10 条结果。
+
+没有覆盖、删除或伪装原始失败报告。原始证据是：
+
+```text
+public report SHA-256:
+  2a7dcef4fbc007f53d141cd246e7ad4bf327c3f5ad75899424f0a69c273ed3ae
+private byte SHA-256:
+  ddddc77f3e5bdfe1a756aa680dae2102e340a6b7c5452b90a53271ccc5f98507
+private canonical SHA-256:
+  20d42bae9b954e223dbc55798fa8de71fe5beec42dbed835f5f96b2e7aba3a63
+```
+
+向用户列出 A“保留原报告，用独立 correction audit 修 rank 契约和 aggregate/fold
+解释，不重跑 dev”、B“保持 invalid”、C“重新运行 dev aggregate”后，用户明确
+选择 A。
+
+correction audit 只读取不可变 Stage164 public/private 和 Stage160 hashed 证据；
+加载 dev rows 0、documents 0，重算 feature rows 0，Agent runs 0，retrieval
+runs 0。它把 guard 改为验证 gold membership 非空且 generation context count
+精确为 10，并把 aggregate visibility gap 与 fold-stable gap 分开。
+
+```text
+correction guards: 11 / 11
+corrected Stage164 process: 16 / 16
+metric snapshot before/after:
+  adbdd33664fbc66c42a341caf817ebf98cfba53014291eb33114b95dc6a1288f
+metric snapshot changed: false
+fold-stable visibility gap: false
+policy selected: false
+correction report SHA-256:
+  d80b786c32462cb9032e657ee1d1abc67f5cd995da66c1abd3831b3067c299fa
+```
+
+原始 10 张加 correction 2 张 SVG 共 12/12 可做 XML parse；没有声称完成
+pixel-level screenshot review。
+
+### 真实失败、修正与当前验证
+
+- 一次只读 `rg` 使用 Windows wildcard 并猜错 router 路径，exit 1；改为读取
+  真实文件列表，没有文件改动。
+- core 首轮 Ruff 发现 2 个长行，随后 format check 要求机械格式化；完成后通过。
+- CLI 测试首轮有 1 个长行，随后 format check 要求格式化；完成后通过。
+- 第一次 source authorization preflight 把 imported Stage160 module 用局部变量
+  `stage160` 遮蔽，触发 `AttributeError`，并在加载 dev 前停止。变量改名并增加
+  回归测试后授权通过。
+- correction 模块首轮 Ruff 发现 `Mapping` 导入来源、长行和 import sorting；
+  测试文件也需要 import sorting；随后四个相关文件完成机械格式化并通过。
+- 正式流程真实暴露 dense-rank guard 错误并 exit 1；按用户 A 路线没有重跑 dev，
+  而是新增独立 correction audit。
+- 第一次合并文档补丁使用默认解码后的乱码终行做上下文，`apply_patch` 整体拒绝，
+  没有产生半写入文件；改用 UTF-8 读取真实终行后分块写入。
+
+最终 current-source 验证：
+
+```text
+Stage164 five-file Ruff format check: passed
+Stage164 five-file Ruff lint: passed
+full repository Ruff lint: passed
+Stage164 targeted pytest: 16 passed in 0.85s
+full repository pytest: 870 passed, 1 existing warning in 12.60s
+full pytest exit code / stderr bytes: 0 / 0
+```
+
+warning 是既有 FastAPI/Starlette `TestClient` deprecation。完整 pytest 只启动
+一次，没有 pytest timeout、monitor deadline、kill、restart、retry 或 fallback，
+并由 PID `39120` 自然结束。
+
+### 本步学到
+
+- generation context 的 membership、list position 和保留的 candidate rank 是三种
+  不同语义；过程 guard 必须验证真正需要的契约，不能用 rank 数值替代 membership。
+- gold 文档进入 Top10 仍可能因为 600 字符 excerpt 丢失答案，但小样本 aggregate
+  关联如果跨折方向不稳定，就不能升级为 prompt policy。
+- 现有证据更值得继续研究的是 question-evidence alignment 和 synthetic history
+  contamination；下一步必须先在 train-only 上建立诊断协议，不能继续消费 dev。
+- correction audit 应保持 metric snapshot 不变并把数据重载、特征重算、Agent 与
+  retrieval 调用全部显式记为 0，防止“纠正契约”变成隐性重评估。
+
+下一步候选：Stage165 设计 train-only 的 history isolation 与 question-evidence
+alignment 诊断。test、Agent 新运行、runtime default、fallback、query rewrite 和
+second retrieval 继续关闭。
