@@ -34292,3 +34292,139 @@ full pytest exit code / stderr bytes: 0 / 0
 `Wait-Process`，没有分段轮询，也没有 pytest timeout、monitor deadline、kill、
 restart、retry 或 fallback，并自然结束。warning 是既有 FastAPI/Starlette
 `TestClient` deprecation。
+
+## 2026-07-19 - Stage 165 转移标签纠正与 Stage 166 runtime safety-gate 外层五折
+
+目标：继续下一阶段前先审计 Stage 165 的 paired safety 方向语义，再只使用隔离决策前
+可获得的 runtime 特征，在 train-only 上做严格外层五折 gate 诊断。原始 Stage 165
+public/private artifact 保留不变；dev/test、runtime default 和 fallback 全部关闭。
+
+### Stage 165 directional transition correction
+
+审查 `_unanswerable_pair_effect` 时发现，unanswerable 的总误答数、误答率差、McNemar
+p 值及最终 decision 都正确，但两个方向性转移字段的条件写反：原报告标成
+`synthetic refusal -> isolated false answer = 3`、反向为 `22`；从 1124 条原始 paired
+observation 直接重算后，正确方向是：
+
+```text
+synthetic refusal -> isolated false answer: 22
+synthetic false answer -> isolated refusal: 3
+discordant total: 25
+```
+
+因此 isolation 的安全恶化证据实际上比错误标签显示得更直接。纠正涉及 aggregate、
+turn-position 和 fold 内共 10 个 summary section。排除这两个方向字段后的完整诊断
+snapshot 在前后完全一致：
+
+```text
+5d9a1e06df903d3258d7f4d4114665fb0aab159f3108687fa344796735282ac5
+```
+
+false-answer rate delta 仍为 `+0.126667`，McNemar exact p 仍为 `0.000157`，原始与
+纠正后 decision 完全一致：
+`primeqa_hybrid_train_history_isolation_not_train_safe`。没有打开 dev/test，也没有改变
+Stage 165 候选资格。
+
+纠正使用独立只读 audit，严格授权原始 public/private byte SHA-256，并确认 correction
+前后原文件未变化。首次正式 audit 在 source authorization 阶段真实 exit 1：代码错误
+地从 base protocol 调用不存在的 `canonical_json_sha256`；没有创建报告或 SVG，也没有
+加载 split、运行检索、Agent 或模型。增加本地 canonical JSON hash 封装和回归测试后，
+明确标记的 replacement audit 成功，`10/10` correction guards 通过。没有把首次失败
+覆盖或伪装成成功。
+
+纠正报告 SHA-256：
+
+```text
+589b65959069d4f12aacc0ff95c2a5f65df173ea0e8c67ca426c15026c01e29d
+```
+
+### Stage 166 冻结 runtime 特征与外层五折
+
+只允许在 retrieval 完成、router generation 开始前可获得且两 arm 一致的特征：
+`question_route`、`synthetic_turn_position`、`top_candidate_score`。明确禁止把
+answerable label、gold 文档/rank、gold prompt overlap、selected action、refusal、F1
+或 citation outcome 当作 runtime 输入。
+
+421 个 post-first case 中，`top_candidate_score` 的 unique/min/max 均为 `1/1.0/1.0`，
+完全无区分力，因此正式规则族不使用它。规则族穷举 8 个 route 的 255 个非空子集与
+turn position `{2,3,4}` 的 7 个非空子集，共 `1785` 个固定 gate，family SHA-256 为：
+
+```text
+afa4c9f2edba185dd668acb2c3c5f49d11f06dcc7c93f7be568b46dccabebdbb
+```
+
+每个 outer fold 只在其余 4 折筛选规则，要求 aggregate 和每个训练折同时满足：
+answerable refusal/F1/citation 与 unanswerable false answer 四项都不劣于 always-synthetic，
+且至少一项严格改善。固定字典序依次最大化 F1、citation、拒答减少、安全改善，再偏好
+更小隔离范围。每折评估 1785 个规则，五折共 8925 次；没有模型拟合或阈值调优。
+
+训练四折内严格合格规则数分别为 `38/16/80/48/20`，但五折选出的 route/position
+规则互不一致。留出折结果：
+
+```text
+fold 0: false answers +1
+fold 1: all quality/safety deltas 0; selected 0 cases
+fold 2: refusal +1, F1 sum -0.340586, citation -1
+fold 3: refusal -1, F1 sum +0.25, false answers +1
+fold 4: all quality/safety deltas 0
+```
+
+OOF gate 实际隔离 45/421 个 case，相对 always-synthetic：
+
+```text
+answerable refusal count delta:       0
+answerable F1 sum delta:             -0.090586
+answerable average F1 delta:         -0.000334
+gold citation count delta:           -1
+unanswerable false answer delta:     +2
+strict-nonregression folds:           2 / 5
+```
+
+所以正式 decision 为
+`primeqa_hybrid_stage166_runtime_feature_family_insufficient`，`candidate_selected=false`。
+route×position 在训练折内可以找到看似安全的组合，但迁移到留出折后同时发生质量和安全
+回退；不能选择 gate，也不能打开 dev/test。下一方向必须在 train-only 上补充真正有
+变化的 pre-generation evidence 特征，例如检索 score margin、多路命中一致性、query-
+evidence overlap 和 evidence coverage，而不是继续组合当前两个弱特征。
+
+Stage 166 report SHA-256：
+
+```text
+8430cb37aa8bc0764f607b050d6c8007472ffc1a4f2d94853333ece652e4892b
+```
+
+纠正生成 2 张 SVG，Stage 166 生成 5 张 SVG，7/7 完成 XML parse。关键 OOF delta
+SVG 另经 Edge headless 渲染为 ignored PNG 并实际查看，正负轴、标签与数值清晰且无
+重叠；Edge stderr 的 QQBrowser profile 提示不影响截图 exit 0 或图像内容。
+
+### 真实实现与验证过程
+
+- 查找既有 correction 模式时，一次 `rg` 使用 Windows wildcard 且猜错模块名而
+  exit 1；随后又猜错测试文件名，读取命令 exit 1。两次都没有修改文件，之后改用
+  `rg --files` 和真实路径。
+- correction 首轮静态检查发现 1 个 unused import，3 个文件需要机械 format；修正。
+- correction 首轮测试为 `20 passed, 3 failed`：一个期望值应遵循既有舍入顺序为
+  `0.333334`，SVG helper 缺 `value_label`，Typer 长参数在当前终端宽度被截断。修正后
+  为 `23 passed`；增加 canonical hash 回归后为 `24 passed`。
+- correction 首次正式 audit 因 canonical hash helper 调错模块而 exit 1；replacement
+  audit 成功且 10/10 guards 通过，原始 artifact 未改变。
+- Stage 166 首轮静态检查发现 1 个 unused import、若干长行和 2 个待 format 文件；
+  修正后通过。首轮测试 `5 passed, 1 failed`，失败同样是 Typer 长选项显示截断；改为
+  验证稳定帮助语义后为 `6 passed`。
+- Stage 166 正式 outer-CV 只运行一次并 exit 0，11/11 guards 通过。它没有运行长时
+  进程，因此不涉及状态轮询；dev/test、检索、Agent、model generation 均为 0。
+
+最终 current-source 验证：
+
+```text
+Stage165 correction + Stage166 related pytest: 50 passed in 0.90s
+eight-file Ruff format check: passed
+full repository Ruff lint: passed
+full repository pytest: 920 passed, 1 warning in 11.06s
+full pytest exit code / stderr bytes: 0 / 0
+```
+
+完整 pytest 只启动一次，由同一条 PowerShell 命令创建 PID `28004` 后直接执行
+`Wait-Process`，没有分段轮询，也没有 pytest timeout、monitor deadline、kill、
+restart、retry 或 fallback，并自然结束。warning 是既有 FastAPI/Starlette
+`TestClient` deprecation。

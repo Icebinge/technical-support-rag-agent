@@ -235,6 +235,25 @@ def test_decision_rejects_isolation_when_unanswerable_safety_regresses() -> None
     assert decision["status"] == "primeqa_hybrid_train_history_isolation_not_train_safe"
 
 
+def test_unanswerable_transition_labels_follow_synthetic_to_isolated_direction() -> None:
+    observations = [
+        _observation(1, arm="isolated", position=2, answerable=False, refused=False),
+        _observation(1, arm="synthetic_history", position=2, answerable=False, refused=True),
+        _observation(2, arm="isolated", position=2, answerable=False, refused=True),
+        _observation(2, arm="synthetic_history", position=2, answerable=False, refused=False),
+        _observation(3, arm="isolated", position=2, answerable=False, refused=False),
+        _observation(3, arm="synthetic_history", position=2, answerable=False, refused=True),
+    ]
+
+    safety = protocol.summarize_stage165_pairs(observations)[
+        "unanswerable_post_first_safety_effect"
+    ]
+
+    assert safety["synthetic_refusal_to_isolated_false_answer_count"] == 2
+    assert safety["synthetic_false_answer_to_isolated_refusal_count"] == 1
+    assert safety["false_answer_rate_difference_isolated_minus_synthetic"] == 0.333334
+
+
 def test_visualizations_write_ten_parseable_svgs(tmp_path) -> None:
     observations = [
         _observation(0, arm="isolated", position=1),

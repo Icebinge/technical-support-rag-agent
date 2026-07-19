@@ -661,8 +661,8 @@ def _unanswerable_pair_effect(
     count = len(pairs)
     isolated_false = sum(not pair.isolated_refused for pair in pairs)
     synthetic_false = sum(not pair.synthetic_history_refused for pair in pairs)
-    worsened = sum(pair.isolated_refused and not pair.synthetic_history_refused for pair in pairs)
-    improved = sum(not pair.isolated_refused and pair.synthetic_history_refused for pair in pairs)
+    worsened = sum(not pair.isolated_refused and pair.synthetic_history_refused for pair in pairs)
+    improved = sum(pair.isolated_refused and not pair.synthetic_history_refused for pair in pairs)
     return {
         "pair_count": count,
         "isolated_false_answer_count": isolated_false,
