@@ -147,13 +147,16 @@ def test_executor_interleaves_arms_and_closes_every_thread() -> None:
     workload = protocol.build_stage165_paired_workload_plan(diagnostic_set)
     folds = protocol.build_stage165_grouped_fold_assignment(samples, fold_count=2)
     session = _FakeSession()
+    incrementally_persisted = []
 
     rows = validation.Stage165PairedWorkloadExecutor(session=session).execute(
         workload=workload,
         folds=folds,
+        observation_sink=incrementally_persisted.append,
     )
 
     assert len(rows) == 10
+    assert tuple(incrementally_persisted) == rows
     assert session.opened == {}
     assert session.open_count == session.close_count == 7
     paired = protocol.pair_stage165_observations(rows)

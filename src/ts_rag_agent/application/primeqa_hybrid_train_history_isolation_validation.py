@@ -44,6 +44,7 @@ from .primeqa_hybrid_train_history_isolation_protocol import (
     Stage165ArmObservation,
     Stage165FoldAssignment,
     Stage165PairedWorkloadPlan,
+    Stage165SyntheticThread,
     Stage165TrainSample,
     build_stage165_grouped_fold_assignment,
     build_stage165_paired_workload_plan,
@@ -99,6 +100,7 @@ _FORBIDDEN_PUBLIC_KEYS = frozenset(
 )
 
 ProgressSink = Callable[[Mapping[str, Any]], None]
+ObservationSink = Callable[[Stage165ArmObservation], None]
 
 
 @dataclass(frozen=True)
@@ -324,9 +326,14 @@ class Stage165PairedWorkloadExecutor:
         workload: Stage165PairedWorkloadPlan,
         folds: Stage165FoldAssignment,
         progress_sink: ProgressSink | None = None,
+        threads: Sequence[Stage165SyntheticThread] | None = None,
+        observation_sink: ObservationSink | None = None,
     ) -> tuple[Stage165ArmObservation, ...]:
         observations: list[Stage165ArmObservation] = []
-        for thread in workload.threads:
+        selected_threads = tuple(threads) if threads is not None else workload.threads
+        selected_pair_count = sum(len(thread.samples) for thread in selected_threads)
+        completed_pair_count = 0
+        for completed_thread_count, thread in enumerate(selected_threads, start=1):
             synthetic_handle = f"stage165-synthetic-{thread.ordinal:03d}"
             self._session.open_thread(synthetic_handle)
             try:
@@ -367,19 +374,21 @@ class Stage165PairedWorkloadExecutor:
                                 arm_order_position=arm_order_position,
                             )
                         observations.append(observation)
+                        if observation_sink is not None:
+                            observation_sink(observation)
             finally:
                 self._session.close_thread(synthetic_handle)
+            completed_pair_count += len(thread.samples)
             _emit(
                 progress_sink,
                 phase="paired_train_thread_completed",
-                completed_thread_count=thread.ordinal,
-                total_thread_count=len(workload.threads),
-                completed_pair_count=sum(
-                    len(item.samples) for item in workload.threads[: thread.ordinal]
-                ),
-                total_pair_count=len(workload.ordered_samples),
+                completed_thread_count=completed_thread_count,
+                total_thread_count=len(selected_threads),
+                current_synthetic_thread_ordinal=thread.ordinal,
+                completed_pair_count=completed_pair_count,
+                total_pair_count=selected_pair_count,
                 completed_agent_turn_count=len(observations),
-                total_agent_turn_count=len(workload.ordered_samples) * 2,
+                total_agent_turn_count=selected_pair_count * 2,
             )
         return tuple(observations)
 

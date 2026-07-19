@@ -34149,3 +34149,146 @@ full pytest exit code: 0
 完整 pytest 只启动一次，没有 pytest timeout、monitor deadline、kill、restart、
 retry 或 fallback，并由 PID `49164` 自然结束。warning 是既有 FastAPI/Starlette
 `TestClient` deprecation。
+
+## 2026-07-19 - Stage 165 完成：确定性多进程分片 history-isolation 正式诊断
+
+目标：按用户确认的 A 路线，把首次单进程 CUDA OOM 后尚未完成的 562 对
+train-only `isolated` / `synthetic_history` 真实 Qwen Agent 诊断做完。执行协议必须
+保留 paired synthetic-thread 边界，使用严格串行的新鲜进程分片；不设置 runtime
+timeout，不重试、不启用 fallback、不调用 `empty_cache`，任何分片失败都停止后续
+分片。dev/test、policy selection 和 runtime default 始终关闭。
+
+### 冻结分片协议与工程实现
+
+将 141 个 synthetic thread 按冻结顺序连续切成 12 片：前 11 片各 12 个线程、
+48 对、96 个 Agent observation；末片 9 个线程、34 对、68 个 observation。总计
+141 个线程、562 对、1124 个 Agent observation，分片 assignment SHA-256 为：
+
+```text
+cd543f5c1ddd19f58483cb7ba4763c226e601cfb04ac24abe71d8f7ea42dfc23
+```
+
+每个子进程只构建一次资源、做一次 warmup，然后执行该片完整线程。每完成一个
+observation 就立即 flush content-free JSONL；父进程只在 12 片全部 exit 0 后做严格
+合并，并重新验证顺序、身份哈希、覆盖、public-safe 契约和 guard。实现没有加入
+重试、超时、跳过失败分片或任何兜底分支。
+
+为使同一执行器既支持完整 workload 又支持冻结子集，`Stage165PairedWorkloadExecutor`
+新增可选 thread selection 和 observation sink；默认仍是完整 workload。分片职责由
+独立 protocol、child runner、sequential process orchestrator 和 final analyzer 封装。
+
+### 正式运行过程与等待方式纠正
+
+正式 sharded run 只启动一次，父进程 PID 为 `44904`，自然 exit 0；没有 kill、
+restart、retry、fallback、runtime timeout 或 monitor deadline。最初监控阶段错误地
+进行了多次短间隔状态读取，不符合用户要求的“一条指令一直等待到进程结束”。用户
+指出后，只停止了监控循环，没有停止或重启正式进程；随后对同一个 PID 只执行一条
+`Get-Process -Id ... | Wait-Process`，该命令持续阻塞直至正式父进程自然结束。今后长
+进程跟踪应直接使用这一种单命令阻塞等待方式，不再分段轮询。
+
+12 个分片全部 exit 0，每片 process guard 均为 `12/12`；合并报告 guard 为
+`23/23`。JSONL 实际行数为：
+
+```text
+96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 96, 68
+total: 1124
+```
+
+正式父流程总耗时 `4901.550206s`，12 个进程各构建一次资源，共 12 次资源构建、
+12 次 warmup、1136 次 model generation。session open/close 为 `703/703`，结束时
+遗留 open thread 为 0。各片最大 `peak_allocated_bytes` 为 `7612323840`，最大
+`peak_reserved_bytes` 为 `14606663680`；这是 PyTorch 在 Windows/WDDM 下报告的
+CUDA allocator 数值，不等同于独显物理容量占用。12 份 stderr 只有模型加载进度，
+未发现 Traceback、CUDA OOM 或运行时异常。
+
+### 完整 train-only 诊断结果
+
+完整配对覆盖为 562 对，其中 answerable/unanswerable 为 `370/192`，首轮/后续轮为
+`141/421`。141 个首轮 negative-control 的 context signature 和输出均精确一致，
+说明 arm 之间的空历史对照成立。
+
+```text
+post-first answerable pairs: 271
+isolated refusal rate:        0.586716
+synthetic-history refusal:    0.719557
+synthetic - isolated delta:  +0.132841
+McNemar exact p:              0.000003
+average F1 isolated gain:    +0.023596
+
+gold-visible post-first pairs: 121
+isolated refusal rate:          0.289256
+synthetic-history refusal:      0.504132
+synthetic - isolated delta:    +0.214876
+McNemar exact p:                0.000006
+
+post-first unanswerable pairs: 150
+isolated false-answer rate:     0.346667
+synthetic-history false answer: 0.220000
+isolated - synthetic delta:    +0.126667
+McNemar exact p:                0.000157
+```
+
+答案质量侧的 history-contamination 信号很清楚：隔离历史让后续 answerable 拒答率
+下降 `13.2841pp`，在 gold-visible 子集下降 `21.4876pp`，同时平均 F1 提高。
+五折 answerable 拒答差均为正：`0.115385/0.132076/0.1/0.140625/0.173076`；
+gold-visible 五折也全为正：`0.260869/0.291667/0.04/0.214285/0.285714`。
+
+但是安全性不合格：隔离历史让后续 unanswerable false-answer rate 增加
+`12.6667pp`。五折安全差为 `0.18421/0.066667/0/0.173913/0.222222`，即 4 折
+退化、1 折持平、0 折改善。它不是偶然的 aggregate 波动，不能用 answerable 收益
+掩盖。
+
+最终决策真实状态为
+`primeqa_hybrid_train_history_isolation_not_train_safe`。进程和数据契约全部成功，
+history contamination 信号也 fold-stable；但
+`isolated_unanswerable_safety_nonregression=false`，所以
+`candidate_eligible_for_frozen_dev_validation=false`。该候选停止，不打开 dev，
+不打开 test，不选择 policy，不注册 runtime default。下一研究方向是只基于 train
+重新检查 answerability/safety alignment，而不是继续推进这个 isolation 候选。
+
+### 产物、可视化与当前验证
+
+正式 public/private 报告分别生成，SHA-256 为：
+
+```text
+public:  f152653c5c85e03add95c06ff898ff442744733078c3339b662fa406d17874a1
+private: ce4b5b281093319696a51251d475a3fc5fa6b7dac2e7f9659464fe1d8e55ad1b
+stdout:  cbe9530b375ee1d9b2ef6ac9f4afa99082ceee138bf616f9c912b7ba1a4baeb6
+stderr:  e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+```
+
+生成 10 张正式 SVG，覆盖 arm 质量/安全率、首轮 negative control、post-first 和
+gold-visible transition、unanswerable safety、五折 answerable/safety 差、question
+alignment bins、效率和 guard。10/10 均完成 XML parse。本地图片查看器不能直接
+渲染 SVG，随后使用 Edge headless 把关键
+`stage165_fold_unanswerable_safety_deltas.svg` 渲染为 ignored PNG 并实际查看；标题、
+五折标签、数值和条形清晰且没有重叠。第一次 Edge 定位因 PowerShell
+`ProgramFiles(x86)` 环境变量写法错误而返回 `EDGE_NOT_FOUND`，修正变量语法后成功，
+没有改变正式 SVG 或统计结果。
+
+实现过程的真实验证记录：首轮静态检查只发现 import sorting 与 4 个文件需机械
+format；focused tests 先通过 `27 passed`，增加 public-safety guard 覆盖后为
+`28 passed`。相关无 pytest timeout 的 detached regression 自然完成为
+`131 passed, 1 existing warning in 2.36s`，warning 仍是既有 FastAPI/Starlette
+`TestClient` deprecation。正式运行前 full Ruff lint 和相关文件 format check 均通过。
+
+正式运行后曾执行一次全仓 `ruff format --check .`，当前 Ruff 报告 311 个历史文件
+需要重新格式化并 exit 1；该命令没有修改文件，也没有把全仓历史格式化混入本阶段。
+随后按阶段既有口径复核本阶段 7 个 Python 文件，结果为 `7 files already formatted`；
+全仓 `ruff check .` 为 `All checks passed`。
+
+最终 current-source 验证：
+
+```text
+Stage165 sharded focused pytest: 28 passed in 0.91s
+Stage165 related regression: 131 passed, 1 existing warning in 2.36s
+Stage165 seven-file Ruff format check: passed
+full repository Ruff lint: passed
+full repository pytest: 906 passed, 1 warning in 13.24s
+full pytest exit code / stderr bytes: 0 / 0
+```
+
+完整 pytest 只启动一次，由同一条 PowerShell 命令创建 PID `9700` 后直接执行
+`Wait-Process`，没有分段轮询，也没有 pytest timeout、monitor deadline、kill、
+restart、retry 或 fallback，并自然结束。warning 是既有 FastAPI/Starlette
+`TestClient` deprecation。
