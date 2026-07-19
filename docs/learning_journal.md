@@ -33997,3 +33997,155 @@ warning 是既有 FastAPI/Starlette `TestClient` deprecation。完整 pytest 只
 下一步候选：Stage165 设计 train-only 的 history isolation 与 question-evidence
 alignment 诊断。test、Agent 新运行、runtime default、fallback、query rewrite 和
 second retrieval 继续关闭。
+
+## 2026-07-19 - Stage 165 进行中：train-only history isolation 与 CUDA OOM 诊断检查点
+
+目标：按用户选择 A，在完整 562 条 train 上建立 `isolated` 与
+`synthetic_history` 成对的真实 Qwen Agent 诊断；只使用 train，使用五折 grouped
+fold 观察方向稳定性，不拟合模型、不调阈值、不选择 policy。dev/test、runtime
+default、fallback、retry、query rewrite 和 second retrieval 全部关闭。
+
+本节是进行中检查点，不代表 Stage 165 已完成。首次完整运行在 1124 个计划 Agent
+turn 完成前发生 CUDA OOM，因此目前没有完整的 paired quality 指标，也没有资格打开
+dev。后续只在用户确认新的执行协议后继续。
+
+### 冻结协议与实现
+
+train 来源 SHA-256 为
+`cabd93e0b972c47384c4bf5cc2cd215a7fc519b2df4f81fba61db73c931aa155`，
+共 562 行，其中 answerable/unanswerable 为 `370/192`。stable-hash 顺序把样本分成
+141 个 synthetic thread：140 个四问线程和 1 个两问线程；每个样本分别运行 fresh
+isolated thread 和连续 synthetic-history thread，共 1124 个 Agent turn。turn 1 的
+141 对是空历史 negative control，后续位置共 421 对。
+
+冻结身份：
+
+```text
+stable order SHA-256:
+  e1e5fb1902bfd32a2900a9a4f44b041fd469748a847904657e8e104007e48d25
+grouping SHA-256:
+  a00ebf94a9e1e2125805c0120da4fd109df260483173d1adc56a943f4284621c
+arm schedule SHA-256:
+  b675b662132b9255050dd9df92623f5d2e07ef71f37a3a85d188488ad2566493
+fold assignment SHA-256:
+  5f1536a65ce0afe03685babd045e7d212eedeffb2954e071f9f23a7867febb98
+```
+
+五折按 normalized question + answer document / unanswerable 分组，534 个组，行数
+`113/113/112/112/112`，组数 `107/107/106/107/107`。fold 只用于 aggregate
+方向稳定性，不参与 fit、selection 或 tuning。公开报告只允许 aggregate；逐 turn
+artifact 只保存 hashed identity、数值指标和 content-free trace，不保存 raw question、
+answer、document id/text 或 model output。实现同时准备 10 张正式分析 SVG；由于正式
+运行未完成，它们尚未形成完整结果。
+
+### 首次完整运行的真实 OOM
+
+正式运行只启动一次，没有 runtime timeout、monitor deadline、kill、restart、retry、
+fallback 或 `empty_cache`。它自然完成 36/141 个 synthetic thread，即 144 对、288 个
+train Agent turn，随后在第 37 个线程内 exit 1。没有完整 Stage 165 public/private
+结果 artifact 被创建，不能把部分进度当作正式质量结果。
+
+根因 traceback 位于 Qwen SDPA attention 的 `model.generate`，最终异常是：
+
+```text
+torch.AcceleratorError: CUDA error: out of memory
+```
+
+随后 Typer/Rich 的异常格式化又发生 `MemoryError`，但底层 CUDA OOM traceback 仍然
+保留。原始 PID、exit、stdout 和 stderr 未覆盖地保存在 ignored
+`artifacts/stage165/formal_attempt1_cuda_oom/`。stdout/stderr 大小为
+`8458/13994` bytes，SHA-256 分别为
+`3a1c1862c888a24c8952b6429581ae21b77fcabba9c66cb717021f73ad345924` 和
+`e6340b64bf53e69f3704ffd45736b1bd896ed0ca84b370e5d53646219d69275d`。
+
+进度只按完整 synthetic thread 落盘，因此能定位第一个未完成边界为 thread 37，但
+不能从首次日志真实确定失败的是该线程哪一个 arm。边界四个 hashed identity 精确
+冻结；没有公开 raw 问题内容。
+
+### 用户选择 A 后的 thread 37 内存探针
+
+给出 A“干净进程只跑 thread 37、最多 8 turn 并逐 turn 记录 token/CUDA”、B“直接
+分片”、C“同进程主动清缓存”和 D“停止”后，用户选择 A。探针没有清缓存、重试、
+fallback 或继续完整运行；每次生成事件在调用结束时立即写入 ignored JSONL。OOM 后
+的 CUDA 遥测读取也被设计为不能覆盖原异常。
+
+探针只启动一次并自然 exit 0，总耗时 `81.138600s`，其中 prepare `62.688404s`、
+8-turn 执行 `18.450195s`。1 次 warmup 和 8 个 train turn 全部完成，模型成功生成
+9 次，failed turn 为 0，thread open/close 为 `5/5`。结果：
+
+```text
+input tokens:       min 2274, median 2495, max 2842, average 2508.625
+prompt characters:  min 8917, median 9356, max 10972, average 9520.625
+allocated before:   4067.086 MiB on every train turn
+reserved before:    min 5212 MiB, median 5972 MiB, max 7844 MiB
+peak allocated:     min 5172.725 MiB, max 5674.974 MiB
+peak reserved:      min 5972 MiB, max 7844 MiB
+CUDA telemetry failures: 0
+```
+
+最大 input 是 turn 3 synthetic-history 的 2842 tokens；它成功完成，peak allocated
+`5674.974 MiB`，peak reserved 上升到 `7844 MiB`。随后 turn 4 的 isolated 与
+synthetic-history 也都在 reserved `7844 MiB` 时成功。11/11 process guards 通过，
+dev/test 均未加载，policy/runtime default 均未选择。
+
+公开报告、private aggregate 和 incremental JSONL 的 byte SHA-256 分别为：
+
+```text
+afc4514af0fff990295eb9350b2b76cab10a5fb58ff0a184ef19571538114acb
+ea3c28dfaf2297799be4936ae712d68feb8c0e9199e0917cd4cf21331c1349a3
+2c1f38ea2278fcce846bb2426c21b3901bb2c0d3c1320dab6d437d00107dff48
+```
+
+3 张 input-token、peak-allocated 和 peak-reserved SVG 均可做 XML parse；没有声称
+完成逐像素 screenshot review。
+
+### 真实失败、修正与验证过程
+
+- 实现探索时两次只读 `rg` 使用 Windows wildcard 失败，另一次 `.env` wildcard 和
+  一次猜错历史脚本文件名的读取失败；最终审计时又有一次命令把两个 Windows
+  wildcard 直接作为 `rg` 路径参数并 exit 1。以上均未修改文件，随后均改用真实路径
+  或 `rg -g`。
+- Stage 165 core 首轮 Ruff 发现 2 个长 import 和 import sorting；修正后机械格式化。
+  preflight 还发现 question-alignment 的首个 bin 漏掉精确 `0.0`，在正式运行前修正。
+- 首轮 focused pytest 为 `14 passed, 2 failed`：一个测试把空 dict 错与 set 比较；
+  SVG 调用错误使用 `data` 而不是既有 API 的 `bars`。修正后为 `16 passed`。
+- 一次相关 pytest 被错误地直接交给默认 shell 执行，工具在约 13.1 秒后终止，真实
+  结果为 exit 124 和 stdout `OSError`。没有宣称通过；用户选择 A 后，用无 pytest
+  timeout 的独立 replacement driver 自然完成，结果 `102 passed`。
+- 首次正式运行期间，一次 PowerShell 监控读取因 CLR `HRESULT 80004005` 失败；detached
+  正式进程未受影响，随后由真实 exit 文件和日志确认 CUDA OOM。
+- 内存探针新增测试首轮为 `7 passed, 1 failed`；失败只因 JSON 将 tuple 读回 list，
+  测试直接比较 Python 结构。改为比较真实序列化结构后为 `8 passed`。
+- 探针相关的 13 个测试文件由独立、无 pytest timeout 的进程自然结束：
+  `119 passed, 1 existing warning in 3.56s`。warning 是既有 FastAPI/Starlette
+  `TestClient` deprecation。
+
+### 本步学到与尚未授权的下一步
+
+- 干净进程中的 exact thread 37 没有重现 OOM，因此“thread 37 某个固定问题或 arm
+  单独必然 OOM”不成立。首次失败仍是真实 OOM，不能因探针成功而改写。
+- 探针中 allocated-before 始终约 4067 MiB，而 reserved 从 5212 MiB 增长到
+  7844 MiB。结合首次运行在 288 turn 后失败，更支持累计 allocator reserve/
+  fragmentation 或长运行状态相关问题；这是基于两次运行的推断，不是已经证明的
+  唯一根因。
+- thread 37 的新鲜进程证据支持下一步设计 deterministic process sharding，并在
+  synthetic-thread 边界切分，以保留同一 paired-history 契约。分片大小、进程数和
+  是否先做 allocator 配置对照尚未授权；不能自动完整重跑。
+- Stage 165 仍没有完整 562 对指标，当前决定只允许“设计分片协议”，不允许打开
+  dev/test、选择 policy 或注册 runtime default。
+
+当前诊断检查点的最终 current-source 验证：
+
+```text
+Stage165 core focused pytest: 16 passed
+Stage165 memory-probe focused pytest: 8 passed in 1.07s
+Stage165 related regression: 119 passed, 1 existing warning in 3.56s
+seven-file Ruff format check: passed
+full repository Ruff lint: passed
+full repository pytest: 894 passed, 1 existing warning in 11.67s
+full pytest exit code: 0
+```
+
+完整 pytest 只启动一次，没有 pytest timeout、monitor deadline、kill、restart、
+retry 或 fallback，并由 PID `49164` 自然结束。warning 是既有 FastAPI/Starlette
+`TestClient` deprecation。
