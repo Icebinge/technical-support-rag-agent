@@ -35013,3 +35013,87 @@ full pytest PID / exit code: 30464 / 0
 
 warning 是既有 FastAPI/Starlette `TestClient` deprecation。完整 pytest 只启动一个进程，并在同一条
 PowerShell 命令里对该 PID 执行一次 `Wait-Process` 等待自然结束。
+
+## 2026-07-22 - Stage 173 冻结 Cross-Encoder 语义证据交叉验证
+
+用户选择 A：不微调模型，使用本地缓存的 `cross-encoder/ms-marco-MiniLM-L-6-v2` 对每个
+question-document pair 做直接语义评分。实验只加载 562 条 train；dev/test、答案生成、Agent turn、
+retry、fallback 和默认 runtime 全部关闭。
+
+协议在运行前冻结：final union 的每篇文档只评分一次，initial 复用子集分数；query-aware body window
+为 1,600 chars，cross-encoder max length 512、GPU batch 64、event batch 512 pairs。新增 12 个
+semantic feature；比较 14 维 semantic-only 与 41 维 hybrid，两个模型族、17 个阈值，共 68 个
+spec，继续使用 grouped nested five-fold 和 Stage 172 的五项门槛及每折 safety。
+
+本地模型 smoke test 使用两个纯合成 pair，相关/无关分数为 `9.4798/-11.0890`，CUDA allocated/
+reserved 仅 `0.094/0.104 GiB`，没有读取数据集行。正式 PID `21616` 第一次运行即自然 exit 0，完成
+9,714 个唯一 pair、1,124 个 evidence view 和全部 68 个 spec；21/21 process guard 通过。
+
+直接语义诊断：pair-level AUC `0.821097`，view-max AUC `0.756961`；267 个含 gold 的 final union
+中，gold 被零样本 cross-encoder 排到 top1 的比例为 `156/267 = 0.584270`。但正 pair p25
+`2.737359` 与负 pair p75 `2.728148` 几乎重合，说明冻结的 MS MARCO relevance score 不是可靠的
+evidence-entailment 边界。
+
+正式 nested OOF：
+
+```text
+balanced accuracy:                    0.613567
+ROC AUC:                              0.745437
+initial-visible compose:              0.308571  fail
+alternate-only inspect:               0.934783  pass
+alternate-only final compose:         0.152174  fail
+alternate-only exact path:            0.097826  fail
+insufficient final compose:           0.138983  aggregate pass
+```
+
+五个 inner loop 都是 0 个 eligible spec。4/5 outer fold 选择 semantic-only；fold 5 false-compose
+`0.209677` 超过每折 `<=0.20` 的安全线，所以 aggregate safety 通过也不能入选。相对 Stage 172，
+initial/final/exact path 分别只增加 2.86/4.35/2.17pp，false-compose 同时增加 5.08pp，AUC 下降
+1.75pp。完整 train OOF 的 hybrid histogram GBDT 0.75 虽 5/5 fold 安全，但 initial 0.44、final
+0.152174、exact path 0.108696，仍不 eligible。
+
+客观结论：A 路线被淘汰。正式状态为
+`stage173_frozen_cross_encoder_semantics_insufficient`、`candidate_selected=false`。没有注册模型、
+没有进入 runtime E2E、没有打开 dev/test。pair AUC 与 4/5 semantic-only 选择为监督微调 B 路线提供了
+实验依据，但 B 是新的用户选择，不作为 A 的自动 fallback 执行。
+
+资源：wall 123.669439 秒、CPU 448.328125 秒；candidate replay 88.873777 秒、模型加载 0.147502
+秒、pair build+score 26.706377 秒、纯 score 22.451182 秒、nested CV 7.735781 秒；吞吐
+432.672093 pairs/s。working set/private 峰值 4.287/6.653 GiB，系统最小可用 2.866 GiB，CUDA
+allocated/reserved 峰值 0.626/0.900 GiB。19 个 scoring event batch 加 6 个阶段边界，共 25 个
+进程内事件采样；没有外部轮询 monitor。
+
+正式进程由一条 PowerShell 命令启动一个 PID，并在同一命令中直接执行一次 `Wait-Process` 到自然结束；
+没有 PowerShell wait timeout、轮询、kill、restart、retry 或 partial continuation。工具通道只挂起
+等待同一 shell cell，没有启动第二条监控命令。
+
+8 张 SVG 覆盖 gate、Stage 172/173 对比、fold safety/path、profile 选择、semantic 诊断、timing 和
+resource；8/8 XML parse、8/8 Edge PNG 渲染成功，关键图实际核验与 JSON 一致。会话缩略图把两张长
+标题显示成 `S3`，直接检查 SVG 源文本确认完整 `Stage 173` 标题一直存在。Edge stderr 只有既有
+QQBrowser profile 提示。
+
+真实失败和修正：第一次只读仓库/模型缓存搜索因第二个候选缓存目录不存在而 exit 1；之后一次只读命令在
+有效读取后又因 Windows wildcard 和不存在的 lock files 而 exit 1；另一搜索打印 wildcard error，
+但后续读取成功使整个 PowerShell command exit 0。三者均未修改文件。第一次模型哈希命令因把
+`foreach` 直接接管道而在 PowerShell parse 阶段失败，没有执行哈希；改为先收集对象后成功授权。
+实现首轮 Ruff 与 9 个 Stage 173 test 一次通过，随后相关回归 `26 passed`；正式实验第一次即成功，
+没有失败重跑。
+
+current-source public report SHA-256：
+
+```text
+b75c3aea469cbe22fb5581210e0d96afb9094502aaa36d9c21aa60c22db9b366
+```
+
+最终 current-source 仓库验证：
+
+```text
+Stage 169/172/173 focused regression: 26 passed in 3.53s
+full repository Ruff lint: passed
+three-file Ruff format check: passed
+full repository pytest: 1001 passed, 1 warning in 11.41s
+full pytest PID / exit code: 5992 / 0
+```
+
+warning 是既有 FastAPI/Starlette `TestClient` deprecation。完整 pytest 只启动一个进程，并在同一条
+PowerShell 命令里对该 PID 执行一次 `Wait-Process` 等待自然结束。
