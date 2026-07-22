@@ -34581,3 +34581,94 @@ full pytest exit code / stderr bytes: 0 / 0
 PID `40296` 后直接执行 `Wait-Process`，自然结束为 `929 passed`。两次均没有分段轮询、
 pytest timeout、monitor deadline、kill、restart、retry 或 fallback。warning 是既有
 FastAPI/Starlette `TestClient` deprecation。
+
+## 2026-07-22 - Stage 168 A+C 有界迭代 Agent 与训练集可行性验证
+
+目标：停止继续优化 Stage 167 已否决的 history-isolation gate，正式进入 Agent capability
+分支。用户明确授权 A+C 可以作为 fallback：A 只检查当前请求已经构建好的候选池中的另一种
+证据视图；C 在信息不足且可由一个具体事实补齐时请求澄清。本阶段不允许 query rewrite、第二次
+retrieval、循环、retry 或其他未授权 fallback，也不改默认 runtime、不接 HTTP、不打开 dev/test。
+
+### 冻结实现
+
+新增严格 Pydantic 决策协议。初始决策只允许 `compose_grounded_answer`、
+`inspect_alternate_evidence`、`request_clarification`、`refuse_insufficient_evidence`。
+执行 A 后的最终决策不再允许 inspect，只允许 compose、clarify 或 refuse。模型最多决策两次，
+retrieval 恰好一次，A 最多一次；A 直接读取已有 candidate pool 的 original-RRF rank 1-10，
+不重建候选池，也不发起第二次检索。
+
+C 不是普通回答或拒答，而是独立 `clarify` terminal state。模型只能选择六种固定缺失信息类别：
+product/component、version/build、error/log、environment/platform、requested outcome、
+reproduction steps；最终澄清文本由系统固定映射生成，模型不能自由生成。v1 ledger 默认终态仍为
+`complete/refuse`，v2 runtime 显式传入 `complete/clarify/refuse`，没有破坏旧协议。
+
+### Train-only 正式结果
+
+正式分析只重放 frozen Stage 161 train contract：562 个 train row、112400 个 Top200
+candidate feature row、370 个 answerable row。CLI 不接受 dev/test path，正式过程没有加载
+dev/test，没有运行真实 router、answer generation、F1、citation metric 或人工澄清质量评估。
+
+```text
+candidate Top200 gold visible:       345 / 370
+initial query-overlap Top10:         175 / 370
+alternate original-RRF Top10:        255 / 370
+initial + alternate union:           267 / 370
+alternate-only gold hits:             92
+initial-only gold hits:               12
+both-view gold hits:                 163
+neither-view gold hits:              103
+mean view overlap / union size: 2.715302 / 17.284698
+```
+
+Stage 165 的 138 个 post-first、answerable、candidate-hit 但 generation-miss case 中，A 让
+68 个 gold document 重新进入可见上下文，真实 rescue rate 为 `68/138 = 0.492754`；仍有 70 个
+无法由该备选 Top10 解决。该结论只证明证据可见性增加，不等价于答案 F1 或 citation 提升。
+
+16/16 process guard 通过，decision 为
+`advance_to_stage169_real_gpu_router_calibration`。这只允许下一阶段校准真实本地 Qwen router，
+不允许默认启用、service integration、dev evaluation 或 test evaluation。
+
+current-source public report SHA-256：
+
+```text
+27dd3266414e9e2e766588095b0792be035b7e3e1610bc9355167b0243fcf80a
+```
+
+生成 4 张正式 SVG：gold-document coverage、两视图贡献、已知 generation-miss rescue 和
+bounded call budget；4/4 完成 XML parse。coverage 图另由 Edge headless 渲染为 ignored PNG
+并实际查看，标签、数值和条形清晰无重叠。Edge stderr 只有既有 QQBrowser profile 提示，PNG
+写入成功。
+
+### 真实失败与修正记录
+
+- 两次探索读取因 Windows `rg` wildcard 写法错误而 exit 1，均发生在文件修改前；随后改用
+  `rg --files` 与目录级搜索。
+- 新 Agent 核心第一次静态检查发现 4 个 import/长行问题，测试尚未启动；修正后相关回归为
+  `54 passed`。验证模块第一次静态检查发现 12 个格式问题；修正并补测试后定向验证为
+  `24 passed`。
+- 第一次 formal 进程在 1.3 秒内 exit 2：`Start-Process` 把含空格 confirmation note 拆成
+  额外 Typer 参数。失败发生在参数解析阶段，没有加载数据、索引或模型，也没有生成报告。
+- 改用等价的无空格审计标识后，replacement 自然 exit 0，报告 SHA-256 为
+  `929b803ee9f7737bd9a41adfff1eb8981f00dabfaf78e9aea14228890ebc08de`。
+- 随后审查发现报告中的 runtime budget 虽与实现一致，但由验证模块重复写死。将其改为直接读取
+  runtime 导出的 frozen contract，并让 guard 检查真实字段。由于源码已变化，没有把旧成功报告
+  冒充 current-source；再次执行 current-source replacement，统计完全复现，最终报告 hash 为
+  `27dd3266...fcf80a`。
+
+两次成功的 formal replay 都分别由一条 PowerShell 指令创建一个 PID，并在该指令中直接执行
+一次 `Wait-Process` 等待同一 PID 自然结束；没有 PowerShell wait timeout、状态轮询、kill、
+restart 或自动 retry。首次 CLI 参数失败和两次成功运行均保留独立日志与 exit 文件。
+
+最终 current-source 仓库验证：
+
+```text
+Stage168 focused pytest: 24 passed in 1.73s
+eight-file Ruff format check: passed
+full repository Ruff lint: passed
+full repository pytest: 953 passed, 1 warning in 12.86s
+full pytest exit code / stderr bytes: 0 / 0
+```
+
+完整 pytest 只启动一次，由同一条 PowerShell 指令创建 PID 后直接执行一次 `Wait-Process`，
+自然结束；没有分段轮询、pytest timeout、monitor deadline、kill、restart、retry 或 fallback。
+warning 是既有 FastAPI/Starlette `TestClient` deprecation。

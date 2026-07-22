@@ -208,12 +208,19 @@ class CompletedThreadTurn:
 class ThreadStateLimits:
     max_completed_turns: int
     max_retained_bytes: int
+    allowed_terminal_states: tuple[str, ...] = ("complete", "refuse")
 
     def __post_init__(self) -> None:
         if self.max_completed_turns <= 0:
             raise ValueError("max_completed_turns must be positive")
         if self.max_retained_bytes <= 0:
             raise ValueError("max_retained_bytes must be positive")
+        if not self.allowed_terminal_states:
+            raise ValueError("allowed_terminal_states must not be empty")
+        if len(set(self.allowed_terminal_states)) != len(self.allowed_terminal_states):
+            raise ValueError("allowed_terminal_states must be unique")
+        if any(not state.strip() for state in self.allowed_terminal_states):
+            raise ValueError("allowed_terminal_states must be non-empty strings")
 
 
 @dataclass(frozen=True)
@@ -247,7 +254,7 @@ class VolatileThreadStateLedger:
         turn: CompletedThreadTurn,
     ) -> ThreadStateSummary:
         self._validate_handle(opaque_thread_handle)
-        if turn.terminal_state not in {"complete", "refuse"}:
+        if turn.terminal_state not in self._limits.allowed_terminal_states:
             raise ThreadStatePolicyViolationError("only terminal turns may be retained")
         if not turn.user_turn_input or not turn.verified_terminal_response:
             raise ThreadStatePolicyViolationError("retained terminal turn fields must be non-empty")
