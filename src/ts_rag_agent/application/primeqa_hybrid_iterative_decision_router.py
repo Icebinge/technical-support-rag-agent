@@ -19,6 +19,7 @@ from ts_rag_agent.application.primeqa_hybrid_structured_decision_router import (
 )
 from ts_rag_agent.domain.dataset import PrimeQAQuery
 from ts_rag_agent.domain.retrieval import RetrievalResult
+from ts_rag_agent.infrastructure.bm25_retriever import tokenize_text
 
 ITERATIVE_DECISION_SCHEMA_ID = "bounded_inspect_or_clarify_decision_v1"
 ITERATIVE_ROUTER_IMPLEMENTATION_ID = "qwen3_vl_2b_bounded_iterative_router_v1"
@@ -84,9 +85,23 @@ class IterativeAgentDecision(BaseModel):
 class IterativeRouterPromptPolicy:
     max_initial_evidence_results: int = 10
     max_alternate_evidence_results: int = 10
-    max_evidence_chars_per_result: int = 600
-    max_input_tokens: int = 12_288
-    max_new_tokens: int = 48
+    max_evidence_chars_per_result: int = 200
+    max_query_tokens_for_window_search: int = 16
+    max_occurrences_per_query_token: int = 4
+    max_input_tokens: int = 4_096
+    max_new_tokens: int = 32
+
+    def __post_init__(self) -> None:
+        if self.max_initial_evidence_results <= 0 or self.max_alternate_evidence_results <= 0:
+            raise ValueError("evidence result limits must be positive")
+        if self.max_evidence_chars_per_result <= 0:
+            raise ValueError("evidence character limit must be positive")
+        if self.max_query_tokens_for_window_search <= 0:
+            raise ValueError("query token search limit must be positive")
+        if self.max_occurrences_per_query_token <= 0:
+            raise ValueError("query token occurrence limit must be positive")
+        if self.max_input_tokens <= 0 or self.max_new_tokens <= 0:
+            raise ValueError("router token limits must be positive")
 
 
 @dataclass(frozen=True)
@@ -140,6 +155,14 @@ class IterativeRouterPromptBuilder:
             if phase is IterativeDecisionPhase.INITIAL
             else sorted(_FINAL_ACTIONS)
         )
+        initial = tuple(initial_evidence_results[: self._policy.max_initial_evidence_results])
+        initial_document_ids = {result.document.id for result in initial}
+        alternate = tuple(
+            result
+            for result in alternate_evidence_results
+            if result.document.id not in initial_document_ids
+        )[: self._policy.max_alternate_evidence_results]
+        query_tokens = frozenset(tokenize_text(question.full_question))
         payload = {
             "phase": phase.value,
             "completed_turns": [
@@ -153,13 +176,14 @@ class IterativeRouterPromptBuilder:
             ],
             "current_question": question.full_question,
             "initial_evidence": self._evidence_rows(
-                initial_evidence_results,
-                limit=self._policy.max_initial_evidence_results,
+                initial,
+                query_tokens=query_tokens,
             ),
             "alternate_evidence": self._evidence_rows(
-                alternate_evidence_results,
-                limit=self._policy.max_alternate_evidence_results,
+                alternate,
+                query_tokens=query_tokens,
             ),
+            "alternate_duplicate_count": len(alternate_evidence_results) - len(alternate),
         }
         return (
             "You are a bounded decision router inside a technical-support RAG Agent.\n"
@@ -184,17 +208,46 @@ class IterativeRouterPromptBuilder:
         self,
         results: Sequence[RetrievalResult],
         *,
-        limit: int,
+        query_tokens: frozenset[str],
     ) -> list[dict[str, Any]]:
         return [
             {
                 "rank": result.rank,
                 "retrieval_score": round(float(result.score), 8),
                 "title": result.document.title,
-                "excerpt": result.document.text[: self._policy.max_evidence_chars_per_result],
+                "excerpt": self._query_aware_excerpt(
+                    result.document.text,
+                    query_tokens=query_tokens,
+                ),
             }
-            for result in results[:limit]
+            for result in results
         ]
+
+    def _query_aware_excerpt(self, text: str, *, query_tokens: frozenset[str]) -> str:
+        limit = self._policy.max_evidence_chars_per_result
+        if len(text) <= limit:
+            return text
+        lowered = text.lower()
+        last_start = max(0, len(text) - limit)
+        starts = {0, last_start}
+        search_tokens = sorted(query_tokens, key=lambda token: (-len(token), token))[
+            : self._policy.max_query_tokens_for_window_search
+        ]
+        for token in search_tokens:
+            search_from = 0
+            for _ in range(self._policy.max_occurrences_per_query_token):
+                position = lowered.find(token, search_from)
+                if position < 0:
+                    break
+                starts.add(min(last_start, max(0, position - (limit // 3))))
+                search_from = position + max(1, len(token))
+        scored = []
+        for start in sorted(starts):
+            window = text[start : start + limit]
+            window_tokens = set(tokenize_text(window))
+            overlap = len(query_tokens & window_tokens)
+            scored.append((overlap, -start, window))
+        return max(scored)[2]
 
 
 class StrictIterativeStructuredDecisionRouter:
@@ -293,6 +346,8 @@ def iterative_decision_router_contract() -> dict[str, Any]:
         "model_generated_clarification_text_allowed": False,
         "strict_json_schema": True,
         "automatic_prompt_truncation": False,
+        "evidence_excerpt_policy": "query_overlap_best_fixed_character_window",
+        "final_alternate_duplicate_documents_removed": True,
         "retry_actions_allowed": False,
         "unapproved_fallback_actions_allowed": False,
         "user_authorized_clarification_fallback": True,

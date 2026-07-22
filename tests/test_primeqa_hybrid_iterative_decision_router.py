@@ -25,8 +25,8 @@ class StaticBackend:
         self.prompts: list[str] = []
 
     def generate(self, *, prompt: str, max_input_tokens: int, max_new_tokens: int):
-        assert max_input_tokens == 12_288
-        assert max_new_tokens == 48
+        assert max_input_tokens == 4_096
+        assert max_new_tokens == 32
         self.prompts.append(prompt)
         return GeneratedRouterText(
             text=self.outputs.pop(0),
@@ -116,6 +116,53 @@ def test_final_prompt_contains_both_bounded_views_and_no_inspect_action() -> Non
     assert '"inspect_alternate_evidence"' not in instruction.split("Authorized clarification")[0]
 
 
+def test_final_prompt_removes_alternate_documents_already_in_initial_view() -> None:
+    builder = IterativeRouterPromptBuilder()
+    initial = _results("shared")
+
+    prompt = builder.build(
+        phase=IterativeDecisionPhase.FINAL_AFTER_INSPECTION,
+        question=_question(),
+        initial_evidence_results=initial,
+        alternate_evidence_results=(*initial[:3], *_results("alternate")[:7]),
+        completed_turns=(),
+    )
+    payload = json.loads(
+        prompt.split("PRIVATE_RUNTIME_DATA_BEGIN\n", 1)[1].split("\nPRIVATE_RUNTIME_DATA_END", 1)[0]
+    )
+
+    assert len(payload["alternate_evidence"]) == 7
+    assert payload["alternate_duplicate_count"] == 3
+
+
+def test_prompt_uses_query_relevant_fixed_size_window() -> None:
+    builder = IterativeRouterPromptBuilder()
+    result = RetrievalResult(
+        document=PrimeQADocument(
+            id="relevant-tail",
+            title="Adapter",
+            text=("unrelated material " * 30) + "configure adapter with acmectl apply",
+        ),
+        score=1.0,
+        rank=1,
+    )
+
+    prompt = builder.build(
+        phase=IterativeDecisionPhase.INITIAL,
+        question=_question(),
+        initial_evidence_results=(result,),
+        alternate_evidence_results=(),
+        completed_turns=(),
+    )
+    payload = json.loads(
+        prompt.split("PRIVATE_RUNTIME_DATA_BEGIN\n", 1)[1].split("\nPRIVATE_RUNTIME_DATA_END", 1)[0]
+    )
+    excerpt = payload["initial_evidence"][0]["excerpt"]
+
+    assert "configure adapter" in excerpt
+    assert len(excerpt) <= 200
+
+
 def test_router_contract_records_user_authorized_fallback_and_closed_loop() -> None:
     contract = iterative_decision_router_contract()
 
@@ -125,6 +172,9 @@ def test_router_contract_records_user_authorized_fallback_and_closed_loop() -> N
     assert contract["model_generated_clarification_text_allowed"] is False
     assert contract["user_authorized_clarification_fallback"] is True
     assert contract["retry_actions_allowed"] is False
+    assert contract["prompt_policy"]["max_evidence_chars_per_result"] == 200
+    assert contract["prompt_policy"]["max_input_tokens"] == 4_096
+    assert contract["final_alternate_duplicate_documents_removed"] is True
 
 
 def _decide(router, *, phase: IterativeDecisionPhase):

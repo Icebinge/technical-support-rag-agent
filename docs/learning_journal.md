@@ -34672,3 +34672,126 @@ full pytest exit code / stderr bytes: 0 / 0
 完整 pytest 只启动一次，由同一条 PowerShell 指令创建 PID 后直接执行一次 `Wait-Process`，
 自然结束；没有分段轮询、pytest timeout、monitor deadline、kill、restart、retry 或 fallback。
 warning 是既有 FastAPI/Starlette `TestClient` deprecation。
+
+## 2026-07-22 - Stage 169 真实 GPU A+C 路由校准与资源统计
+
+目标：在 Stage 168 只证明证据可见性之后，使用本地缓存的
+`Qwen/Qwen3-VL-2B-Instruct` 和 RTX 5060，真实测量 strict schema、合成动作遵循、
+train-only gold-visible routing proxy、延迟、进程内存、系统可用内存和 CUDA 显存。
+不运行答案生成、F1、citation、dev/test，不增加 retry、query rewrite、第二次 retrieval、
+HTTP integration 或默认 runtime。
+
+### 冻结协议
+
+模型运行前固定 14 个 synthetic initial case 和 4 个 synthetic final case，覆盖 compose、
+refuse、六种 clarification kind、inspect->compose 和 inspect->refuse。真实 train 证据按 frozen
+sample identity SHA-256 固定选取五层各 10 条：initial gold visible、alternate-only gold
+visible、union missing/candidate hit、candidate miss、unanswerable。每条分别调用一次 initial
+和一次 counterfactual final，正式总调用数固定为 118。八个质量阈值在看模型输出前写入源码，
+运行后没有改阈值。
+
+### 首次 CUDA OOM 与定量估算
+
+首次 formal PID `56040` 使用 `600 chars x initial/alternate 20 documents`。它完成 14/14
+synthetic 和 9 个 train case 后 exit 1，stderr 明确为 `CUDA error: out of memory`；没有报告、
+自动 retry 或 partial continuation。等待工具通道曾显示 aborted，但随后只读检查确认原 PID 已结束、
+exit file 为 1，因此不是等待方式造成 OOM。
+
+RTX 5060 总显存 8151 MiB，诊断时可用 5917 MiB。既有实测为 696 tokens 峰值 4.16 GiB、
+2190 tokens 峰值 4.99 GiB。只加载 tokenizer、使用真实 technote 文本得到：
+
+```text
+600 chars: initial 2957 / final 5252 tokens
+300 chars: initial 2114 / final 3402 tokens
+240 chars: initial 1956 / final 3075 tokens
+200 chars: initial 1872 / final 2886 tokens
+```
+
+因此用户确认采用 query-aware 200 字符窗口、final initial/alternate 去重、4096 input tokens、
+32 output tokens。窗口算法只定位最长 16 个 query token、每词最多 4 个出现位置，再对有限候选
+打分，避免按 100 字符滑窗扫描全文造成额外 CPU 成本。这是固定 prompt redesign，不是 OOM 后
+fallback 或 retry。
+
+### 资源采样与过程修正
+
+`psutil` 未安装，因此没有增加依赖。使用 Win32 `GetProcessMemoryInfo`、
+`GlobalMemoryStatusEx` 与 PyTorch CUDA 原生计数器，在阶段边界及每次 generation 结束时做事件驱动
+采样，不运行外部 polling monitor。
+
+第一次独立采样检查因未声明 Win64 HANDLE 和函数参数类型而失败；该检查没有加载模型。显式补齐
+API signature 后，独立实测成功。compact replacement 随后完成全部 118 次调用且没有 OOM，但
+报告组装读取旧 stderr 时按 UTF-8 解码失败。字节检查确认 PowerShell 重定向文件为 Windows
+`cp936` 且无 BOM；改为 `locale.getpreferredencoding(False)` 并增加 CP936 回归后，
+current-source 从第 1 次模型调用完整重跑，没有恢复或拼接旧内存结果。
+
+### 正式质量结果
+
+current-source 118/118 generation 完成，schema valid 为 `116/118 = 0.983051`。合成结果：
+
+```text
+phase action:          7 / 18 = 0.388889
+clarification kind:    0 / 6  = 0
+exact path:            4 / 14 = 0.285714
+```
+
+六个 clarification case 全部被选为 inspect。train-only proxy：
+
+```text
+initial-visible compose:       0 / 10 = 0
+alternate-only inspect:        9 / 10 = 0.9
+alternate-only final compose:  5 / 10 = 0.5
+alternate-only exact path:     4 / 10 = 0.4
+insufficient final compose:    3 / 30 = 0.1
+```
+
+八个 frozen quality gate 只通过 3 个。模型明显 initial inspect bias、final clarify bias，且两个
+synthetic final compose 输出 schema invalid。正式 decision 为
+`stage169_router_requires_redesign`；不进入 runtime E2E，不打开 dev/test，不改变默认 runtime。
+
+### 正式资源结果
+
+```text
+wall / evidence build / model load: 217.407039 / 92.257149 / 4.970529 s
+synthetic / train calibration:       9.463150 / 107.443268 s
+GPU generation total / throughput:  115.038575 s / 1.025743 calls/s
+input/output tokens:                 194753 / 2148
+latency p50/p95/max:                 905.428 / 1603.777 / 1733.520 ms
+process peak working set:            7.518 GiB
+process peak private usage:          12.725 GiB
+minimum system available memory:     3.370 GiB
+CUDA peak allocated / reserved:      5.323 / 6.496 GiB
+```
+
+成功 prompt 的 input token 范围为 `622..2601`，p50/p95 为 `1551/2502`；compact 方案为
+8GB GPU 留出了真实余量。Private usage 是 Windows committed virtual memory，不等同于物理
+working set；CUDA reserved 含 allocator cache，不等同于 live tensor allocated。
+
+17/17 process guard 通过，public report 没有 raw question/answer/document/model output。
+报告 SHA-256：
+
+```text
+aa1f66d64ecf901d811c8f4db436b88f3fd416f91f0d9078c8d37f2174b06ad1
+```
+
+生成 5 张正式 SVG，5/5 XML parse。train proxy quality 与 resource peaks 由 Edge headless
+渲染并实际查看。首次共享 Edge profile 的 resource 截图标题出现缺字，SVG 源文本完整；使用独立
+profile 重渲染后标题、标签、数值和条形全部清晰。Edge stderr 仍只有既有 QQBrowser profile
+提示。
+
+三次 formal 分别由一条 PowerShell 指令启动一个 PID，并在同一指令中直接执行一次
+`Wait-Process` 等待自然结束；没有状态轮询、PowerShell wait timeout、kill 或自动 retry。
+首次 OOM、compact 报告组装失败和 current-source 成功均保留独立 stdout/stderr/exit/PID 文件。
+
+最终 current-source 仓库验证：
+
+```text
+Stage169 focused pytest: 30 passed in 2.14s
+five-file Ruff format check: passed
+full repository Ruff lint: passed
+full repository pytest: 963 passed, 1 warning in 13.57s
+full pytest exit code / stderr bytes: 0 / 0
+```
+
+完整 pytest 只启动一次，由同一条 PowerShell 指令创建一个 PID 后直接执行一次
+`Wait-Process`，自然结束；没有分段轮询、pytest timeout、monitor deadline、kill、restart、
+retry 或 fallback。warning 是既有 FastAPI/Starlette `TestClient` deprecation。
