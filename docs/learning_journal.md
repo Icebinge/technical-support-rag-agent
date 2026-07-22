@@ -34866,3 +34866,72 @@ full pytest PID / exit code: 19900 / 0
 
 warning 是既有 FastAPI/Starlette `TestClient` deprecation。完整 pytest 只启动一个 PID，并在同一条
 PowerShell 指令中执行一次 `Wait-Process` 直到自然结束；没有轮询、wait timeout、kill、retry 或 fallback。
+
+## 2026-07-22 - Stage 171 扩容两层受约束路由验证
+
+用户选择 A：扩大样本而不扩大单次上下文。Stage 171 将四动作生成改为两个正交 strict schema：request
+层只输出 `complete_technical_request / missing_specific_fact / unsupported_request`，missing 时必须附一个
+授权 clarification kind；evidence 层只输出 `sufficient_evidence / insufficient_evidence`。程序根据 phase
+确定性映射为 compose/inspect/clarify/refuse。两层每次都固定运行，任一层 schema 非法则整个决策失败，
+不 retry、不修 JSON、不替换动作、不 fallback。
+
+扩容从五个既有 train strata 各按 sample identity SHA-256 顺序取 20 条，共 100 case；每条运行 initial
+和 counterfactual final，synthetic 还有 18 个 phase decision，因此是 218 decision、436 次真实 generation。
+继续使用 200 字符 query-aware window、4096/32 token、单 GPU 串行执行。原 fold_id 保留用于 grouped
+五折稳定性；本阶段没有训练参数或阈值选择，所以这是真实五折稳定性评估，不冒充 OOF 模型训练。
+
+正式 PID `23392` 首次运行即自然 exit 0，436/436 层输出 schema valid，没有 OOM。旧质量 gate 从 Stage
+169 的 3/8、Stage 170 的 0/8 提升到 5/8：initial-visible compose 20/20、alternate initial inspect
+10/20、alternate final compose 18/20、exact path 10/20、schema 436/436 均通过。失败项是 synthetic
+action 13/18、clarification kind 0/6，以及 insufficient strata final compose 48/60 = 0.8。
+
+Hierarchy gate 为 4/5：synthetic evidence disposition 10/10、train request complete 196/200、request
+schema 218/218、evidence schema 218/218 通过；synthetic request disposition 13/18 未达到 0.9。六个
+clarification synthetic 只有 version case 被识别为 missing，但 kind 误选 environment；其余五个被判为
+complete，因此 clarification 仍不可用。
+
+真正的主瓶颈是 real technote evidence entailment。各 strata 的 sufficient/40 为：initial gold `40`、
+alternate-only `29`、union gold missing `26`、candidate-pool gold missing `25`、unanswerable `29`。
+synthetic evidence 10/10 并不能外推到真实 technote；模型把主题相关性误当成直接答案支持。五折
+insufficient final compose 为 `0.769231/0.545455/0.857143/0.75/1.0`，每折都失败，不是单折偶然。
+正式 decision 为 `stage171_hierarchy_requires_redesign`，未接 runtime/default，未打开 dev/test。
+
+资源：wall 388.730042 秒，evidence build 91.567470 秒、model load 4.764013 秒、synthetic 14.269941
+秒、expanded train 274.773031 秒；generation 284.699760 秒，1.531438 calls/s，input/output token
+`441914/5880`。单次 input 为 249..3539，p50/p95 `578/2412`。request latency p50/p95/max 为
+438.320/523.339/987.808ms，evidence 为 672.343/1223.550/12368.132ms。working set/private 峰值
+6.833/15.275 GiB，系统最小可用 2.429 GiB，CUDA allocated/reserved 6.267/9.020 GiB；设备物理
+VRAM 7.960 GiB。WDDM 下 reserved 可代表超过物理显存的虚拟 allocator reservation，不等于 live tensor，
+但 active 峰值和 12.37s outlier 表明长输入已接近压力区，之后不能扩上下文、batch 或并发。
+
+生成 6 张 SVG：gate progress、synthetic layer、train proxy、五折、layer latency、resource peaks；6/6
+XML parse 和 Edge PNG 渲染通过。会话缩放图中两张标题看似缩写，直接检查 SVG 证实 `Stage 171` 标题
+完整。Edge stderr 只有既有 QQBrowser profile 提示。
+
+过程失败完整记录：第一次只读 `rg` 使用 Windows wildcard path 而 exit 1；第二次 slash 假设导致过滤
+无匹配，随后用真实文件列表成功。首轮 Ruff 发现 3 条 101 字符长行和 1 个 unused import；修复时一块
+combined patch 因格式化后的上下文不同而原子失败，拆分后成功。第一次 focused pytest PID `4724`
+因参数名 `request` 是 pytest 保留名而 collection exit 2，没有执行测试或模型；改名后 PID `9324`
+为 50 passed。正式 GPU 没有失败或重跑。full pytest 的工具通道曾 yield，但原 shell 和原
+`Wait-Process` 持续等待同一 PID，没有启动第二条监控命令；PID `35152` 自然 exit 0。
+
+最终 public report SHA-256：
+
+```text
+cfb4dad9dd55587b058623c7d818f89ba5bcd8199bdf85f19c0d8df70d921e5d
+```
+
+15/15 process guard 通过，report 不含 raw question/answer/document/model output/private sample ID/gold
+document ID。最终验证：
+
+```text
+Stage171 focused pytest: 50 passed in 1.65s
+six-file Ruff format check: passed
+full repository Ruff lint: passed
+full repository pytest: 983 passed, 1 warning in 11.77s
+full pytest PID / exit code: 35152 / 0
+```
+
+下一步 Stage 172 冻结为专用 evidence-entailment 二分类器：只用 runtime-safe query/evidence 特征，
+在 train 上做 grouped 五折 OOF 的模型与阈值选择，并要求每折 safety non-regression。request 层继续作为
+实验输入，clarification taxonomy 作为独立未解决 gate；dev/test、answer E2E 和默认启用继续关闭。
