@@ -35302,3 +35302,69 @@ full pytest PID / exit code: 29920 / 0
 
 warning 是既有 FastAPI/Starlette `TestClient` deprecation。完整 pytest 只启动一个进程，并在同一条
 PowerShell 命令里对该 PID 执行一次 `Wait-Process` 等待自然结束。
+
+## 2026-07-22 - Stage 177 Listwise 纯二阶段 Reranker OOF 评估
+
+Stage 177 停止把 Stage 176 的 `listwise_none` 当 evidence sufficiency gate，只评估它作为二阶段文档排序器的
+价值。实验仍严格 train-only：5 个 grouped OOF fit，不再选择 family、threshold 或 calibration；同一批候选分别按
+original RRF、frozen cross-encoder 和 listwise OOF 排序，并以 2,000 次 paired bootstrap 比较 MRR、
+Recall@1/3/5/10。13/13 来源哈希授权通过，dev/test、答案生成、Agent、checkpoint、sufficiency gate、retry、
+fallback 和默认 runtime 全部关闭。
+
+候选池边界必须单独说明：370 个可回答 train 问题中，只有 267 个的 gold 文档进入 final union，coverage 为
+`0.721622`，另有 103 个问题无法靠二阶段重排找回。对 267 个 gold-present 问题，结果为：
+
+```text
+method                 MRR       mean rank  R@1       R@3       R@5       R@10
+original_rrf           0.698964  2.734082   0.573034  0.782772  0.861423  0.955056
+frozen_cross_encoder   0.708886  2.745318   0.584270  0.805243  0.868914  0.947566
+listwise_oof           0.767388  2.337079   0.655431  0.853933  0.898876  0.962547
+```
+
+对全部 370 个可回答问题，listwise 的 Recall@1/3/5/10 为
+`0.472973/0.616216/0.648649/0.694595`。相对 original RRF，MRR/Recall@3 delta 为
+`+0.068424/+0.071161`，95% CI lower 为 `0.028249/0.022472`；相对 frozen cross-encoder 为
+`+0.058502/+0.048689`，CI lower 为 `0.028386/0.007491`。Recall@10 的非劣 margin 与 MRR fold wins 也通过，
+共 8/8 预设门槛通过；MRR fold wins 分别为 4/5 和 5/5。
+
+正式 PID `35692` 第一次启动即自然 exit 0，完成 5 fits、511 optimizer steps 和 9,714 complete pairs，20/20
+process guard 通过，无 OOM、retry、fallback、restart 或 partial continuation。loss 均值从 `1.405709` 降到
+`1.054080`。资源为 wall 276.893420 秒、CUDA allocated/reserved 峰值 2.954/5.541 GiB、working set 峰值
+4.644 GiB、系统最小可用内存 1.419 GiB；OOF inference 25.116566 秒、386.756693 pairs/s，已构建的 20 pair
+推理估算 0.051712 秒。该估算不含一阶段召回、候选构建和文档加载，不能冒充端到端延迟。正式 PowerShell 命令只
+启动一个进程，并在同一命令内对该 PID 执行一次 `Wait-Process` 直到自然结束，没有轮询、分段监控或超时。
+
+8/8 SVG XML parse，四张关键图完成独立 PNG 渲染和视觉核验，非空且与 JSON 一致。真实修正：首轮 Ruff 发现
+`json`、`asdict` 两个 unused import，删除后 Ruff 与 8 个 focused tests 通过；一次并行预检 wrapper 在约
+10.5 秒触发工具默认超时，但已打印 `54 passed`，被隐藏的 source/format 结果没有被假定成功，而是独立重跑并
+确认 13/13 授权和 format passed。一次文档读取猜错 Stage 176 文件名、一次 compact report 提取猜错 JSON 路径，
+均未修改文件；之后分别用 `rg` 和实际 schema keys 核实，不从空值推断任何指标。首次追加 Stage 177 日志时又因
+尾句重复而插入 Stage 173 前，检查后已显式移动到文件末尾；没有把错误顺序保留为正式记录。
+
+最终验证前，一次并行 Ruff/search 命令又因猜测的测试文件 pattern 没有匹配而只返回 exit 1，并隐藏并行 Ruff
+输出；之后独立找出真实文件名并重跑，Ruff format/lint 均通过。最终 focused wrapper 在约 14 秒触发工具通道默认
+超时，但唯一 pytest 子进程未被中断并自然完成 `54 passed in 15.50s`；只做一次结束后确认，没有轮询。完整 pytest
+使用单一 PID `4016` 和一次 `Wait-Process` 自然完成；输出为 `1037 passed`，PowerShell 命令 exit 0，但
+`Start-Process` 对象的 child `ExitCode` 字段打印为空，因此不把该空字段伪写成 0。
+
+正式状态：`advance_to_stage178_listwise_reranker_agent_e2e`、`candidate_selected=true`。这是 Stage 172-177
+分支首个通过全部冻结 advancement gate 的候选，但只授权进入 Stage 178 Agent 检索链 E2E，不代表默认启用，
+也不代表 103 个 first-stage gold miss 已解决。dev/test 继续保持关闭，失败的 sufficiency gate 继续禁用。
+
+current-source public report SHA-256：
+
+```text
+6e028ed9e90fe153fda39f3073861c5d0b8eb019675635edb21a6825a472be50
+```
+
+最终 current-source 仓库验证：
+
+```text
+Stage 172-177 focused regression: 54 passed in 15.50s
+full repository Ruff lint: passed
+three-file Ruff format check: passed
+full repository pytest: 1037 passed, 1 warning in 20.15s
+full pytest PID / PowerShell command exit: 4016 / 0
+```
+
+warning 是既有 FastAPI/Starlette `TestClient` deprecation。
