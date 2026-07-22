@@ -35235,3 +35235,70 @@ full pytest PID / exit code: 13304 / 0
 
 warning 是既有 FastAPI/Starlette `TestClient` deprecation。完整 pytest 只启动一个进程，并在同一条
 PowerShell 命令里对该 PID 执行一次 `Wait-Process` 等待自然结束。
+
+## 2026-07-22 - Stage 176 Listwise View Calibration 嵌套交叉验证
+
+Stage 176 固定 Stage 175 train-OOF 选出的 `listwise_none`，只用 562 条 train 做 5 x（4 inner + 1 outer）=
+25 个 fresh fits。相同 OOF logits 同时比较四个预声明 policy：`absolute_top1`、原始
+`top1_top2_none_margin`、`candidate_mass_vs_none` 和 `bounded_absolute_relative`；前三者各用 21 点
+`-4..8` 网格，bounded 用 21 点 `-1..1` 网格，共 84 个固定 spec。inner OOF 选 policy+threshold，outer
+held-out 只评估一次。12 个来源哈希授权通过，dev/test、答案生成、Agent、checkpoint、retry、fallback 和
+默认 runtime 全部关闭。
+
+9 个 focused test 第一次即通过。纯合成 GPU smoke 不读取数据集行，完成真实 listwise 反向传播、14/14 推理
+覆盖和四个 policy 计算，loss `4.100567 -> 2.681946`，CUDA allocated/reserved 峰值 0.443/0.490 GiB。
+正式 PID `17264` 第一次启动即自然 exit 0，完成 25 fits、2,046 optimizer steps，全部 guard 通过，无 OOM。
+
+5/5 inner fold 全部选择原始 `top1_top2_none_margin`，其他 policy 0/5；五个 inner loop 仍全部是 0 eligible
+spec。严格 nested OOF：
+
+```text
+balanced accuracy:                    0.659947
+ROC AUC:                              0.758915
+initial-visible compose:              0.514286  fail
+alternate-only inspect:               0.956522  pass
+alternate-only final compose:         0.152174  fail
+alternate-only exact path:            0.108696  fail
+insufficient final compose:           0.122034  pass
+```
+
+相对 Stage 175，balanced accuracy +0.020236，initial +0.045715，final/exact 各 +0.010870，false compose
+-0.010169，AUC -0.000219。五折 false-compose 为 0.101695/0.150943/0.116667/0.049180/0.193548，全部安全；
+但 final-compose 只有 0.10/0.181818/0.111111/0.058824/0.333333，alternate-only 转换仍是主要失败。
+
+完整 OOF 诊断中，absolute/margin/mass/bounded 的 balanced accuracy 为
+0.580947/0.663802/0.535718/0.592511，final compose 为 0.032609/0.163043/0/0.032609；四者都没有 eligible
+threshold。原 margin 明确胜出，因此简单 calibration 分支到此关闭，继续调阈值或代数组合没有依据。
+
+资源：wall 767.297528 秒，nested calibration 646.608632 秒；working set/private 峰值 4.598/11.900 GiB，
+CUDA allocated/reserved 2.954/5.734 GiB，系统最小可用内存 1.267 GiB。正式命令只对 PID `17264` 执行一次
+`Wait-Process` 到自然结束，没有轮询或分段监控。9/9 SVG parse，4 张关键图渲染核验；Edge 的 `S5/S6`
+缩写只存在于 headless 截图，SVG 源标题完整。
+
+真实修正：一次并行预检 wrapper 在约 10.4 秒触发工具默认超时，但已打印 `46 passed`；来源授权和 Ruff 输出
+不可见，所以没有假定通过，而是分别重跑并确认 12/12 授权、Ruff passed。本阶段实现、focused tests、GPU smoke
+和正式实验没有功能失败。
+
+正式状态：`stage176_view_calibration_insufficient`、`candidate_selected=false`。dev/test 未打开，模型未保存或
+注册，runtime E2E 未授权。下一步停止把 listwise 当 evidence gate，改为 Stage 177 纯二阶段 reranker OOF 评估：
+gold rank、MRR、Recall@1/3/5/10，并与 original RRF 和 frozen cross-encoder 比较；若 reranking 真正改善，再进入
+Agent 检索链 E2E，失败的 sufficiency gate 保持关闭。
+
+current-source public report SHA-256：
+
+```text
+61619c229fd786698b37f456e0cfee7568db198a0842bac4a0903d7faf5005c1
+```
+
+最终 current-source 仓库验证：
+
+```text
+Stage 172-176 focused regression: 46 passed in 10.02s
+full repository Ruff lint: passed
+three-file Ruff format check: passed
+full repository pytest: 1029 passed, 1 warning in 18.46s
+full pytest PID / exit code: 29920 / 0
+```
+
+warning 是既有 FastAPI/Starlette `TestClient` deprecation。完整 pytest 只启动一个进程，并在同一条
+PowerShell 命令里对该 PID 执行一次 `Wait-Process` 等待自然结束。
