@@ -180,6 +180,39 @@ class CandidateScoringPolicy(Protocol):
     ) -> list[RetrievalResult]: ...
 
 
+class PrimaryContextSelectionPolicy(Protocol):
+    """Select one generation context from the immutable Stage116 prefix."""
+
+    def select(
+        self,
+        *,
+        question: PrimeQAQuery,
+        query_terms: set[str],
+        candidates: Sequence[RetrievalResult],
+        scoring_policy: CandidateScoringPolicy,
+        top_k: int,
+    ) -> Sequence[RetrievalResult]: ...
+
+
+class QueryOverlapPrimaryContextSelectionPolicy:
+    """Preserve the existing query-overlap Top10 behavior."""
+
+    def select(
+        self,
+        *,
+        question: PrimeQAQuery,
+        query_terms: set[str],
+        candidates: Sequence[RetrievalResult],
+        scoring_policy: CandidateScoringPolicy,
+        top_k: int,
+    ) -> Sequence[RetrievalResult]:
+        _ = question
+        return scoring_policy.rank(
+            query_terms=query_terms,
+            candidates=candidates,
+        )[:top_k]
+
+
 class QueryOverlapCandidateScoringPolicy:
     """Stage129-compatible query-overlap scorer using runtime-visible inputs."""
 
@@ -245,6 +278,7 @@ class PrimeQAHybridSidecarObservationAdapter:
         self,
         *,
         scoring_policy: CandidateScoringPolicy | None = None,
+        primary_context_selection_policy: PrimaryContextSelectionPolicy | None = None,
         primary_context_depth: int = _PRIMARY_CONTEXT_DEPTH,
         sidecar_observation_slots: int = _SIDECAR_OBSERVATION_SLOTS,
         prefix_depth: int = _BASELINE_PREFIX_DEPTH,
@@ -259,6 +293,9 @@ class PrimeQAHybridSidecarObservationAdapter:
         if candidate_pool_depth <= prefix_depth:
             raise ValueError("candidate_pool_depth must exceed prefix_depth")
         self._scoring_policy = scoring_policy or QueryOverlapCandidateScoringPolicy()
+        self._primary_context_selection_policy = (
+            primary_context_selection_policy or QueryOverlapPrimaryContextSelectionPolicy()
+        )
         self._primary_context_depth = primary_context_depth
         self._sidecar_observation_slots = sidecar_observation_slots
         self._prefix_depth = prefix_depth
@@ -277,10 +314,21 @@ class PrimeQAHybridSidecarObservationAdapter:
             for result in candidate_pool_results
             if self._prefix_depth < result.rank <= self._candidate_pool_depth
         ]
-        primary = self._scoring_policy.rank(
-            query_terms=query_terms,
-            candidates=prefix,
-        )[: self._primary_context_depth]
+        primary = list(
+            self._primary_context_selection_policy.select(
+                question=question,
+                query_terms=query_terms,
+                candidates=prefix,
+                scoring_policy=self._scoring_policy,
+                top_k=self._primary_context_depth,
+            )
+        )
+        if len(primary) != self._primary_context_depth:
+            raise ValueError("primary context selector returned an unexpected depth")
+        if len({result.document.id for result in primary}) != len(primary):
+            raise ValueError("primary context selector returned duplicate documents")
+        if any(result not in prefix for result in primary):
+            raise ValueError("primary context selector escaped the immutable prefix")
         sidecar = self._scoring_policy.rank(
             query_terms=query_terms,
             candidates=append,

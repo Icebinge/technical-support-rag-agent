@@ -35368,3 +35368,89 @@ full pytest PID / PowerShell command exit: 4016 / 0
 ```
 
 warning 是既有 FastAPI/Starlette `TestClient` deprecation。
+
+## 2026-07-22 - Stage 178A 首次正式失败与候选对齐审计
+
+Stage 178 按用户选择的 C 路线开始：先做 train-only、五折 grouped OOF 的
+确定性 LangGraph tool-Agent E2E，全部门槛通过后才允许做分片 Qwen dynamic
+Agent E2E。dev/test 继续关闭，sufficiency gate、fallback 和默认 runtime 均未启用。
+
+实现阶段新增可替换 primary-context policy、listwise union runtime reranker、全训练
+checkpoint 导出与哈希 manifest、OOF Agent E2E runner、严格质量/process gates、CPU
+latency probe、可视化和测试。首轮测试有一个失真的 `doc-20` 最终 Top10 断言，已按
+真实 20-pair 评分边界修正；一次回归命令猜错旧 sidecar 测试文件名，pytest 在收集前
+停止，随后按真实文件名重跑。报告里的 retry/fallback 也从常量 0 改成实际 trace 汇总。
+本阶段定向测试 6 passed，相关回归 50 passed，Ruff 和 py_compile 通过。全历史仓库
+Ruff format check 会报告 311 个旧文件不符合当前 formatter，本阶段未改写这些无关文件。
+
+正式 attempt 1 的 PID 为 `16368`，同一 PowerShell 命令只调用一次 `Wait-Process`
+等待自然结束。五个 OOF fit 和第六个 full-train checkpoint fit 均完成，无 OOM；但在
+第一个 paired Agent trace 前发现 live Stage128 Top200 与 Stage161/177 replay 不一致，
+严格 guard 抛出 `Stage178A live candidate prefix drifted from OOF replay`。正式 public
+report 和 private OOF artifact 均未生成，因此 attempt 1 不是完成实验。checkpoint 已实际
+生成并保留。外层 PowerShell 返回 0，但 `Start-Process` 对象的 child `ExitCode` 为空，
+没有把该空值伪报成 0；缺失报告和 traceback 是失败事实。
+
+随后新增并运行 train-only 聚合 alignment audit，PID `35116`，同样只用一次
+`Wait-Process`；无模型训练、无 dev/test、无原始 ID 输出，7/7 process guards 通过。
+562 题中 Top200 顺序仅 387 题完全一致、集合仅 466 题一致；original-RRF Top10、
+query-overlap Top10、两路 union 分别为 561/560/559 题一致，3 个 live union pair
+不在 Stage177 离线 union 中。prefix symmetric difference mean/p95/max 为
+0.608541/4/16。gold-hit 聚合虽恰好都无变化：RRF 255、overlap 175、union 267，
+gain/loss 均为 0，但不能据此忽略逐题身份漂移。
+
+根因是 exact-token derived route 深度不一致：Stage161 按 Stage116 使用
+`component_depth=200`；live Stage128 先以 400 深度解析 route 再截 prefix，可能把 base
+rank 201-400 的特殊词文档提升进前 200。Stage140 验证的是 live 与同样 400-depth 的
+Stage128 reconstruction 一致，并未真正证明原始 Stage116 prefix identity。审计明确
+不授权协议变更；Stage178A 未完成，Stage178B 未授权，等待用户选择全局修复路线。
+
+用户选择 A：修复 live runtime，恢复原冻结 Stage116 Top200，而不是把 Stage177 重训到
+漂移的 400-depth prefix 上。实现将 independent route 只检索一次 Top400 并稳定截取
+Top200；derived route 则复用已解析结果，分别基于 source Top200 计算 prefix、基于 source
+Top400 计算 append，不增加第二次 BM25/dense 索引搜索。相关 runtime/facade 测试 39 passed，
+Stage140/strict-latency/Agent 协议测试 38 passed，只有既有依赖 warning。
+
+修复前 checkpoint、正式日志和 alignment 报告已移动到明确的 attempt-1 目录保留。修复后
+train-only alignment audit 使用 PID `14428` 和一次 `Wait-Process` 自然完成，7/7 guards
+通过。Top200 sequence/set、RRF Top10、query-overlap Top10、union sequence/set 全部
+`562/562` 一致；prefix symmetric difference mean/p95/max 全为 0，缺失 pair 为 0。
+live retrieval mean/p95/max 为 0.066837/0.104169/0.677110 秒。修正报告 SHA-256 为
+`e2398024edf128ad0628900d25eb1ccc9c83c437fb474921fe136e2603e47272`，已作为 Stage178A
+新的强制授权来源。dev/test 仍未打开。
+
+Stage178A attempt 2 使用 PID `10028`，同一 PowerShell 命令只调用一次
+`Wait-Process` 到自然结束。Windows `Start-Process` 对象的 child `ExitCode` 仍为空，
+因此没有伪报子进程退出码；public/private report、checkpoint、8 个 SVG 和 20/20 process
+guards 均完整，证明本次正式运行闭合。完成 5 个 OOF fit、第 6 个 full-train fit、1124 个
+paired deterministic Agent turns、50-query CPU checkpoint probe 和一个 label-free smoke，
+无 OOM、retry、fallback、dev/test 或默认 runtime 变更。
+
+核心结果：verified F1 `0.1946 -> 0.2004`，delta `+0.0058`；context gold hit
+`175 -> 257`，`+82`；gold citation `151 -> 183`，`+32`；answerable refusal 和
+unanswerable false answer 均无变化；request p95 `0.129680 -> 0.128900` 秒。context/citation
+paired CI lower 为 0.178378/0.053986，但 answerable F1 delta 为 0.005804，95% CI
+`[-0.001612, 0.013721]`。fold 1/2 回退，fold 3/4/5 改善，只有 3/5 fold F1 non-regression；
+citation 为 5/5。因此 11 个冻结质量 gate 中 9 个通过，失败项为 F1 CI lower 非负和 F1
+fold non-regression 4/5。严格按预设规则，状态为
+`stage178a_listwise_tool_agent_e2e_insufficient`，Stage178B 不授权。
+
+CPU checkpoint rerank 50 题 mean/median/p95/max 为
+0.574648/0.587466/0.665752/0.710443 秒，通过 1 秒 p95 gate；runtime smoke 为
+0.617925 秒、400 candidates、10 context、3 tool calls、0 retry/fallback。wall
+458.378767 秒；working set/private 峰值约 7.509/11.712 GiB；CUDA allocated/reserved
+2.954/5.541 GiB；系统最小可用内存约 0.289 GiB。没有 OOM，但不能描述为余量充足。
+
+8/8 SVG XML parse。F1、context/citation、fold F1、quality gates 四张图独立 PNG 渲染并
+实际查看，非空、未截断且与 JSON 一致。首次 Edge 命令把 screenshot 写成相对路径，Edge
+无法解析，四张 PNG 均未生成；改用绝对路径后成功，未把首轮失败计为验证。Edge 另有既有
+QQBrowser profile warning。public report SHA-256 为
+`e57e3f09bcc65657a3f8783e97e6767b690095e2cffd5d252d51e181eaf533c9`。checkpoint 仅作为
+ignored research artifact 保留，未注册、未默认启用；dev/test 仍关闭。
+
+最终 current-source 验证：Stage178 affected regression `77 passed, 1 warning in
+5.46s`；11 个本阶段文件 Ruff format check passed；full repository Ruff lint passed；
+完整 pytest 使用单一 PID `1884`，同一 PowerShell 命令只调用一次 `Wait-Process` 等待
+自然完成，结果 `1046 passed, 1 warning in 19.82s`，stderr 0 bytes。外层 PowerShell
+返回 0，但 child `ExitCode` 字段为空，记录中未伪造该字段。warning 仍是既有
+FastAPI/Starlette `TestClient` deprecation。

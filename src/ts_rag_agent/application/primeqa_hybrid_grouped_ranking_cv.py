@@ -179,6 +179,7 @@ class RankingFoldTrainer(Protocol):
         training_fold_count: int,
         evaluation_fold_count: int,
         progress_sink: ProgressSink | None,
+        checkpoint_path: Path | None = None,
     ) -> tuple[dict[str, float], RankingFitSummary]: ...
 
 
@@ -216,6 +217,7 @@ class LocalGroupedRankingTrainer:
         training_fold_count: int,
         evaluation_fold_count: int,
         progress_sink: ProgressSink | None,
+        checkpoint_path: Path | None = None,
     ) -> tuple[dict[str, float], RankingFitSummary]:
         from transformers import AutoModelForSequenceClassification
 
@@ -299,6 +301,18 @@ class LocalGroupedRankingTrainer:
             progress_sink=progress_sink,
         )
         inference_seconds = time.perf_counter() - inference_started
+        if checkpoint_path is not None:
+            if checkpoint_path.exists():
+                raise FileExistsError(f"ranking checkpoint already exists: {checkpoint_path}")
+            checkpoint_path.mkdir(parents=True)
+            model.save_pretrained(checkpoint_path, safe_serialization=True)
+            self._tokenizer.save_pretrained(checkpoint_path)
+            _emit(
+                progress_sink,
+                phase="ranking_checkpoint_saved",
+                family=family,
+                fit_id=fit_id,
+            )
         summary = RankingFitSummary(
             family=family,
             fit_id=fit_id,

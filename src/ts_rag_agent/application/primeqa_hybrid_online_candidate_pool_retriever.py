@@ -35,6 +35,15 @@ class CandidatePoolSearchChannel(Protocol):
         resolved_results: Mapping[str, Sequence[RetrievalResult]],
     ) -> Sequence[RetrievalResult]: ...
 
+    def prefix_results(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        full_results: Sequence[RetrievalResult],
+        resolved_prefix_results: Mapping[str, Sequence[RetrievalResult]],
+    ) -> Sequence[RetrievalResult]: ...
+
 
 @dataclass(frozen=True)
 class IndependentCandidatePoolSearchChannel:
@@ -54,6 +63,17 @@ class IndependentCandidatePoolSearchChannel:
     ) -> Sequence[RetrievalResult]:
         _ = resolved_results
         return self.searcher(query, top_k)
+
+    def prefix_results(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        full_results: Sequence[RetrievalResult],
+        resolved_prefix_results: Mapping[str, Sequence[RetrievalResult]],
+    ) -> Sequence[RetrievalResult]:
+        _ = query, resolved_prefix_results
+        return full_results[:top_k]
 
 
 @dataclass(frozen=True)
@@ -80,6 +100,21 @@ class DerivedCandidatePoolSearchChannel:
                 f"source channel must run first: {self.source_channel_id}"
             ) from error
         return self.searcher(query, source_results, top_k)
+
+    def prefix_results(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        full_results: Sequence[RetrievalResult],
+        resolved_prefix_results: Mapping[str, Sequence[RetrievalResult]],
+    ) -> Sequence[RetrievalResult]:
+        _ = full_results
+        return self.search(
+            query,
+            top_k=top_k,
+            resolved_results=resolved_prefix_results,
+        )
 
 
 @dataclass(frozen=True)
@@ -162,6 +197,7 @@ class PrimeQAHybridOnlineCandidatePoolRetriever(CandidatePoolRetrieverPort):
         started_at = time.perf_counter()
         query = question.full_question
         results_by_channel: dict[str, Sequence[RetrievalResult]] = {}
+        prefix_results_by_channel: dict[str, Sequence[RetrievalResult]] = {}
         channel_timings = []
 
         for channel in self._channels:
@@ -173,8 +209,17 @@ class PrimeQAHybridOnlineCandidatePoolRetriever(CandidatePoolRetrieverPort):
                     resolved_results=results_by_channel,
                 )
             )
+            prefix_results = tuple(
+                channel.prefix_results(
+                    query,
+                    top_k=self._config.prefix_depth,
+                    full_results=results,
+                    resolved_prefix_results=prefix_results_by_channel,
+                )
+            )
             channel_finished_at = time.perf_counter()
             results_by_channel[channel.channel_id] = results
+            prefix_results_by_channel[channel.channel_id] = prefix_results
             channel_timings.append(
                 CandidatePoolChannelTiming(
                     channel_id=channel.channel_id,
@@ -189,10 +234,6 @@ class PrimeQAHybridOnlineCandidatePoolRetriever(CandidatePoolRetrieverPort):
             )
 
         fusion_started_at = time.perf_counter()
-        prefix_results_by_channel = {
-            channel.channel_id: results_by_channel[channel.channel_id][: self._config.prefix_depth]
-            for channel in self._channels
-        }
         prefix = _weighted_rrf_rank(
             channels=self._channels,
             results_by_channel=prefix_results_by_channel,
@@ -209,7 +250,10 @@ class PrimeQAHybridOnlineCandidatePoolRetriever(CandidatePoolRetrieverPort):
             target_pool_depth=self._config.target_pool_depth,
         )
         fused_at = time.perf_counter()
-        documents_by_id = _documents_by_id(results_by_channel)
+        documents_by_id = _documents_by_id(
+            results_by_channel,
+            prefix_results_by_channel,
+        )
         candidate_pool = tuple(
             RetrievalResult(
                 document=documents_by_id[doc_id],
@@ -244,10 +288,11 @@ def _weighted_rrf_rank(
 
 
 def _documents_by_id(
-    results_by_channel: Mapping[str, Sequence[RetrievalResult]],
+    *result_mappings: Mapping[str, Sequence[RetrievalResult]],
 ) -> dict[str, PrimeQADocument]:
     return {
         result.document.id: result.document
+        for results_by_channel in result_mappings
         for results in results_by_channel.values()
         for result in results
     }
