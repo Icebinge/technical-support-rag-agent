@@ -35174,3 +35174,64 @@ full pytest PID / exit code: 7780 / 0
 
 warning 是既有 FastAPI/Starlette `TestClient` deprecation。完整 pytest 只启动一个进程，并在同一条
 PowerShell 命令里对该 PID 执行一次 `Wait-Process` 等待自然结束。
+
+## 2026-07-22 - Stage 175 问题分组 Pairwise/Listwise Ranking 嵌套交叉验证
+
+Stage 175 只用冻结的 562 条 train，并列比较 `pairwise_anchor` 与 `listwise_none`，不把任一 family 当作
+运行中兜底。两族都使用固定 `none=0` 边界，group 不拆分，以 32 pairs 为 batch budget，训练 2 epochs；
+view score 冻结为 `top1_logit - max(0, top2_logit)`，inner OOF 从 21 点 margin grid 同时选 family 和
+threshold。正式协议为 40 inner + 10 outer = 50 fresh fits，11 个来源哈希授权通过，dev/test、答案生成、
+Agent、checkpoint、retry、fallback 和默认 runtime 全部关闭。
+
+纯合成 GPU smoke 不读取数据集行，两族均完成真实反向传播和 14/14 推理覆盖；pairwise loss
+`0.976238 -> 0.534559`，只有单 batch/epoch 的 listwise 为 `1.637238 -> 1.997387`，后者只作为执行链观察，
+不作为效果证据。正式 PID `30416` 第一次真实启动即自然 exit 0，完成 50 fits、4,094 optimizer steps，
+全部 process guard 通过，无 OOM。严格 nested OOF：
+
+```text
+balanced accuracy:                    0.639711
+ROC AUC:                              0.759134
+initial-visible compose:              0.468571  fail
+alternate-only inspect:               0.956522  pass
+alternate-only final compose:         0.141304  fail
+alternate-only exact path:            0.097826  fail
+insufficient final compose:           0.132203  aggregate pass
+```
+
+相对 Stage 174，balanced accuracy/AUC 提升 0.075858/0.009862，initial/final/exact path 提升
+0.268571/0.130434/0.097826，证明 grouped ranking 有效；但 final compose 仍远低于 0.70，fold 5 pairwise
+held-out false-compose `0.258065` 又超过每折 0.20 安全线。五个 inner loop 全部 0 eligible spec，因此不能进入
+runtime。inner 选择 listwise 4/5、pairwise 1/5；完整 OOF 最终选择 listwise，但它也不 eligible，模型未保存。
+
+资源：wall 1398.167229 秒；working set/private 峰值 4.835/13.278 GiB，CUDA allocated/reserved 峰值
+2.955/6.814 GiB，系统最小可用内存仅 0.418 GiB。没有 OOM，但后续不能直接扩大模型、pair budget 或并发。
+正式命令只对 PID `30416` 执行一次 `Wait-Process` 到自然结束，没有轮询或分段监控。9/9 SVG parse，4 张关键图
+渲染核验；Edge 的 `S4/S5` 标题缩写只存在于 headless 截图，SVG 源文本完整。
+
+真实修正：首次并行 Ruff/test 发现 `UP012` 且未返回 pytest 输出，因此没有假定测试通过；修正后 Stage 175
+`10 passed`、Stage 172-175 回归 `37 passed`。最初计划估算 45 fits，正式前纠正为 50；代码、测试和 guard
+一直是 50，未运行过 45-fit 正式协议。两次日志移动因同类尾句匹配到 Stage 173 而位置错误，均显式检查并最终用
+Stage 174 唯一的 `1010 passed` 上下文定位到文件末尾。
+
+正式状态：`stage175_grouped_ranking_insufficient`、`candidate_selected=false`。下一步建议保留 listwise，使用
+25 fits 比较 absolute top1、top1-top2、candidate mass vs none 及有界组合，验证剩余瓶颈是否为 view
+calibration。完整协议与数值见 `docs/primeqa_hybrid_grouped_ranking_cv.md`。
+
+current-source public report SHA-256：
+
+```text
+27641cf6754762260a7400aa431762c5e8e34cf9f1645f4038fa8867cc04dec8
+```
+
+最终 current-source 仓库验证：
+
+```text
+Stage 172/173/174/175 focused regression: 37 passed in 7.95s
+full repository Ruff lint: passed
+three-file Ruff format check: passed
+full repository pytest: 1020 passed, 1 warning in 16.99s
+full pytest PID / exit code: 13304 / 0
+```
+
+warning 是既有 FastAPI/Starlette `TestClient` deprecation。完整 pytest 只启动一个进程，并在同一条
+PowerShell 命令里对该 PID 执行一次 `Wait-Process` 等待自然结束。
