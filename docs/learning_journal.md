@@ -35454,3 +35454,57 @@ ignored research artifact 保留，未注册、未默认启用；dev/test 仍关
 自然完成，结果 `1046 passed, 1 warning in 19.82s`，stderr 0 bytes。外层 PowerShell
 返回 0，但 child `ExitCode` 字段为空，记录中未伪造该字段。warning 仍是既有
 FastAPI/Starlette `TestClient` deprecation。
+
+## 2026-07-22 - Stage 179 Listwise Agent train-only 失败归因
+
+Stage 179 没有继续训练或调参，而是冻结 Stage 178A 的 baseline/candidate Agent、五折 OOF
+分数与判定规则，只用 562 条 train 做逐题配对重放。dev/test、模型拟合、完整 checkpoint
+加载、fallback、retry、Stage 178B 和默认 runtime 均保持关闭。正式输入通过 Stage 178 public/private、
+修正后 alignment、Stage 128/125/80 与 frozen train 哈希认证；共使用 9,714 个真实 OOF pair 分数。
+
+正式 PID `14136` 在同一条 PowerShell 命令中只执行一次 `Wait-Process` 并自然结束。Windows
+`Start-Process` 对象的 child `ExitCode` 字段仍为空，因此没有把空字段伪报为 0；完整报告与
+16/16 process guards 均已生成。运行只构建一次 live runtime，完成 1,124 个 Agent turns、
+562 次 score-provider 调用，baseline/candidate 各 562 次完整调用且无失败。wall
+`138.672731` 秒，其中 runtime 构建 `39.911538` 秒、paired replay `98.609738` 秒、归因
+`0.114434` 秒。
+
+370 条可回答 train 的链路为：prefix gold hit 345，two-view union gold hit 267，candidate
+Top10 context hit 257，candidate gold citation 183，candidate positive F1 360。也就是说，
+78 条在 frozen union 边界前失去 gold，10 条在 listwise Top10 选择时失去 gold，另有 74 条
+虽然 context 含 gold 却未生成 gold citation。
+
+context 转移为 171 hit-to-hit、4 hit-to-miss、86 miss-to-hit、109 miss-to-miss。86 条新增
+context 中只有 37 条转化为 gold citation，49 条未引用，转化率 `0.430233`；F1 为 47 改善、
+6 持平、33 变差，mean delta `+0.039837`。citation 转移为 143 hit-to-hit、8 hit-to-miss、
+40 miss-to-hit、179 miss-to-miss。183 条 candidate gold-cited 回答仍有 60 条 F1 变差，说明
+证据已经可见并被引用时，答案内容保真也不稳定。
+
+candidate gold context 位于 rank 1 时 citation rate 为 `0.868571`，rank 2-3 为
+`0.415094`，rank 4-5 为 `0.416667`，rank 6-10 仅 `0.235294`。五折 F1 delta 分别为
+`-0.008159/-0.006910/+0.017779/+0.008320/+0.019563`；总体 139 改善、97 持平、
+134 变差，与 Stage 178 的 aggregate `+0.005804` 但统计不稳定一致。
+
+按正式运行前冻结的优先规则，context-to-citation、answer fidelity 与 reranker stability 三个
+诊断标志都成立，primary bottleneck 为 `context_to_citation_conversion`。下一方向仅授权设计
+`runtime-visible citation-aware composition` 的 train-OOF 实验，不授权使用 gold runtime 特征、
+Stage 178B、fallback、默认启用或打开 dev/test。
+
+过程纠正如实记录：正式运行前发现 candidate workflow 已评分后又直接调用一次 provider，虽不改变
+答案但会把诊断计数翻倍，已在 formal 前删除；正式报告为正确的 562 次调用。6 张 SVG 均通过 XML
+解析，4 张关键图完成 PNG 渲染。首次并行读取时两个 Edge 截图尚未完成写入，标题显示不全；重新
+渲染并依次查看后标题完整、图非空、无重叠且数值与 JSON 一致。Edge 的既有 QQBrowser profile
+warning 不影响产物。
+
+Stage 179 public report SHA-256：
+
+```text
+80a7b82016eb54a480748466fabff7990d147843742e49114277e08155b45d8f
+```
+
+最终 current-source 验证：Stage 177-179 focused regression `18 passed in 2.39s`；
+3 个本阶段 Python 文件 Ruff format check passed；full repository Ruff lint passed。
+完整 pytest 使用单一 PID `32640`，同一条 PowerShell 命令只调用一次 `Wait-Process` 并等待
+自然完成，结果为 `1048 passed, 1 warning in 18.31s`，stderr 为空，外层命令返回 0。
+进程对象确认 `HasExited=True`，但 child `ExitCode` 字段为空，记录中未伪造该字段。warning
+仍是既有 FastAPI/Starlette `TestClient` deprecation。
