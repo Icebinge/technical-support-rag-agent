@@ -35097,3 +35097,80 @@ full pytest PID / exit code: 5992 / 0
 
 warning 是既有 FastAPI/Starlette `TestClient` deprecation。完整 pytest 只启动一个进程，并在同一条
 PowerShell 命令里对该 PID 执行一次 `Wait-Process` 等待自然结束。
+
+## 2026-07-22 - Stage 174 监督式 Cross-Encoder 嵌套交叉验证
+
+用户选择 A 路线后，Stage 174 只用冻结的 562 条 train 对本地
+`cross-encoder/ms-marco-MiniLM-L-6-v2` 做监督微调。协议是严格 5 折 grouped nested CV：每个 outer
+fold 包含 4 个 inner fit 和 1 个 held-out fit，共 25 个从原始快照重新初始化的模型；每个模型全参数训练
+2 epoch，pointwise weighted BCE，batch 32，学习率 `2e-5`。有正样本的问题保留 1 个 gold 与 frozen-score
+最高的 4 个负例，无正样本的问题保留最高的 2 个负例；view 分数取候选 sigmoid 概率最大值，不再拟合第二个
+learner。
+
+正式运行前把继承的 17 点阈值网格扩展并冻结为 21 点：`0.05`、`0.10..0.90`（步长 0.05）、
+`0.95/0.975/0.99`。这是在没有任何 Stage 174 正式结果时完成的协议修正，原因是 BCE 概率的安全阈值可能高于
+0.90，不是看结果后调参。10 个 report/split/document/model 来源哈希全部授权通过；dev/test、答案生成、Agent
+turn、checkpoint、retry、fallback 与默认 runtime 全部关闭。
+
+正式 PID `31148` 一次真实启动后自然 exit 0，完成 25 fits、1,952 optimizer steps、9,714 complete pairs、
+1,925 full-train sampled pairs 与 1,124 evidence views。五个 inner loop 都是 0 个 eligible threshold，因此
+outer 选择了 0.90 或 0.95 的严格阈值。nested OOF 为：
+
+```text
+balanced accuracy:                    0.563853
+ROC AUC:                              0.749272
+initial-visible compose:              0.200000  fail
+alternate-only inspect:               0.989130  pass
+alternate-only final compose:         0.010870  fail
+alternate-only exact path:            0.000000  fail
+insufficient final compose:           0.040678  pass
+```
+
+相对 Stage 173，AUC 只增加 0.003835，balanced accuracy 下降 0.049714；false compose 降低 0.098305，
+代价是 initial/final/exact path 分别下降 0.108571/0.141304/0.097826。五折 held-out false-compose 为
+0.016949/0.037736/0.033333/0.016393/0.096774，全部安全，但覆盖与路径成功严重不足。完整 train OOF
+诊断阈值 0.85 的 balanced accuracy 为 0.615431、false compose 0.132203，initial/final/exact path 仍只有
+0.405714/0.076087/0.043478，不能改变 nested 结论。
+
+训练 loss 从首 epoch 均值 1.505392 降到末 epoch 均值 1.074603，说明模型确实学习了 pointwise 目标；失败原因
+是 pair-level BCE + view-max 单阈值无法同时满足安全和业务覆盖，不是 OOM 或训练中断。正式状态为
+`stage174_supervised_cross_encoder_insufficient`、`candidate_selected=false`；模型不保存、不进入 runtime E2E，
+dev/test 始终未打开。
+
+资源：wall 762.527954 秒，candidate replay 88.315168 秒，nested fine-tuning 646.789325 秒；working set/private
+峰值 4.637/9.683 GiB，CUDA allocated/reserved 峰值 2.954/3.494 GiB，系统最小可用内存 2.324 GiB，
+generation call 为 0。资源统计是进程内事件采样；正式 PowerShell 命令只对同一个 PID 执行一次
+`Wait-Process` 直到自然结束，没有轮询、retry、restart、kill、partial continuation 或 OOM。
+
+8 张 SVG 覆盖 gate、Stage 173/174 对比、fold safety/path、阈值、loss、timing 和 resources，全部可解析；
+3 张关键图独立渲染并与 JSON 数值核对。Edge headless 把一张长标题显示成 `S3`，但 SVG 源文本明确包含完整
+`Stage 173 versus Stage 174`，没有修改本来正确的生成器。
+
+真实失败与修正：实现首轮为 `7 passed, 2 failed`，分别是测试误把正例当 hard negative、以及对序列化 dict
+使用属性访问，修正后 Stage 172-174 回归 `27 passed`；阈值 patch 输出被截断后先显式搜索源码确认落盘；一次
+pytest 预检引用不存在的 Stage 172 文件名而零测试，改成真实文件后通过；一次来源预检错误假设 raw-data root，
+改由 `ProjectSettings` 取真实路径后 10/10 授权；工具把 `timeout_ms: 0` 解释成立即 11 ms 超时，PowerShell
+主体未执行、PID 未创建、正式训练未启动，随后真实正式命令只启动 PID `31148`；另一次先按截图误判标题错误，
+随后检查 SVG 源文本纠正判断，没有制造代码修改。
+
+current-source public report SHA-256：
+
+```text
+7d949a300f58f3205397c76e3accf4c9a71932d466fa4811144f3cbc04b86019
+```
+
+下一步建议是新的 Stage 175 train-only grouped pairwise/listwise reranker：直接优化同一问题内 gold 与 hard negative
+的排序，再独立校准 view-level sufficiency margin。它必须作为新协议显式确认，不能作为本次失败候选的自动兜底。
+
+最终 current-source 仓库验证：
+
+```text
+Stage 172/173/174 focused regression: 27 passed in 4.24s
+full repository Ruff lint: passed
+three-file Ruff format check: passed
+full repository pytest: 1010 passed, 1 warning in 13.13s
+full pytest PID / exit code: 7780 / 0
+```
+
+warning 是既有 FastAPI/Starlette `TestClient` deprecation。完整 pytest 只启动一个进程，并在同一条
+PowerShell 命令里对该 PID 执行一次 `Wait-Process` 等待自然结束。
