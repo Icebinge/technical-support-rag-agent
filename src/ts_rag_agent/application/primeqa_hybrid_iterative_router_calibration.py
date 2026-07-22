@@ -140,6 +140,7 @@ class RouterCallObservation:
 @dataclass(frozen=True)
 class TrainCalibrationCase:
     stratum: str
+    fold_id: str
     question: PrimeQARuntimeQuery
     initial_evidence: tuple[RetrievalResult, ...]
     alternate_evidence: tuple[RetrievalResult, ...]
@@ -347,6 +348,7 @@ def select_train_calibration_cases(
             selected.append(
                 TrainCalibrationCase(
                     stratum=stratum,
+                    fold_id=records[0].fold_id,
                     question=PrimeQARuntimeQuery(
                         id=_sha256_text(sample.sample_id),
                         title=sample.question_title,

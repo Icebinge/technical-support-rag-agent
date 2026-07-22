@@ -34795,3 +34795,74 @@ full pytest exit code / stderr bytes: 0 / 0
 完整 pytest 只启动一次，由同一条 PowerShell 指令创建一个 PID 后直接执行一次
 `Wait-Process`，自然结束；没有分段轮询、pytest timeout、monitor deadline、kill、restart、
 retry 或 fallback。warning 是既有 FastAPI/Starlette `TestClient` deprecation。
+
+## 2026-07-22 - Stage 170 冻结 Prompt 家族比较与资源验证
+
+目标：在不打开 dev/test、不运行答案生成、不改默认 runtime 的前提下，判断仅靠 instruction/prompt
+设计能否修复 Stage 169 的迭代路由问题。正式运行前冻结 ordered precedence、contrastive few-shot、
+phase gate 三个 profile；三者共享 Stage 169 的 query-aware 200 字符证据窗口、final 去重、4096
+input token、32 output token、严格 JSON parser 和 greedy generation。
+
+协议先让每个 profile 运行相同的 14 个 synthetic initial case 和 4 个 synthetic final call，仅按
+synthetic 结果选择前两名。两名 finalist 再各自在同一批冻结的 50 个 train case 上执行 initial 和
+counterfactual final，共 `3*18 + 2*50*2 = 254` 次真实 GPU generation。train case 保留已有五折
+fold_id，用于报告跨折稳定性；没有用 train outcome 反向修改 profile，也没有读取 development/test。
+
+Synthetic 排名为：
+
+```text
+profile                      action       clarification   exact path
+contrastive few-shot         0.666667     0.333333        0.428571
+phase gate                   0.611111     0.166667        0.357143
+ordered precedence           0.277778     0               0.142857
+```
+
+Contrastive 和 phase gate 进入 train-only 比较。Stage 169 baseline 原为 3/8 gate；两个 finalist
+都只有 0/8。Contrastive 的 schema valid 为 0.813559、initial-visible compose 为 0.2、
+alternate inspect/final compose/exact path 为 `0.3/0.1/0`、insufficient final compose 为
+0.333333。Phase gate 的对应结果为 schema 0.957627、initial compose 0.6、alternate
+inspect/final compose/exact path `0/0.5/0`、insufficient final compose 0.366667。五折结果同样不稳：
+contrastive schema 只有 0.722222..0.833333；phase gate 的 initial compose 在各折为 0..1，
+fold 4 的 insufficient final compose 达 0.6。
+
+正式 decision 为 `stage170_prompt_family_insufficient`。Synthetic 排名最高的 contrastive 只作为
+报告中的 selected profile，不代表上线候选；`default_runtime_activation=false`。真实结论是 prompt
+措辞无法同时约束 phase、action、clarification kind、schema 和 insufficient-evidence safety，下一阶段
+应改为两层受约束路由结构，而不是继续堆 prompt。
+
+资源结果：PID `6552` 一次启动并由同一条 PowerShell 指令直接执行一次 `Wait-Process`，自然 exit 0，
+254/254 call 完成且没有 OOM。wall 343.770696 秒，其中 evidence build 93.895376 秒、model load
+5.322201 秒、synthetic 31.343788 秒、train comparison 210.076469 秒；generation 合计
+237.859314 秒，1.067858 calls/s，input/output token 为 `425321/4204`。process working set 峰值
+7.323 GiB、private usage 13.273 GiB、系统最小可用内存 2.718 GiB、CUDA allocated/reserved
+峰值 5.420/7.020 GiB。采样为进程内事件驱动，没有外部轮询 monitor。
+
+5 张正式 SVG 覆盖 synthetic accuracy、quality gate、train proxy、p95 latency 和 resource peaks；
+5/5 Edge PNG 渲染成功并完成视觉检查。第一次缩放查看似乎把 resource 标题显示成 `$0`，但直接读取
+SVG 证实 title 和可见文本一直是完整的 `Stage 170 process and GPU resource peaks`，因此这是显示审查
+误判，不是数据修正；随后新增 exact-title 回归断言。Edge stderr 只有既有 QQBrowser profile 提示和
+一次 disk-cache directory 提示，exit 0、PNG 均写入成功。
+
+过程失败如实保留：第一次静态检查发现 1 个 import-order 错误，在模型运行前修正；第一次报告摘要
+命令因 Windows PowerShell 不支持 `ConvertFrom-Json -Depth` 而失败，移除只读参数后成功；一次双引号
+`rg` pattern 中的 `$0` 被 PowerShell 展开而形成无效 regex，改用单引号后成功。全仓
+`ruff format --check` 还发现当前 Ruff 会重排 311 个历史文件，这些既存格式差异与 Stage 170 无关，
+没有批量修改；Stage 170 六个 Python 文件单独 format/lint 通过。
+
+最终 public report SHA-256：
+
+```text
+d74abda6a8455ab1946504096654a1238c5aa5ad2b4d5d3f4aa917e6badb5ef2
+```
+
+14/14 process guard 通过；report 不含 raw question/answer/document/model output。最终验证：
+
+```text
+Stage170 focused pytest: 37 passed in 1.42s
+six-file Ruff format/lint: passed
+full repository pytest: 970 passed, 1 warning in 11.75s
+full pytest PID / exit code: 19900 / 0
+```
+
+warning 是既有 FastAPI/Starlette `TestClient` deprecation。完整 pytest 只启动一个 PID，并在同一条
+PowerShell 指令中执行一次 `Wait-Process` 直到自然结束；没有轮询、wait timeout、kill、retry 或 fallback。

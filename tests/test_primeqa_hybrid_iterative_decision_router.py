@@ -8,8 +8,11 @@ from ts_rag_agent.application.primeqa_hybrid_iterative_decision_router import (
     ClarificationKind,
     IterativeDecisionPhase,
     IterativeRouterPromptBuilder,
+    OrderedPrecedenceInstructionPolicy,
+    PhaseGateInstructionPolicy,
     StrictIterativeStructuredDecisionRouter,
     iterative_decision_router_contract,
+    stage170_challenger_instruction_policies,
 )
 from ts_rag_agent.application.primeqa_hybrid_structured_decision_router import (
     GeneratedRouterText,
@@ -175,6 +178,36 @@ def test_router_contract_records_user_authorized_fallback_and_closed_loop() -> N
     assert contract["prompt_policy"]["max_evidence_chars_per_result"] == 200
     assert contract["prompt_policy"]["max_input_tokens"] == 4_096
     assert contract["final_alternate_duplicate_documents_removed"] is True
+
+
+def test_stage170_instruction_profiles_are_unique_and_phase_specific() -> None:
+    profiles = stage170_challenger_instruction_policies()
+
+    assert len(profiles) == 3
+    assert len({profile.profile_id for profile in profiles}) == 3
+    ordered = OrderedPrecedenceInstructionPolicy()
+    assert "inspect is forbidden" in ordered.render(IterativeDecisionPhase.FINAL_AFTER_INSPECTION)
+    gates = PhaseGateInstructionPolicy()
+    assert "inspect_alternate_evidence" in gates.render(IterativeDecisionPhase.INITIAL)
+    assert "refuse_insufficient_evidence" in gates.render(
+        IterativeDecisionPhase.FINAL_AFTER_INSPECTION
+    )
+
+
+def test_prompt_records_injected_instruction_profile() -> None:
+    profile = OrderedPrecedenceInstructionPolicy()
+    builder = IterativeRouterPromptBuilder(instruction_policy=profile)
+
+    prompt = builder.build(
+        phase=IterativeDecisionPhase.INITIAL,
+        question=_question(),
+        initial_evidence_results=_results("initial"),
+        alternate_evidence_results=(),
+        completed_turns=(),
+    )
+
+    assert builder.instruction_profile_id == profile.profile_id
+    assert f"Instruction profile: {profile.profile_id}" in prompt
 
 
 def _decide(router, *, phase: IterativeDecisionPhase):
