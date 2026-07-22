@@ -34935,3 +34935,81 @@ full pytest PID / exit code: 35152 / 0
 下一步 Stage 172 冻结为专用 evidence-entailment 二分类器：只用 runtime-safe query/evidence 特征，
 在 train 上做 grouped 五折 OOF 的模型与阈值选择，并要求每折 safety non-regression。request 层继续作为
 实验输入，clarification taxonomy 作为独立未解决 gate；dev/test、answer E2E 和默认启用继续关闭。
+
+## 2026-07-22 - Stage 172 Evidence-Entailment 嵌套交叉验证
+
+目标：验证专用二分类器能否替代 Stage 171 不安全的生成式 evidence layer。实验严格只使用冻结的
+562 条 train；每个问题构造 initial Top10 与 initial+original-RRF 去重 final 两个视图，共 1,124
+个 case，同一问题的两个视图始终属于同一 fold。dev/test、答案生成、Agent turn、retry、fallback
+和默认 runtime 全部关闭。
+
+协议在运行前冻结为 29 个 runtime-safe 聚合特征、balanced logistic 与 histogram GBDT 两个模型族、
+0.10..0.90 步长 0.05 的 17 个阈值，共 34 个 spec。使用 grouped nested five-fold：inner OOF
+选择 family+threshold，outer heldout 只预测一次；另做完整 train OOF 选择未来 refit spec。gold
+只用于 fit/evaluation，不进入 feature，也不写 private case row。
+
+正式 PID `32332` 第一次运行即自然 exit 0。562 个问题、112,400 条 Top200 candidate、1,124 个
+view 全部构建成功；442 个 sufficient、682 个 insufficient。全部 17 个 process guard 通过，公开
+报告未发现 raw question/answer/document、private sample ID 或 gold document ID。
+
+Nested OOF 结果：
+
+```text
+balanced accuracy:                    0.603887
+ROC AUC:                              0.762910
+initial-visible compose:              0.280000  fail (>= 0.70)
+alternate-only inspect:               0.967391  pass (>= 0.50)
+alternate-only final compose:         0.108696  fail (>= 0.70)
+alternate-only exact path:            0.076087  fail (>= 0.40)
+insufficient final compose:           0.088136  pass (<= 0.20)
+```
+
+五个 outer inner loop 都是 0 个 eligible spec；outer 选择为 fold 1-4 的 histogram GBDT 0.80
+和 fold 5 的 0.85。五折 false-compose 分别为 0.135593/0.094340/0.083333/0.065574/
+0.064516，全部安全；但 exact path 为 0/0/0.222222/0.058824/0.133333，全部低于目标。
+完整 train OOF 诊断最优 spec 是 histogram GBDT 0.75，5/5 fold 安全，但 initial compose
+0.371429、final compose 0.152174、exact path 0.086957，仍不 eligible。
+
+客观结论：聚合特征有一定排序能力（AUC 0.76291），但在严格 safety operating point 上无法同时保留
+可回答证据。正式状态为 `stage172_no_grouped_oof_safe_evidence_classifier`、
+`candidate_selected=false`。没有注册模型、没有进入 runtime E2E、没有打开 dev/test，也没有修改
+默认 runtime。下一阶段必须继续 train-only，研究直接 question-to-passage semantic evidence scoring，
+而不是把本次失败候选接入 Agent。
+
+资源结果：wall 99.675895 秒，其中 evidence replay/case build 94.862135 秒、nested CV 4.674951
+秒；CPU time 405.578125 秒；working set 峰值 4.273 GiB、结束时 private usage 5.020 GiB、边界
+最小系统可用内存 3.669 GiB。未加载 GPU 模型，generation call 为 0。正式进程只由一条 PowerShell
+命令启动一个 PID，并在该命令中直接执行一次 `Wait-Process` 等待自然结束；没有轮询、wait timeout、
+kill、restart、retry 或 partial continuation。工具通道只对仍在执行的同一 shell cell 做了一次挂起等待，
+没有另启监控命令。
+
+6 张 SVG 覆盖 OOF gate/rate、五折 safety/path、inner eligible spec 和 label distribution；6/6
+XML parse，6/6 独立 Edge profile 渲染成功并完成视觉核验。数值与 JSON 一致，无空图、标签或条形
+溢出。Edge stderr 只有既有 QQBrowser profile 提示，所有 PNG 均成功写入。
+
+真实失败和修正完整保留：初始只读审计一次因 Windows wildcard path 直接传给 `rg` 而 exit 1；
+之后一次搜索又因 `src\\ts_rag_agent\\config*` 不是合法 Windows path 而 exit 1，两次均未修改文件。
+full-train OOF patch 的工具输出曾被会话截断，因此没有假定成功，而是通过显式源码搜索确认落盘。
+首轮 focused check 发现 1 个 unused import，同时 3 张比例图漏传必需的 `x_label`，真实结果为
+`8 passed, 1 failed` 且 Ruff failed；修复后 Stage 167/169/172 相关回归为 `26 passed`。正式实验
+第一次即成功，不存在失败重跑。第一次文档+日志联合补丁又因错误假设日志尾部上下文而原子失败，未修改
+任何文件；确认真实末尾后拆分为两个补丁成功写入。
+
+current-source public report SHA-256：
+
+```text
+48d0309e98d044f2cc89fa42526ef9c5da1c8bf9e7b2e188a60c372f8c7dd827
+```
+
+最终 current-source 仓库验证：
+
+```text
+Stage 167/169/172 focused regression: 26 passed in 2.71s
+full repository Ruff lint: passed
+three-file Ruff format check: passed
+full repository pytest: 992 passed, 1 warning in 11.30s
+full pytest PID / exit code: 30464 / 0
+```
+
+warning 是既有 FastAPI/Starlette `TestClient` deprecation。完整 pytest 只启动一个进程，并在同一条
+PowerShell 命令里对该 PID 执行一次 `Wait-Process` 等待自然结束。
