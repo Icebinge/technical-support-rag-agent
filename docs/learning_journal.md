@@ -34428,3 +34428,156 @@ full pytest exit code / stderr bytes: 0 / 0
 `Wait-Process`，没有分段轮询，也没有 pytest timeout、monitor deadline、kill、
 restart、retry 或 fallback，并自然结束。warning 是既有 FastAPI/Starlette
 `TestClient` deprecation。
+
+## 2026-07-22 - Stage 167 真实预生成证据门控与嵌套五折
+
+目标：延续 Stage 166 的 train-only 结论，补充真正有变化的检索后、生成前证据信号，
+再用严格 nested CV 判断能否安全地选择性隔离对话历史。本阶段始终不加载 dev/test，
+不运行 Agent 或模型生成，不改 runtime default，也不加入 fallback。用户此前明确反对
+线上逐问重建耗时候选池，因此本阶段的正式边界是：离线训练分析只重放一次冻结的
+Stage 161 多路索引；未来若门控成立，线上特征只能从已有检索结果计算，不能增加第二次
+候选池构建。
+
+### 数据来源与真实性边界
+
+Stage 165 私有产物保存了 candidate/generation/verification context SHA-256，但没有保存
+逐候选文档和特征行。因此 Stage 167 的特征不是“Stage 165 当时已经捕获的逐候选特征”，
+而是对冻结 Stage 161 契约的确定性 train-only 重算：Stage 116 exact Top200 多路融合，
+再复现当前 query-overlap Top10。报告明确记录
+`not_direct_stage165_candidate_capture=true`。样本通过 frozen train `sample_id` 的 SHA-256
+与 Stage 165 private identity 一一对齐；562 个训练问题全部得到 evidence summary，
+其中 421 个 post-first paired case 进入 nested CV。
+
+正式运行共构建 112400 个内存 candidate feature row，不写逐 case 或逐 candidate 私有行。
+初始化已有本地稀疏/稠密通道 1 次，执行 562 次 train-only query retrieval；模型下载、
+Agent turn、router/composition/verification generation、dev/test load 和 fallback action 均为 0。
+Stage 161 原始测量中索引构建约 50 秒、562 问特征构建约 48 秒，本次最终 current-source
+运行对应耗时为 `38.446931s` 和 `47.21338s`。这是一次离线训练成本，不是新加入的
+线上逐请求候选池构建。
+
+### 冻结特征与 nested CV
+
+从已有 Top200/Top10 检索结果汇总 27 个 numeric evidence feature，包括 RRF top1/top2
+margin 与 Top10 spread、多路/稀疏/稠密命中一致性、best route rank、query-overlap Top10
+与原 RRF prefix 的重合度、query/title/heading/body coverage、特殊词命中和 BM25 Top10
+占比。27 个特征在 421 个 case 上全部非恒定；例如：
+
+```text
+rrf top1-top2 margin:       0.000022 .. 0.039806, 399 unique
+top1 route hits:            5 .. 7, 3 unique
+selection baseline max rank: 10 .. 200, 159 unique
+selection prefix overlap:   0 .. 10, 10 unique
+selection query coverage:   0.287356 .. 1.0, 365 unique
+```
+
+运行时输入只允许 27 个 evidence feature、`question_route` 和 turn position。answerable、
+gold document/rank、selected action、refusal/F1/citation outcome 及本阶段的 benefit/harm label
+全部禁止作为 runtime feature。
+
+paired outcome 仅在训练侧生成两个监督目标：`beneficial` 表示 isolation 对该 case 的所有
+适用指标非退化且至少一项严格改善，`harmful` 表示任一适用质量或安全指标退化。421 个
+case 中 beneficial/harmful/neutral 为 `51/34/336`。模型族冻结为 balanced logistic 与
+histogram GBDT；benefit threshold 6 个、harm threshold 7 个，共 84 个 spec，family
+SHA-256 为：
+
+```text
+788277b1616276ee5be6c8acae2286ae9fdd7997bd043d2a0b44bb32672ce33f
+```
+
+每个 outer fold 仅使用其余四折。阈值选择不是在 outer-train 拟合值上直接完成：对每个
+model family 再对四个 training fold 产生 leave-one-fold-out prediction，只接受 aggregate
+和每个 inner held-out fold 同时满足 answerable refusal/F1/citation 与 unanswerable false
+answer 四项非退化、且 aggregate 至少一项严格改善的 spec。选中后在 outer 四折 refit，
+对 outer held-out fold 只预测一次。没有读取 held-out outcome 后反调模型或阈值。
+
+### 正式结果
+
+五个 outer fold 的 inner-eligible spec 数分别为 `58/35/0/0/11`。选择结果依次为：
+
+```text
+fold 0: logistic, benefit >= 0.45, harm <= 0.15
+fold 1: histogram GBDT, benefit >= 0.45, harm <= 0.35
+fold 2: no eligible spec; keep synthetic-history baseline
+fold 3: no eligible spec; keep synthetic-history baseline
+fold 4: histogram GBDT, benefit >= 0.65, harm <= 0.20
+```
+
+OOF gate 隔离 30/421 个 case，相对 always-synthetic：
+
+```text
+answerable refusal count delta:       +1
+answerable F1 sum delta:              -0.135593
+answerable average F1 delta:          -0.000500343173
+gold citation count delta:             0
+unanswerable false-answer delta:      +2
+strict-nonregression folds:            3 / 5
+```
+
+fold 0 新增 3 次 unanswerable false answer；fold 1 虽减少 1 次 false answer，但新增 1 次
+answerable refusal且 F1 降低 `0.135593`；fold 2/3 保持 baseline；fold 4 选择 2 个 case 但
+全部指标持平。真实结论为
+`primeqa_hybrid_stage167_evidence_gate_not_train_safe`，`candidate_selected=false`。
+即使增加真实的预生成 evidence 特征，这个 history-isolation gate 仍无法跨折同时守住质量
+和安全，不能继续为它打开 dev，更不能接入 runtime。下一方向冻结为停止该门控分支，开始
+Agent capability 工作；test 继续关闭。
+
+最终 current-source public report SHA-256：
+
+```text
+1b80dda06b8be004d100fb6130d8433ab2ee1608378a98a669ac2e08d1abd5e7
+```
+
+### 可视化、失败过程与验证
+
+生成 6 张正式 SVG：OOF metric delta、各折隔离数、inner eligible spec 数、label 分布、
+各折 safety delta 和 guard 状态，6/6 均通过 XML parse。关键 OOF delta SVG 用 Edge
+headless 渲染为 ignored PNG 并实际查看；标题、四项标签、正负条形和数值均清晰无重叠。
+Edge stderr 只有既有 `QQBrowser user data path not found` 提示，exit 0 且 PNG 写入成功。
+
+实现与执行中的真实失败没有覆盖：
+
+- 两批初始只读并行定位分别因 Windows wildcard 路径和猜错 Stage 161 脚本名而整体返回
+  失败；随后改用 `rg --files` 和真实路径。另一次 all-settled 读取中只有一个无匹配 `rg`
+  exit 1，其余读取成功。三者均未修改文件。
+- 首轮 focused run 是 `4 passed, 2 failed`，并发现 3 个 unused import；失败来自 SVG helper
+  参数名写成旧式 `data`，以及 Typer 长帮助文本在当前终端宽度被截断。修正后第二轮为
+  `5 passed, 1 failed`：测试把 `encoder_device` 中的字符串 `dev` 误判成 development 参数。
+  改为检查明确 split 参数名后为 `6 passed`；之后加入“缺失预测必须报错”及 feature matrix
+  回归，相关测试为 `29 passed`。
+- 首次 formal 进程 PID `51852` 在 1.4 秒内 exit 2：`Start-Process` 把带空格的
+  confirmation note 拆成额外 CLI 参数。失败发生在 Typer 参数解析阶段，没有加载数据、
+  索引或运行 CV，也没有生成报告。改用无空格等义标识后的 replacement PID `55056`
+  自然 exit 0。
+- replacement 成功后又把 `always_isolated` 诊断控制与正式预测路径完全分开，并规定正式
+  spec 缺预测立即报错。因为源码已变化，没有把旧报告冒充 current-source；最终又运行
+  current-source replacement PID `10212`，自然 exit 0。两次成功运行的 outer spec、OOF
+  指标与 decision 完全一致，只有真实耗时和报告哈希变化。
+- 提交前差异审计发现 inner eligibility 曾用整个 metrics dataclass 是否变化表示“至少一项
+  严格改善”，其中 `isolated_selection_count` 也会触发变化。它可能把只选择中性 case 的
+  spec 误算为有收益。修正为只接受四项业务指标正确方向的严格改善，并增加回归测试；
+  相关测试变为 `30 passed`。最终 strict-gain replacement PID `56924` 自然 exit 0，
+  inner eligible 数、outer spec、OOF 指标和 decision 与前两次成功运行完全一致。
+- 三次成功正式运行的 stderr 各 276 bytes，仅为两个本地 dense encoder 的权重加载进度，
+  无 traceback、CUDA OOM 或 runtime error。
+
+Stage 167 replacement、current-source replacement 和 strict-gain replacement 都各自由
+一条 PowerShell 指令启动一个 PID 后直接执行一次 `Wait-Process`，没有状态轮询、
+PowerShell `Wait-Process -Timeout`、kill、restart、自动 retry 或 fallback。首次 CLI
+参数解析失败后的 replacement 明确保留并记录为修正重跑，不伪装为首次成功。
+
+最终 current-source 验证：
+
+```text
+Stage167 focused pytest: 9 passed
+Stage161/166 related regression: 30 passed in 2.69s
+three-file Ruff format check: passed
+full repository Ruff lint: passed
+full repository pytest: 929 passed, 1 warning in 11.94s
+full pytest exit code / stderr bytes: 0 / 0
+```
+
+严格收益修正前曾完成一次 full pytest，PID `37076` 的真实结果为 `928 passed`。由于随后
+修正代码并新增 1 个测试，最终 current-source full pytest 由同一条 PowerShell 命令创建
+PID `40296` 后直接执行 `Wait-Process`，自然结束为 `929 passed`。两次均没有分段轮询、
+pytest timeout、monitor deadline、kill、restart、retry 或 fallback。warning 是既有
+FastAPI/Starlette `TestClient` deprecation。
