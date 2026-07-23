@@ -35592,3 +35592,89 @@ fold F1 与 quality gates 四张关键图实际渲染为 PNG；前三张中的 `
 `1060 passed, 1 warning in 29.90s`。进程对象 `HasExited=True`，child `ExitCode` 字段为空，
 外层命令返回 0，stderr 为 0 bytes；没有把空 child 字段伪报成 0。warning 仍是既有
 FastAPI/Starlette `TestClient` deprecation。
+
+## 2026-07-23 - Stage 181 Counterfactual Composition Action Audit
+
+Stage 181 按用户确认的严格 A 标准开展反事实 composition action 审计：一个动作只有在 citation
+不下降、answer F1 不下降且至少一项严格改善时，才标记为 `strict_expected`。本阶段只使用冻结的
+562 条 train，其中 370 条可回答；dev/test、fallback、Stage 178B 和默认 runtime 均保持关闭，
+也没有进行策略选择或上线。动作空间覆盖删除 answer slot、从前 12 条候选句替换 slot、短答案追加、
+保留前缀、document coverage、lead-preserving coverage，以及 Stage 180 实际嵌套 OOF 动作；完全
+相同的结果序列会去重，同时保留动作别名和 Stage 180 对齐信息。
+
+结果分类固定为 `dual_gain`、`citation_gain_f1_tied`、`f1_gain_citation_preserved`、
+`citation_gain_f1_loss`、`citation_loss`、`citation_preserved_f1_loss` 和 `neutral`。共审计
+12,298 行，其中 370 行是 baseline control，11,928 行是唯一非 baseline 动作；每题 32-34 个动作，
+均值 33.237838。严格成功动作共 5,668 个，占 0.475184；364/370 题至少有一个严格成功动作。
+各类数量为：F1 提升且 citation 保持 5,408、双增益 257、citation 提升且 F1 持平 3、neutral
+378、citation 提升但 F1 下降 104、citation 下降 721、citation 保持但 F1 下降 5,057。
+因此严格成功主要来自仅改善 F1；真正安全提高 citation 的动作只有 260/11,928，约 2.1797%。
+
+反事实 oracle 在 364/370 题上选择动作，citation `+58`，370 题平均 F1 delta `+0.111694`，
+被选动作平均 F1 delta `+0.113535`。Stage 180 的实际动作中，179/370 被判为严格成功，比例
+0.483784；其总体 citation `+31`、平均 F1 `-0.000493`，因此不能通过严格 A。其分类为：
+双增益 26、仅 F1 增益 152、citation 增益且 F1 持平 1、citation 增益但 F1 下降 10、citation
+下降 6、citation 保持但 F1 下降 144、neutral 31。主要动作来源为 baseline 9、
+document coverage 8、replace slot 2 为 9、replace slot 3 为 23、Stage 180 selected 为 321。
+
+动作族结果显示目标存在明显冲突：`delete_slot2` 严格成功率 0.537838，但平均 citation
+`-0.059459`；`stage180_selected` 成功率 0.507788，平均 citation `+0.096573`、平均 F1
+`+0.001273`；`document_coverage` 平均 citation `+0.043796`，但平均 F1 `-0.031401`。
+route 的严格成功率从 error/log 的 0.534461 到 security remediation 的 0.258065 不等，后者
+只有 2 题，不据此作广泛结论。
+
+固定五折 grouped OOF class-balanced logistic 只使用 runtime 可见的动作特征。OOF AUC
+`0.551504`、AP `0.513067`、基准阳性率 `0.475184`；五折 AUC 为
+`0.490306/0.597378/0.574898/0.560955/0.541652`。每题 top1 命中严格成功动作 212/370
+（0.572973），top3 为 293/370，top5 为 325/370。全覆盖 top1 的 citation `+5`、370 题平均
+F1 `+0.007358`，但只有 4/5 折不回退。10%/25%/50%/100% coverage 的严格成功 precision
+分别为 0.648649/0.526882/0.583784/0.572973；citation delta 为 -2/+2/+6/+5；全题平均 F1
+delta 为 +0.001832/+0.002511/+0.007107/+0.007358；fold non-regression 为 3/5、4/5、4/5、
+4/5。结论是单一 `strict_expected` 二分类目标不能稳定兼顾 citation 与 F1；下一阶段应分别建模
+citation gain 和 F1 regression risk，而不是直接启用本阶段模型。
+
+正式运行共三次并全部如实保留。attempt 1 使用 PID `22760`，单次 `Wait-Process` 等待自然结束，
+因 Stage 180 baseline reproduction guard 不通过而判为无效；产物归档到
+`artifacts/stage181_attempt1_invalid_baseline_guard/`。attempt 2 使用 PID `23288`，加入诊断后
+确认实际 baseline F1 为 0.199876，与历史四舍五入值 0.2004 相差 0.000524；citation 183/183
+完全一致，Stage 180 paired citation `+31` 和 F1 `-0.000493` 也完全一致。该轮仍按当时的精确
+F1 guard 判无效，并归档到 `artifacts/stage181_attempt2_invalid_baseline_guard_diagnostics/`。
+用户随后明确选择 A，只把历史 baseline F1 的绝对容差改为 0.001，citation 和 paired delta
+仍要求精确一致；边界测试覆盖 0.001 通过、0.001001 失败。attempt 3 使用 PID `17468`，同样只用
+一次 `Wait-Process` 等待自然结束，22/22 process guards 通过并形成正式结果。
+
+三次尝试间还观察到很小的模型数值漂移：attempt 1/2 的 AUC/AP 为 0.551511/0.513100，top1
+严格成功 214，citation `+5`、F1 `+0.008196`；attempt 3 为 0.551504/0.513067、212、`+5`、
+`+0.007358`。固定 seed 和数据未变，差异仅能归因于 CPU 数值与近似并列排序的微小变化；它不
+改变模型区分度偏弱的结论。
+
+attempt 3 wall 为 `176.994119` 秒，working set 峰值 `4,029,288,448` bytes，private 峰值
+`5,472,903,168` bytes，系统最小可用内存 `1,789,669,376` bytes，CPU time `535.78125`
+秒，CUDA allocated/reserved 均为 0。共 562 次 provider call、9,714 个 pair，只构建一次资源、
+只完成一次 Agent collection pass，无 retry、fallback 或重启。
+
+实现过程中的真实修正包括：首次 Ruff format 检查发现 3 个文件需格式化；随后 Ruff 发现 scatter
+SVG 的 4 个 E501 长行并已拆分；首轮测试 8 passed、1 failed，原因是测试和 guard 用包含
+`answer` 的模糊规则误伤合法 runtime 特征 `answer_signal_score`，已改为精确私有字段和 gold/
+citation/F1 标签检查，之后通过。进度输出也改为直接枚举 370 条可回答题，确保最终显示 370/370。
+另有一次 PowerShell 汇总尝试因语法解析错误未执行，未产生文件修改；随后用数组收集方式成功重跑。
+
+7/7 SVG 均通过 XML parse。bar chart 实际查看正常；family citation/F1 scatter 初版标签重叠，
+已改为无标签散点加右侧固定图例。CairoSVG 渲染尝试真实失败于 `ModuleNotFoundError`，未伪报成功；
+随后使用全新 GUID Edge profile 重渲染，修正图
+`family_citation_f1_scatter_verified_3d1abb1ea7db49aa978110c31624f930.png` 通过实际检查。
+视觉修正只重生成 SVG，没有改写正式 JSON。首次补录 Stage 181 日志时因使用重复 warning 尾句定位，
+区块被插到 Stage 168 前；检查标题顺序后用 `apply_patch` 删除并追加到真实文件末尾。
+
+Stage 181 public report SHA-256：
+
+```text
+a9c557d7346eb2b4958cddd2505937eba828556c7671d7e936bf883d80cfe88b
+```
+
+最终 current-source 验证：Stage 181 focused tests `10 passed in 1.00s`；Stage 180+181 tolerance
+相关回归 `22 passed`；5 个 Stage 181 Python 文件 Ruff format check passed；full repository Ruff
+lint passed。完整 pytest 只启动 PID `11608`，同一条 PowerShell 命令只调用一次 `Wait-Process`
+并等待自然结束，结果为 `1070 passed, 1 warning in 20.98s`；进程对象 `HasExited=True`，child
+`ExitCode` 字段为空，外层命令返回 0，stderr 为 0 bytes。warning 仍是既有 FastAPI/Starlette
+`TestClient` deprecation。
