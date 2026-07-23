@@ -91,7 +91,7 @@ def render_horizontal_bar_chart_svg(
             ),
             '<rect width="100%" height="100%" fill="#ffffff" />',
             (
-                "<style>text{font-family:Arial, sans-serif;font-size:13px;"
+                "<style>text{font-family:'Poppins';font-size:13px;"
                 "fill:#111827}.title{font-size:18px;font-weight:700}"
                 ".axis{fill:#4b5563;font-size:12px}.grid{stroke:#e5e7eb}"
                 ".bar-value-inverted{fill:#fff;font-weight:600}"

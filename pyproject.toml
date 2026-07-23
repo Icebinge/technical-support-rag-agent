@@ -37,15 +37,27 @@ app = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
 ]
+visualization = [
+  "Pillow>=10,<13",
+  "resvg_py==0.3.3",
+]
 dev = [
   "httpx>=0.28",
+  "Pillow>=10,<13",
   "pytest>=8.2",
+  "resvg_py==0.3.3",
   "ruff>=0.6",
   "tomli>=2.0; python_version < '3.11'",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+ts_rag_agent = [
+  "assets/fonts/poppins/OFL.txt",
+  "assets/fonts/poppins/*.ttf",
+]
 
 [tool.ruff]
 line-length = 100
