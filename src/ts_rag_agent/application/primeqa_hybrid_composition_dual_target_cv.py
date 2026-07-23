@@ -20,6 +20,8 @@ from ts_rag_agent.application.composition_action_audit import (
     summarize_action_rows,
 )
 from ts_rag_agent.application.composition_dual_target_policy import (
+    DualTargetPrediction,
+    SelectedAction,
     run_nested_dual_target_selection,
     stage182_policy_specs,
 )
@@ -54,11 +56,16 @@ _SOURCE_HASHES = {
     "stage181": "a9c557d7346eb2b4958cddd2505937eba828556c7671d7e936bf883d80cfe88b",
 }
 _FORBIDDEN_PUBLIC_KEYS = stage181._FORBIDDEN_PUBLIC_KEYS | {
+    "outer_predictions",
     "selected_actions",
     "runtime_features",
 }
 
 ProgressSink = Callable[[Mapping[str, Any]], None]
+PrivateDiagnosticSink = Callable[
+    [Sequence[ActionAuditRow], Sequence[SelectedAction], Sequence[DualTargetPrediction]],
+    None,
+]
 
 
 @dataclass(frozen=True)
@@ -82,6 +89,7 @@ def run_stage182_composition_dual_target_cv(
     documents_path: Path,
     encoder_batch_size: int = 64,
     progress_sink: ProgressSink | None = None,
+    private_diagnostic_sink: PrivateDiagnosticSink | None = None,
 ) -> dict[str, Any]:
     """Run the train-only Stage 182 nested dual-target policy experiment."""
 
@@ -183,6 +191,9 @@ def run_stage182_composition_dual_target_cv(
         total_question_count=_EXPECTED_ANSWERABLE,
     )
     selected_actions = dual_target.pop("selected_actions")
+    outer_predictions = dual_target.pop("outer_predictions")
+    if private_diagnostic_sink is not None:
+        private_diagnostic_sink(action_rows, selected_actions, outer_predictions)
     tracker.capture("nested_dual_target_ready")
     analyzed_at = time.perf_counter()
 

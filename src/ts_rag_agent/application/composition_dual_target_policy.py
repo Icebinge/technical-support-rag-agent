@@ -153,6 +153,7 @@ def run_nested_dual_target_selection(
     question_count = total_question_count or len({row.question_key for row in rows})
 
     outer_selected: list[SelectedAction] = []
+    outer_predictions: list[DualTargetPrediction] = []
     outer_reports: dict[str, Any] = {}
     model_head_fit_count = 0
     for outer_fold in fold_ids:
@@ -208,6 +209,7 @@ def run_nested_dual_target_selection(
             )
             model_head_fit_count += 2
             heldout_predictions = outer_heads.predict(outer_heldout)
+            outer_predictions.extend(heldout_predictions)
             heldout_selected = select_dual_target_actions(
                 heldout_predictions,
                 spec=selected_spec,
@@ -277,6 +279,7 @@ def run_nested_dual_target_selection(
             )
         ),
         "selected_actions": tuple(outer_selected),
+        "outer_predictions": tuple(outer_predictions),
     }
 
 
@@ -326,13 +329,13 @@ def select_dual_target_actions(
         best = max(
             grouped[question_key],
             key=lambda row: (
-                _policy_utility(row, spec.score_mode),
+                dual_target_utility(row, spec.score_mode),
                 row.citation_gain_probability,
                 -row.f1_regression_probability,
                 row.row.action.action_id,
             ),
         )
-        utility = _policy_utility(best, spec.score_mode)
+        utility = dual_target_utility(best, spec.score_mode)
         if utility_threshold is not None and utility < utility_threshold:
             continue
         selected.append(
@@ -410,7 +413,7 @@ def _learn_coverage_threshold(
         grouped[prediction.row.question_key].append(prediction)
     top_utilities = sorted(
         (
-            max(_policy_utility(row, spec.score_mode) for row in question_rows)
+            max(dual_target_utility(row, spec.score_mode) for row in question_rows)
             for question_rows in grouped.values()
         ),
         reverse=True,
@@ -419,7 +422,9 @@ def _learn_coverage_threshold(
     return float(top_utilities[target - 1])
 
 
-def _policy_utility(prediction: DualTargetPrediction, mode: ScoreMode) -> float:
+def dual_target_utility(prediction: DualTargetPrediction, mode: ScoreMode) -> float:
+    """Combine the two runtime probabilities with a frozen Stage 182 utility."""
+
     citation = prediction.citation_gain_probability
     risk = prediction.f1_regression_probability
     if mode == "citation_only":

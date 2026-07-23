@@ -65,7 +65,10 @@ def test_stage181_reproduction_checks_all_frozen_aggregates() -> None:
 
 
 def test_public_safety_detects_private_dual_target_rows() -> None:
-    assert stage182._forbidden_keys_found({"selected_actions": []}) == {"selected_actions"}
+    assert stage182._forbidden_keys_found({"selected_actions": [], "outer_predictions": []}) == {
+        "outer_predictions",
+        "selected_actions",
+    }
     assert stage182._forbidden_keys_found({"aggregate": {"count": 3}}) == set()
 
 

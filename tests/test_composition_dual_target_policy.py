@@ -161,6 +161,7 @@ def test_nested_selection_uses_inner_folds_and_returns_public_aggregates() -> No
     assert result["aggregate"]["mean_f1_delta_all_questions"] == 0.2
     assert result["aggregate"]["strict_aggregate_pass"] is True
     assert "selected_actions" in result
+    assert len(result["outer_predictions"]) == 30
     assert all(report["selected_spec"] for report in result["outer_folds"].values())
 
 
