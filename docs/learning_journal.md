@@ -35508,3 +35508,87 @@ Stage 179 public report SHA-256：
 自然完成，结果为 `1048 passed, 1 warning in 18.31s`，stderr 为空，外层命令返回 0。
 进程对象确认 `HasExited=True`，但 child `ExitCode` 字段为空，记录中未伪造该字段。warning
 仍是既有 FastAPI/Starlette `TestClient` deprecation。
+
+## 2026-07-23 - Stage 180 Runtime-Visible Citation-Aware Composition 嵌套交叉验证
+
+Stage 180 根据 Stage 179 的 `context_to_citation_conversion` 归因，冻结比较 8 个规则策略和
+6 个 learned dual-target 策略。实验只使用 562 条 train，其中 370 条可回答；外层为冻结五折，
+每个外折内部再做四折 OOF 选择。learned 策略同时拟合 gold-document logistic classifier 与
+sentence-token-F1 ridge regressor，共完成 20 个 inner partition、25 次双头拟合，也就是精确
+50 个 model-head fits。运行时特征只包括 question/route、sentence/score、document title、
+retrieval score 与 context rank；gold 只用于拟合标签和离线评估。没有 fallback，dev/test、
+Stage 178B 和默认 runtime 始终关闭。
+
+正式运行共发生三次尝试，均如实保留。attempt 1 的 PID 为 `3416`，已完成 562 题 collection、
+五个 outer nested selection 和 562 题 paired Agent，但在写图时因调用共享 SVG API 使用了错误的
+`left_margin` 参数而抛出 `TypeError`；没有生成正式 JSON，不能算完成实验。失败日志保存在
+`artifacts/stage180_attempt1_visualization_api_failure/`。修正为 `margin_left` 并增加真实 SVG API
+回归测试后，attempt 2 的 PID 为 `20308`，只输出 `sources_authorized` 就静默退出，stderr 为空，
+也没有报告。Windows Application/System 事件中没有 crash/OOM 记录，也没有 dump；当时系统可用
+内存为 `3.401 GiB`，因此只能记录内存不足为可能原因，不能声称已确认 OOM。其日志保存在
+`artifacts/stage180_attempt2_silent_exit_after_authorization/`。
+
+清理环境后系统可用内存增至 `5.421 GiB`，attempt 3 使用原冻结配置
+`encoder_batch_size=64` 和 PID `16120`。同一条 PowerShell 命令只调用一次 `Wait-Process`，
+一直等待该 PID 自然结束，wall tool time 为 `288.3` 秒。Windows `Start-Process` 对象的 child
+`ExitCode` 字段仍为空，故没有伪报该字段；外层 shell 返回 0，正式 JSON、6 张 SVG 和 21/21
+process guards 完整，stderr 只有两组模型权重加载进度。本次正式分析自身 wall 为
+`279.823876` 秒，完成 1,686 个 Agent turns、1,686 次 score-provider calls 和 29,142 个
+完整 pairs，无 retry、fallback、restart 或 partial continuation。
+
+五个 outer fold 依次选择 `rule_context_rank_coverage_top3`、`dual_c50_f50_cap1`、
+`dual_c75_f25_cap1`、`rule_context_rank_coverage_top3`、`dual_c75_f25_cap1`。严格 paired Agent
+结果如下：
+
+```text
+metric                         baseline   candidate   delta
+answerable average token F1   0.2004     0.1999      -0.0005
+gold citation count           183        214         +31
+gold citation rate            0.4959     0.5799      +0.0840
+context gold-hit count         257        257          0
+request p95 seconds           0.144237   0.148896    +0.004659
+```
+
+2,000 次 paired bootstrap 的 answer-F1 delta 为 `-0.000493`，95% CI
+`[-0.010720, 0.009508]`；gold-citation-rate delta 为 `+0.083784`，95% CI
+`[0.051351, 0.118919]`。五折 citation delta 为 `+6/+13/+1/+6/+5`，全部改善；F1 delta
+为 `+0.0069/+0.0104/-0.0160/-0.0015/-0.0031`，只有 2/5 折非回退。549/562 个 verified
+answer 发生变化；可回答题中 181 个 F1 改善、32 个持平、157 个变差。context 完全不变，
+context-to-citation 从 `183/257=0.712062` 提升到 `214/257=0.832685`，证明策略确实解决了
+部分引用转化问题，但没有同步保持答案内容 F1。
+
+11 个冻结质量 gate 中 8 个通过。失败项是 answerable F1 strict gain、F1 bootstrap CI lower
+非负、F1 至少 4/5 折 non-regression。正式状态为
+`stage180_citation_aware_composition_insufficient`，`candidate_selected=false`；因此不进入
+Stage 181 frozen validation，不默认启用，也不打开 dev/test。下一方向必须重新设计 composition
+目标或策略族，不能把本策略作为兜底偷偷启用。
+
+资源统计为进程内事件采样而非轮询：working set 峰值 `4,774,424,576` bytes（约 4.447 GiB），
+private usage 峰值 `5,700,812,800` bytes（约 5.309 GiB），系统最小可用内存
+`2,069,917,696` bytes（约 1.928 GiB），CPU time `1350.65625` 秒。本次 tracker 报告 CUDA
+allocated/reserved 均为 0；这只是本次正式进程的真实记录，不借用其他阶段 GPU 数据。
+
+过程补录时第一次 `apply_patch` 因学习日志末行换行上下文不匹配而整体拒绝，协议和日志均未发生
+部分写入；随后核验文件未变，再分别按真实上下文补录。该文档操作失败不影响正式实验产物。
+
+Stage 180 public report SHA-256：
+
+```text
+3605db66c11a3a9f527bfe44f9a442e6d139b114766c8d7d0edd2a0286f53be1
+```
+
+可视化不能只凭 XML parse 判定通过。6/6 SVG 解析成功后，将 aggregate F1、fold citation、
+fold F1 与 quality gates 四张关键图实际渲染为 PNG；前三张中的 `fold_f1_delta` 暴露出最大负值
+的数值标签侵入分类标签区，首次浏览器渲染还因复用 Edge profile 出现标题显示不完整。检查 SVG
+源确认正式数值与标题均正确，缺陷位于共享 signed bar 的标签布局和浏览器渲染隔离。随后全局修正
+共享 `svg_charts`：只有外置负值标签会撞入分类区时，才自动移入红色条形并使用高对比文字；短负值
+仍保持外置。新增回归测试同时覆盖碰撞负值、非碰撞负值和正值。使用独立 Edge profile 重渲染后，
+标题、五折标签和所有数值完整分离，图面通过实际检查。修正只重生成 6 张 SVG，没有重跑或改写
+正式指标 JSON，其 SHA-256 保持不变。
+
+视觉修正后的 focused tests 为 `12 passed in 1.02s`。最终 current-source 验证：6 个本阶段 Python
+文件 Ruff format check passed；full repository Ruff lint passed；完整 pytest 只启动 PID `26808`，
+同一条 PowerShell 命令只调用一次 `Wait-Process` 并等待自然结束，结果为
+`1060 passed, 1 warning in 29.90s`。进程对象 `HasExited=True`，child `ExitCode` 字段为空，
+外层命令返回 0，stderr 为 0 bytes；没有把空 child 字段伪报成 0。warning 仍是既有
+FastAPI/Starlette `TestClient` deprecation。

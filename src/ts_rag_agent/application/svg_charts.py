@@ -45,11 +45,20 @@ def render_horizontal_bar_chart_svg(
             value_x = x + bar_width + 8
             anchor = "start"
             fill = "#2563eb"
+            value_class = ""
         else:
             x = zero_x - bar_width
-            value_x = x - 8
-            anchor = "end"
             fill = "#dc2626"
+            estimated_label_width = max(1, len(bar.value_label)) * 8
+            external_label_left = x - 8 - estimated_label_width
+            if external_label_left <= margin_left - 4:
+                value_x = x + 8
+                anchor = "start"
+                value_class = ' class="bar-value-inverted"'
+            else:
+                value_x = x - 8
+                anchor = "end"
+                value_class = ""
         label_y = y + 21
         bar_lines.append(
             "\n".join(
@@ -60,7 +69,8 @@ def render_horizontal_bar_chart_svg(
                         f'<rect x="{x}" y="{y + 6}" width="{bar_width}" '
                         f'height="22" rx="3" fill="{fill}" />'
                     ),
-                    f'<text x="{value_x}" y="{label_y}" text-anchor="{anchor}">'
+                    f'<text x="{value_x}" y="{label_y}" text-anchor="{anchor}"'
+                    f"{value_class}>"
                     f"{escape(bar.value_label)}</text>",
                 ]
             )
@@ -77,14 +87,15 @@ def render_horizontal_bar_chart_svg(
             f'<title id="{chart_id}-title">{escape(title)}</title>',
             (
                 f'<desc id="{chart_id}-desc">Horizontal bar chart showing '
-                f'{escape(x_label)} for {len(bars)} categories.</desc>'
+                f"{escape(x_label)} for {len(bars)} categories.</desc>"
             ),
             '<rect width="100%" height="100%" fill="#ffffff" />',
             (
-                '<style>text{font-family:Arial, sans-serif;font-size:13px;'
-                'fill:#111827}.title{font-size:18px;font-weight:700}'
-                '.axis{fill:#4b5563;font-size:12px}.grid{stroke:#e5e7eb}'
-                '</style>'
+                "<style>text{font-family:Arial, sans-serif;font-size:13px;"
+                "fill:#111827}.title{font-size:18px;font-weight:700}"
+                ".axis{fill:#4b5563;font-size:12px}.grid{stroke:#e5e7eb}"
+                ".bar-value-inverted{fill:#fff;font-weight:600}"
+                "</style>"
             ),
             f'<text x="24" y="32" class="title">{escape(title)}</text>',
             (
