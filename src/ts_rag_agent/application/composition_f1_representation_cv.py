@@ -275,10 +275,7 @@ def run_f1_representation_cv(
     if not selected_regressions:
         raise ValueError("Stage184 requires Stage182 selected F1 regressions")
 
-    feature_indices = {
-        "raw": {_row_key(row): dict(row.runtime_features) for row in rows},
-        "question_relative": _question_relative_feature_index(rows),
-    }
+    feature_indices = build_composition_feature_indices(rows)
     specs = stage184_representation_specs()
     predictions_by_spec: dict[str, list[F1RepresentationPrediction]] = {
         spec.name: [] for spec in specs
@@ -391,6 +388,17 @@ def run_f1_representation_cv(
             "private_prediction_count": sum(len(rows) for _ in specs),
             "public_prediction_rows_written": 0,
         },
+    }
+
+
+def build_composition_feature_indices(
+    rows: Sequence[ActionAuditRow],
+) -> dict[str, dict[tuple[str, str], dict[str, Any]]]:
+    """Build raw and label-free question-relative action feature indices."""
+
+    return {
+        "raw": {_row_key(row): dict(row.runtime_features) for row in rows},
+        "question_relative": _question_relative_feature_index(rows),
     }
 
 

@@ -35956,3 +35956,74 @@ format check passed。完整 pytest 只启动 PID `26932`，同一条 PowerShell
 `Wait-Process` 并等待自然结束，没有轮询或实验监控时限；结果为
 `1099 passed, 1 warning in 25.98s`。进程对象 `HasExited=True`，child `ExitCode` 字段为空，
 记录中未伪造为 0；warning 仍是既有 FastAPI/Starlette `TestClient` deprecation。
+
+## 2026-07-23 - Stage 186 Citation/F1 联合约束排序嵌套交叉验证
+
+Stage 186 严格执行 Stage 185 冻结的 train-only 协议：只读取 562 条 train 与冻结五折，
+在 370 条可回答训练问题、12,298 个候选动作上进行 5 outer × 4 inner 的嵌套交叉验证。
+dev/test、Stage 178B、runtime E2E、replacement policy、默认启用与 fallback 全部保持关闭。
+gold citation/F1 只作为训练标签和离线评估标签，不进入 runtime-visible feature；公开报告没有
+持久化逐动作私有行或 prediction。
+
+本阶段新增独立的联合约束排序模块、PrimeQA runner、CLI 和两组测试。每个
+raw/question-relative × logistic/histogram bundle 共享 vectorizer 与 feature matrix，
+分别拟合 `citation_loss`、`f1_loss`、`strict_gain` 三个 head，再把预测共享给冻结的三种
+ranking rule、三种 safety margin 与两种 gain margin，总计 72 个 policy config。
+20 个 inner partition 与 5 个 outer refit 共完成严格预算内的 300/300 次 model-head fit，
+产生 209,066 个只存在于私有内存的 prediction，公开写出 0 行 prediction。raw bundle 为
+140 个特征，question-relative bundle 为 798 个特征。
+
+五个 outer fold 都存在 inner-eligible config，数量依次为 25、51、52、48、60；但最终五折
+都选择 `max_safety_risk_lexicographic`。held-out 聚合选择改变 130/370 题，却没有选择任何
+strict-success、citation-gain、citation-loss 或 F1-regression 动作；相对原始 baseline 的
+citation delta 为 0，mean F1 delta 为 0。2,000 次 paired bootstrap 的两项 95% CI 都精确为
+`[0, 0]`。
+
+该策略修复了 Stage 182 的 55 个 F1 regression 中的 53 个，repair rate 为 `0.963636`，
+并且没有新增回退；但这是回到 zero-delta baseline-like action 所得到的保守结果，不是有效
+增益。它同时丢失 Stage 182 相对 baseline 的 `+5` citation 与 `+0.005249` mean F1。
+130 个 changed action 全部不是 strict success，因此 strict-success precision 为 0。Stage 185
+设置的非平凡性门槛如预期阻止了这种 safety-only collapse。
+
+三个 selected-bundle held-out head 的 ROC AUC/AP 分别为：
+`citation_loss 0.863981/0.360039`、`f1_loss 0.605203/0.537792`、
+`strict_gain 0.602056/0.543826`。citation-loss 可分性已经较强，但 F1-loss 与 strict-gain
+仍然偏弱，最大安全风险排序最终压过 gain signal。12 个 advancement gate 通过 11 个，唯一
+失败项是 `strict_success_precision >= 0.65`，实际为 0。正式状态为
+`stage186_joint_constraint_ranking_insufficient`；实验有效，但 candidate family 不接受，
+不授权 full-train policy selection、runtime E2E、dev/test 或默认启用，也没有事后放宽规则、
+重试或换用弱候选。
+
+首次内存预检只有 3.558 GiB 可用；用户清理后再次预检为 4.822 GiB，期间没有终止任何用户
+进程。正式 PID `37344` 由同一条 PowerShell 指令调用一次 `Wait-Process` 等到自然结束，
+没有轮询、实验 timeout、重启、partial continuation、fallback 或 OOM。Stage 182 复现耗时
+`285.910042` 秒，联合 nested CV `524.757007` 秒，总 wall `810.669327` 秒；model fit
+`403.261122` 秒，CPU time `2400.015625` 秒。working set 峰值 3.739 GiB，private usage
+峰值 3.458 GiB，系统最小可用内存 3.345 GiB，CUDA allocated/reserved 均为 0。
+
+首版 8 张 SVG 全部有效，但把 private prediction count、fit count 与 GiB 放在同一坐标尺度，
+表达不合理。没有重跑实验，也没有修改指标；只从已持久化的聚合结果生成 v2，将执行计数与
+内存 GiB 拆成两张图，并更新报告的 visualization list。9/9 张 v2 SVG 均通过 XML parse，
+再由固定 `resvg_py==0.3.3`、项目内 Poppins 字体且无字体 fallback 的链路栅格化，所有 PNG
+均非空；两张替换图按原始分辨率实际打开检查，标题、标签、数值、比例均完整，无重叠或裁切。
+中间报告哈希
+`b563790dae40993bde0438bc5344acdc0bddb30f722107321dc93895eae71199`
+仅因可视化清单更新而被最终版本替代，实验结果没有变化。最终正式报告 SHA-256：
+
+```text
+a3aee4190aca1f71f2cd3c611675a8b69090e41eee00fdae0515bce55edf02f4
+```
+
+最终 resvg manifest SHA-256：
+
+```text
+8bd16f76b60244cd3ca4765b1b1cb2d532bf72af360eb55a012f22f5f67fb297
+```
+
+最终 current-source 验证：Stage 186 focused tests 为 `8 passed in 3.24s`；full repository
+Ruff lint passed；6 个相关 Python 文件 Ruff format check passed。完整 pytest 只启动 PID
+`40436`，原 PowerShell 命令只调用一次 `Wait-Process` 并等待自然结束；执行工具只把仍在运行
+的同一 command cell yield 一次，随后继续等待该 cell，没有发出第二条进程查询或第二次
+`Wait-Process`。结果为 `1107 passed, 1 warning in 27.48s`，`HasExited=True`，child
+`ExitCode` 字段为空且没有伪造为 0；warning 仍是既有 FastAPI/Starlette `TestClient`
+deprecation。
