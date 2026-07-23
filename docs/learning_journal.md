@@ -36027,3 +36027,87 @@ Ruff lint passed；6 个相关 Python 文件 Ruff format check passed。完整 p
 `Wait-Process`。结果为 `1107 passed, 1 warning in 27.48s`，`HasExited=True`，child
 `ExitCode` 字段为空且没有伪造为 0；warning 仍是既有 FastAPI/Starlette `TestClient`
 deprecation。
+
+## 2026-07-23 - Stage 187 题内增益敏感排序协议冻结
+
+Stage 187 没有继续调整 Stage 186 的 margin，而是依据正式失败模式重构下一次实验的学习目标。
+Stage 181 的 370 题中有 364 题至少存在一个 strict action，共 5,668 个 strict action；
+Stage 182 曾选中 69 个 strict-success action，得到 citation `+5`、mean F1 `+0.005249`，
+但有 55 个 F1 regression。Stage 186 修复 53/55 regression 且没有新增损失，却在 130 个
+changed question 中选中 0 个 strict success，citation/F1 都回到 0，相对 Stage 182 分别损失
+5 和 `0.005249`。五个 outer fold 全部选择 `max_safety_risk_lexicographic`，而 held-out
+citation-loss/F1-loss/strict-gain AUC 为 `0.863981/0.605203/0.602056`，证明候选空间和
+citation 安全信号存在，真正瓶颈是连续 safety risk 在排序中压倒较弱 gain signal。
+
+Stage 187 冻结 Stage 188 的两个题内 gain ranker。`pairwise_pareto_logistic` 使用同题动作
+runtime feature difference；strict-gain tier 高于 safe-zero，safe-zero 高于 unsafe；
+同一非 unsafe tier 内只保留 citation/F1 componentwise Pareto 可比较 pair，trade-off pair
+直接忽略，不编造标量偏好。两个方向都生成，按题平衡权重，全部可比较 pair 保留且不抽样。
+`linear_listnet_top_frontier` 使用整题完整 action list，target distribution 均匀分配给最高
+可用 outcome tier 内的 citation/F1 Pareto frontier；全量 action 保留、不抽 list。优化器固定为
+零初始化 full-batch Adam、learning rate `0.05`、L2 `0.001`、最多 400 iteration、
+gradient tolerance `1e-7`、patience 20。
+
+安全约束继续由 citation-loss 与 F1-loss 两个独立 head 给出，但不再把连续风险逐级排在 gain
+之前。每题先计算两项概率相对各自题内最小值的 excess，再取 joint excess；admissible action
+定义为 `joint_excess <= min_question_joint_excess + margin`。margin 固定
+`0/0.02/0.05/0.10`。该集合对任意非空候选集在数学上必然非空，因此不需要 fallback。
+frontier 内先最大化 gain score，再最小化 joint excess，最后按 canonical action order
+打破精确并列。
+
+候选网格为 2 个 feature representation × 2 个 safety estimator × 2 个 gain ranker ×
+4 个 frontier margin，共 32 个 policy config。继续使用冻结 5 outer × 4 inner 的
+question-grouped nested CV。每个 representation/partition 拟合四个 safety model 与两个
+gain ranker，两个 representation 合计每 partition 12 fit；20 个 inner partition 加 5 个
+outer refit 的最大预算仍为 300 fit。
+
+inner eligibility 除 aggregate citation/F1 非负和至少 3/4 fold nonregression 外，新增
+changed questions 至少 10%、strict success 至少 inner questions 的 8%、strict-success
+precision 至少 0.60。inner lexicographic objective 首先最大化 strict-success count 与
+precision，再最小化 F1 regression 与 citation loss，然后比较 citation/F1 gain 和
+Stage 182 regression repair。无 eligible config 时只记录 no-eligible，不替换弱候选、不重试、
+不减 pair，也不启用兜底。
+
+最终 14 个 advancement gate 要求五个 outer 都有 eligible config、citation 至少 `+5`、
+mean F1 至少 `+0.005249`、两项 bootstrap 下界非负、两项至少 4/5 fold nonregression、
+strict success 至少 37 且 precision 至少 0.65、citation loss 不超过 4、F1 regression
+不超过 27、修复至少 50% Stage 182 regression、新 regression rate 不超过 2%，且至少改变
+37 题。citation/F1 下限直接等于 Stage 182 的已观测增益，防止再次接受“更安全但更差”的解；
+F1 regression 上限要求相对 Stage 182 的 55 个至少减半。
+
+资源协议要求 pair difference 使用 sparse matrix，按 partition 和 representation 依次构造，
+histogram dense matrix 必须先释放，禁止抽样。若 Stage 188 预检内存不足则不启动正式运行，
+请求释放资源而不是降低协议。正式长进程必须对同一 PID 使用一次 PowerShell `Wait-Process`
+等待自然结束，不轮询、不设置实验 timeout。
+
+正式 Stage 187 只读取并 fingerprint Stage 181-186 六份公开聚合报告，所有固定 SHA-256 与
+status 一致。41/41 guard 全部通过；train/dev/test rows、pair rows、listwise questions、
+model fits 与 policy evaluation 均为 0，retry/fallback 也为 0。正式状态为
+`stage187_gain_sensitive_ranking_protocol_frozen`，只授权 Stage 188 train-only nested
+实验，不授权 dev/test、full-train selection、runtime E2E、replacement policy、Stage 178B
+或默认启用。冻结总耗时 `0.055598` 秒，不属于需要进程监控的长任务。正式报告 SHA-256：
+
+```text
+b6125e28f532774dd2137374f6a236520f71e247c774eca1e4d8c078f31e21b2
+```
+
+8/8 SVG 均通过 XML parse，再由固定 `resvg_py==0.3.3`、显式项目内 Poppins 字体且无字体
+fallback 的链路栅格化。八张 PNG 均非空并按原始分辨率逐张实际打开检查，标题、长
+guard/gate 名称、零值、条形和坐标说明完整，无裁切或重叠。resvg manifest SHA-256：
+
+```text
+d803e4057e5cf7ea30ef37b536ec170bab02e10a272088ffc27f562befe98076
+```
+
+实现新增协议冻结模块、CLI 与四个定向测试。首轮验证真实发现 Ruff E731：测试夹具把 lambda
+赋给局部变量；同时 guard 数断言误写为 39，实际为 41。协议逻辑本身另外三个测试已通过。
+将 lambda 改为局部函数并修正真实 guard 数后，定向验证为 `4 passed in 0.10s`，三个相关
+Python 文件 Ruff lint 与 format check 全部通过。
+
+最终 current-source 验证：Stage 185-187 protocol-chain regression 为
+`15 passed in 7.50s`；full repository Ruff lint passed；3 个 Stage 187 Python 文件 Ruff
+format check passed。完整 pytest 只启动 PID `16340`，原 PowerShell 命令只调用一次
+`Wait-Process` 并等待自然结束；执行工具只 yield 一次仍在运行的同一 command cell，随后继续
+等待该 cell，没有发出第二条进程查询或第二次 `Wait-Process`。结果为
+`1111 passed, 1 warning in 26.94s`，stderr 为空，`HasExited=True`，child `ExitCode`
+字段为空且没有伪造为 0；warning 仍是既有 FastAPI/Starlette `TestClient` deprecation。
