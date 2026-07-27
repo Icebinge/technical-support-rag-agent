@@ -20,6 +20,7 @@ from ts_rag_agent.application.composition_dual_target_policy import (
     SelectedAction,
 )
 from ts_rag_agent.application.composition_rank_capped_safety_pool import (
+    RankCappedSafetyPoolInnerDiagnosticSink,
     run_rank_capped_safety_pool_nested_cv,
 )
 from ts_rag_agent.application.svg_charts import BarDatum, render_horizontal_bar_chart_svg
@@ -67,6 +68,7 @@ def run_stage191_rank_capped_safety_pool_cv(
     documents_path: Path,
     encoder_batch_size: int = 64,
     progress_sink: stage182.ProgressSink | None = None,
+    inner_diagnostic_sink: RankCappedSafetyPoolInnerDiagnosticSink | None = None,
 ) -> dict[str, Any]:
     """Reproduce Stage 182 and run the authorized Stage 191 train-only CV."""
 
@@ -128,6 +130,7 @@ def run_stage191_rank_capped_safety_pool_cv(
         action_rows=private["action_rows"],
         stage182_selected_actions=private["selected_actions"],
         progress_sink=progress_sink,
+        inner_diagnostic_sink=inner_diagnostic_sink,
     )
     tracker.capture("rank_capped_safety_pool_nested_cv_complete")
     analyzed_at = time.perf_counter()

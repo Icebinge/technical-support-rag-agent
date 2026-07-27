@@ -36350,3 +36350,77 @@ help 正常。完整 pytest 启动唯一 PID `27508`，同一条 PowerShell 命�
 `Wait-Process` 等待自然结束，无轮询或 pytest timeout，结果为
 `1139 passed, 1 warning in 21.94s`。warning 仍为既有 FastAPI/Starlette `TestClient`
 deprecation；child `ExitCode` 字段为空并如实保留。
+
+## 2026-07-27 - Stage 192 高召回安全候选池失败归因
+
+Stage 192 在不打开 dev/test 的前提下完整复现 Stage 191，并通过可选 immutable inner-OOF
+diagnostic sink 流式归因全部 32 个冻结配置。正式选择和诊断共用同一候选池及 winner 构建路径；
+每个 strict-opportunity question context 被精确分为候选池排除、池内 ranker 漏选或最终选中三类。
+每个 outer snapshot 立即约简为公开聚合，未持久化 action/prediction 私有行，也没有新增归因拟合。
+
+正式运行先通过 Stage 191 报告 SHA-256 授权，并复现 15/15 检查、288 次拟合和原冻结输出。
+归因共消费 393,536 条 private bundle prediction，覆盖 5 个 outer context、1,480 个
+question context。参考轨迹在 fold 1/3/4/5 使用真实 selected eligible spec；fold 2 因无 eligible
+配置而使用确定性的 top-ineligible spec，因此这是 train-side inner-OOF 诊断轨迹，不是可部署策略结果。
+
+1,456 个 strict opportunity 的精确分解为：候选池排除 58、保留后被 ranker 漏选 500、strict
+选中 898，即 `1456 = 58 + 500 + 898`。候选池 recall 为 `0.960165`，池内条件 capture 为
+`0.642346`，实际 strict-opportunity capture 为 `0.616758`，baseline-change strict precision
+为 `0.611300`，unsafe selection rate 为 `0.352703`。500 个 ranker miss 中只有 35 个 winner
+是 safe-zero，465 个是 unsafe，故主瓶颈明确为 `within_pool_ranker_miss`，而不是继续扩大候选池。
+
+按 pool cap 聚合时，cap 从 4 增到 all 使 recall 从 `0.830185` 升至 `1.000000`，但条件 capture
+从 `0.464529` 降至 `0.422390`，unsafe rate 从 `0.227534` 升至 `0.282432`；cap 16 已达到
+`0.986607` recall。pairwise 相比 ListNet 的条件 capture 更高（`0.562369` 对 `0.313853`），
+但 unsafe rate 也更高（`0.319172` 对 `0.191132`）。raw 相比 question-relative 也呈现同一
+capture/safety 冲突。histogram 与 logistic safety estimator 的差异较小。报告中的四个单指标
+最优配置只表示各自 metric 的极值，不代表通过完整 eligibility 或 advancement gates。
+
+正式 PID `29444` 在同一条 PowerShell 命令中只调用一次 `Wait-Process` 等待自然结束；无轮询、
+实验 timeout、retry、partial continuation、fallback、OOM 或 CUDA allocation。Stage 191 复现加
+流式归因耗时 `999.665059` 秒，总 wall `999.668081` 秒，CPU time `2103.296875` 秒；working
+set 峰值 `5.719 GiB`、private 峰值 `3.435 GiB`、系统最小可用内存 `4.325 GiB`。23/23
+process guard 全部通过。PowerShell child `ExitCode` 字段为空，按事实保留为空而未伪造为 0。
+
+首轮 focused tests 为 `12 passed, 1 failed`：失败来自测试在错误的 JSON 层级读取
+`strict_selected_context_count`，而实现产生的 partition 本身精确；修正测试路径后为
+`13 passed in 1.42s`。Stage 184-192 交叉阶段回归随后为 `54 passed in 5.30s`，全仓 Ruff、
+CLI help 和 `pip check` 均通过。视觉审查发现 pool-cap 图沿字典顺序显示为 `16, 4, 8, all`，
+因此在不重跑模型、不修改正式指标的情况下，把图表展示顺序工程化固定为 `4, 8, 16, all`，
+并新增乱序输入回归断言；修改后的 focused tests 为 `5 passed in 1.57s`。
+
+12/12 SVG 均通过 XML parse，并由固定 `resvg_py==0.3.3`、项目内 Poppins 字体、无字体
+fallback 的链路重新栅格化。12 张 PNG 均非空并按原始分辨率逐张打开，标题、标签、数值、条形、
+坐标说明及 23 行 guard 均无裁切或重叠。正式报告 SHA-256：
+
+```text
+8f454c07b8889d7cbbb6e66f2a0ce1960c89f7197c88018334a587947133887f
+```
+
+resvg manifest SHA-256：
+
+```text
+9de94007254f8a46fc0e0860cf7ee72e7e39822727a35d69b25d2b7491428db1
+```
+
+正式状态为 `stage192_rank_capped_safety_pool_failure_attribution_complete`。Stage 192 没有冻结
+或授权 Stage 193、full-train policy、replacement、runtime E2E、dev/test 或默认启用；下一协议
+应围绕 safety-constrained within-pool reranker 另行设计并冻结，不能直接把某个单指标极值配置
+作为方案。
+
+第一轮 current-source 验证扩大到 Stage 184-192 的 16 个相关测试文件，实际结果为
+`64 passed in 5.19s`；full repository Ruff lint passed，7 个变更 Python 文件 Ruff format
+check passed，`pip check` 无损坏依赖，CLI help 与 `git diff --check` 均通过。完整 pytest 启动
+唯一 PID `19200`，同一条 PowerShell 命令只调用一次 `Wait-Process` 等待自然结束，得到
+`1144 passed, 1 warning in 23.82s`。
+
+提交前代码审阅随后发现 frozen dataclass 内部仍可能接收调用方提供的 mutable mapping，与文档的
+immutable snapshot 契约不完全一致。实现因此在 snapshot 构造时复制并冻结 inner fold IDs、各
+prediction sequence 与 bundle mapping，并新增直接验证源字典后续修改不会渗透、snapshot mapping
+不能赋值的测试。旧验证未冒充最终验证：修改后的相关回归重新运行并得到
+`65 passed in 4.90s`，全仓 Ruff 与 7 文件 format check 再次通过。最终完整 pytest 使用唯一
+PID `7848`，同一条 PowerShell 命令仍只调用一次 `Wait-Process` 等待自然结束，无轮询或 pytest
+timeout；执行工具随后只恢复同一个 command cell 的输出，没有发出第二条进程查询或第二次
+`Wait-Process`。最终结果为 `1145 passed, 1 warning in 21.73s`，stderr 为空，warning 仍是
+既有 FastAPI/Starlette `TestClient` deprecation。两次进程结束后的 PowerShell child
+`ExitCode` 字段都为空，均按事实保留为空。

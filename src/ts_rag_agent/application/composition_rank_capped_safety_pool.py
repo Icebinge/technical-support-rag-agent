@@ -6,7 +6,8 @@ import time
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from types import MappingProxyType
+from typing import Any, Literal, Protocol
 
 from ts_rag_agent.application.composition_action_audit import ActionAuditRow
 from ts_rag_agent.application.composition_dual_target_policy import SelectedAction
@@ -66,6 +67,36 @@ class RankCappedSafetyPoolDecision:
     baseline: GainSensitivePrediction
     pool: tuple[GainSensitivePrediction, ...]
     winner: GainSensitivePrediction
+
+
+@dataclass(frozen=True)
+class RankCappedSafetyPoolInnerOOFSnapshot:
+    """Ephemeral private Stage 191 inner-OOF state for streaming diagnostics."""
+
+    outer_fold_id: str
+    inner_fold_ids: tuple[str, ...]
+    question_count: int
+    predictions_by_bundle: Mapping[str, tuple[GainSensitivePrediction, ...]]
+    reference_spec_name: str
+    reference_kind: Literal["selected_eligible", "top_ineligible"]
+    eligible_config_count: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "inner_fold_ids", tuple(self.inner_fold_ids))
+        object.__setattr__(
+            self,
+            "predictions_by_bundle",
+            MappingProxyType(
+                {
+                    name: tuple(predictions)
+                    for name, predictions in self.predictions_by_bundle.items()
+                }
+            ),
+        )
+
+
+class RankCappedSafetyPoolInnerDiagnosticSink(Protocol):
+    def __call__(self, snapshot: RankCappedSafetyPoolInnerOOFSnapshot) -> None: ...
 
 
 @dataclass
@@ -252,6 +283,7 @@ def run_rank_capped_safety_pool_nested_cv(
     stage182_selected_actions: Sequence[SelectedAction],
     progress_sink: ProgressSink | None = None,
     representation_fitter: RepresentationFitter | None = None,
+    inner_diagnostic_sink: RankCappedSafetyPoolInnerDiagnosticSink | None = None,
 ) -> dict[str, Any]:
     """Run the frozen Stage 191 five-by-four train-only nested CV."""
 
@@ -354,6 +386,26 @@ def run_rank_capped_safety_pool_nested_cv(
         eligible_reports = [row for row in candidate_reports if row["eligible"]]
         ranked_reports = sorted(candidate_reports, key=_inner_selection_key)
         public_top_candidates = [_public_candidate(row) for row in ranked_reports[:5]]
+        diagnostic_reference = (
+            min(eligible_reports, key=_inner_selection_key)
+            if eligible_reports
+            else ranked_reports[0]
+        )
+        if inner_diagnostic_sink is not None:
+            inner_diagnostic_sink(
+                RankCappedSafetyPoolInnerOOFSnapshot(
+                    outer_fold_id=outer_fold_id,
+                    inner_fold_ids=inner_fold_ids,
+                    question_count=inner_question_count,
+                    predictions_by_bundle={
+                        name: tuple(bundle_predictions)
+                        for name, bundle_predictions in inner_predictions.items()
+                    },
+                    reference_spec_name=diagnostic_reference["spec"]["name"],
+                    reference_kind=("selected_eligible" if eligible_reports else "top_ineligible"),
+                    eligible_config_count=len(eligible_reports),
+                )
+            )
         if not eligible_reports:
             outer_reports[outer_fold_id] = {
                 "inner_question_count": inner_question_count,
@@ -374,7 +426,7 @@ def run_rank_capped_safety_pool_nested_cv(
             )
             continue
 
-        selected_report = min(eligible_reports, key=_inner_selection_key)
+        selected_report = diagnostic_reference
         selected_spec = _spec_from_dict(selected_report["spec"])
         selected_spec_counts[selected_spec.name] += 1
         selected_pool_cap_counts[str(selected_spec.pool_cap)] += 1
