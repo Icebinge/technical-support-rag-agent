@@ -36760,3 +36760,74 @@ manifest: 812187c175f474ee562f86d8cef7df6762710b88387692069f621b469353ece2
 正式状态为 `stage202_top1_joint_objective_protocol_frozen`，只授权 Stage 203 train-only experiment；development/test、full-train policy selection、replacement、runtime E2E、Stage 178B 与默认启用均保持关闭。下一阶段按冻结协议实现自定义 group objective、17-cell nested CV、消融统计与资源追踪，正式长进程必须用同一 PID 的单次 PowerShell `Wait-Process` 等待自然结束。
 
 最终验证中，全库 Ruff lint、3 个新增 Python 文件 format check、`pip check`、CLI help 与 `git diff --check` 全部通过；Stage 198-202 定向回归为 `31 passed in 1.52s`。首次准备完整测试时，执行工具拒绝了不受支持的 `timeout_ms=0`，命令在创建 PID 前终止，没有遗留进程。随后 Python PID `10328` 用单次 `Wait-Process` 自然结束，pytest 为 `1220 passed, 1 warning in 42.50s`；PowerShell post-wait `ExitCode` 为空，命令尾部把空值按数值比较误判为 wrapper failure，但 pytest stdout 已到达 100%、stderr 为空。之后由于 outer-refit 契约字段发生真实更名，最终源码另用唯一 Python PID `30628` 完整验证；同一条 PowerShell 命令仍只调用一次 `Wait-Process`，不轮询、不设置 pytest timeout，结果为 `1220 passed, 1 warning in 40.93s`，stderr 为空。最终 post-wait `ExitCode` 仍为空，按事实保留为未知，没有为补写退出码再次运行；warning 仍是既有 FastAPI/Starlette `TestClient` deprecation。
+## 2026-07-27 - Stage 203 分组 Top-1 联合目标嵌套交叉验证
+
+Stage 203 严格执行 Stage 202 冻结的 train-only 协议：固定 Stage 196 的 cap-16
+候选池、baseline union、source 模型与 13 项 inner eligibility，不打开 dev/test，
+在 5x4 nested CV 中比较 16 个 `safety weight x precision weight` 自定义 grouped
+Top-1 objective 和 1 个 Stage 196 精确控制。自定义目标逐题构造 capture、safety、
+precision 分布，并通过组内 softmax 交叉熵向 LightGBM 提供梯度和正对角 Hessian；
+所有拟合都验证唯一 baseline、组大小、行数、权重归一化和有限梯度/Hessian。
+
+第一轮定向测试暴露并修正了四个真实工程问题：测试 target 构造器最初没有按组归一化
+sample weight；adjacent-weight 比较使用的 `zip(strict=True)` 与少一个元素的切片不匹配；
+LightGBM 把 sample weight 传为 float32，原 `1e-12` 容差过严；可调用对象被 LightGBM
+深拷贝后无法在原实例上观察 callback count。最终实现改用闭包 callback、`1e-7` 权重
+容差和真实 callback/tree 计数。LightGBM 的 300 trees 是上限而非伪造的固定实耗；正式
+数据中 320 个 custom fit 均实际使用 300 trees。
+
+第一次正式 PID `25956` 完成 Stage 182 复现和 fold 1 的四个 inner partition，累计
+80 fits 后触发 `KeyError: 'top_inner_evaluation'`。原因是实现按错误的扁平字段读取
+Stage 199，而真实报告把控制证据放在 `top_inner_candidates`。该次没有生成 Stage 203
+正式 JSON。修正后实现严格定位唯一
+`source_weighted_classifier + gain_only` candidate，同时要求
+`control_reproduction_exact=true`；新增缺失控制候选必须失败的负向测试，真实 Stage 199
+五折全部通过解析。这个失败和修正没有伪装成首次成功。
+
+第二次正式 PID `17584` 在同一条 PowerShell 命令中只使用一次 `Wait-Process` 等待自然
+结束；没有轮询、实验 timeout、算法 retry、fallback、OOM 或 CUDA allocation。正式
+wall 为 `617.379649` 秒，其中依赖与内存授权 `0.950319` 秒、Stage 182 精确复现
+`220.968605` 秒、Stage 203 nested CV `395.460724` 秒。实际执行 400 fits、108,000
+棵 LightGBM trees、983,840 条 private prediction、340 次 group-contract validation 和
+96,000 次 custom callback；因五个 outer context 都没有 eligible config，outer refit 为
+0。38/38 process guard 全部通过，公开训练行和 prediction 行均为 0。
+
+五折 inner top candidate 全部是 Stage 196 exact control，而不是新 objective。其
+conditional capture 为 `0.643357-0.689046`、strict precision 为
+`0.632509-0.674825`、unsafe rate 为 `0.295681-0.338983`。冻结边界分别为 capture
+`>=0.68`、precision `>=0.65`、unsafe `<=0.25`，并带有原有质量与 per-fold 条件；没有
+任何配置在任何 outer context 同时满足全部条件，所以 eligible count 为
+`0/0/0/0/0`。正式 aggregate 的零值表示协议禁止 outer evaluation，不是测得策略质量
+为零。
+
+方向响应给出关键结论：增加 safety weight 的 12/12 个相邻比较都使 unsafe rate 不升；
+但增加 precision weight 的 12/12 个相邻比较都使 strict success precision 下降，而且
+惩罚增大也持续牺牲 strict capture。全 inner 聚合中，控制的 strict count/precision/
+capture/unsafe 为 `923 / 0.655075 / 0.641418 / 0.314189`；strict-only custom objective
+为 `863 / 0.610325 / 0.599722 / 0.336486`。因此失败不是简单的权重范围不足，而是当前
+precision target 把 strict 与 baseline 同时设为正质量后，学到的排序与最终 changed-answer
+precision 指标方向不一致。该结论是 Stage 203 网格的观测关联，不伪装为一般因果结论。
+
+正式状态为 `stage203_top1_joint_objective_insufficient`：实验有效，但候选族被拒绝；
+full-train selection、replacement、runtime E2E、dev/test 与默认启用全部关闭。17 项推进
+门槛只通过 4 项；由于没有 outer evaluation，其余外层质量、bootstrap、覆盖和 repair
+门槛按协议 fail closed。下一阶段不应扩大同一权重网格或放宽 gate，而应先归因
+control-to-custom 的逐题排序翻转，把 baseline abstention、strict displacement、safe-zero
+和 unsafe selection 分开，再决定是否采用独立 change/abstain head、conditional strict
+ranker 或新的 calibration constraint。
+
+16/16 SVG 使用固定 `resvg_py==0.3.3`、项目 Poppins 字体、白底、无 fallback 路径完成
+栅格化；manifest 确认所有 PNG 非空且存在非背景像素，三个关键图按原始分辨率目视检查
+无裁切或重叠。正式产物哈希为：
+
+```text
+report:   b675d61a2c79d9fcd74639f6a9e4caf1de3da29205018e4b34343fae79340317
+manifest: c63b2052bd98ea2eac2542f6ec0345310974f1a2b11bf615b29c640eb667b4da
+```
+
+current-source 验证中，全库 Ruff lint、5 个变更 Python 文件 format check、`pip check`、
+CLI help 和 `git diff --check` 全部通过；Stage 194-203 相关回归为
+`85 passed in 15.32s`。完整 pytest 使用唯一 Python PID `25668`，同一条 PowerShell 命令
+只调用一次 `Wait-Process` 等待自然结束，无轮询或 pytest timeout，结果为
+`1236 passed, 1 warning in 44.28s`；warning 仍是既有 FastAPI/Starlette `TestClient`
+deprecation。
