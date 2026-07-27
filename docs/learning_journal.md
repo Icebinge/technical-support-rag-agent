@@ -36177,3 +36177,100 @@ resvg manifest SHA-256：
 
 文档写入时，第一次长补丁因一行缺少补丁前缀被工具原子拒绝，没有产生部分写入；随后拆分为
 专项报告创建与日志追加两次原子操作并成功完成。
+
+## 2026-07-27 - Stage 189 增益敏感排序失败归因
+
+Stage 189 没有继续凭经验调 Stage 188 的安全 margin，而是在完全复现 Stage 188 的同时增加
+流式 inner OOF 归因。每个 outer context、每道题和全部 32 个配置中的 strict opportunity 都被
+严格分到三类之一：被 safety frontier 排除、保留后被 gain ranker 漏选、最终选中。实现把单题
+选择封装为不可变 decision，并通过可选 diagnostic sink 输出一个 outer snapshot；正式选择和诊断
+共用同一条决策路径，避免复制算法。公开报告只保留聚合，不写出 action 或 prediction 私有行。
+
+正式运行复现 12/12 个 Stage 188 检查、240 次 model fit 和 393,536 个私有 prediction，新增
+归因拟合为 0。top-ineligible trajectory 共 1,480 个 question context，其中 1,456 个存在 strict
+opportunity；精确分解为 frontier exclusion `1,280`、retained ranker miss `27`、strict selected
+`149`。frontier strict-question recall 仅 `0.120879`，但条件 ranker capture 为 `0.846591`，
+实际 strict opportunity capture 为 `0.102335`，strict action retention 只有 `0.030655`。
+五个 outer context 的 frontier exclusion 均为 253-260，而 ranker miss 仅为 1-12；filter harm/
+rescue 为 `688/14`。结论是主瓶颈明确为 `safety_frontier_exclusion`，而不是 gain ranker。
+
+margin 从 `0.00` 放宽到 `0.10` 时 frontier recall 只从 `0.014423` 升到 `0.079499`；pairwise
+Pareto logistic 的条件 capture `0.754116` 高于 ListNet 的 `0.509330`。最佳 family config 的
+frontier recall 也只有 `0.135989`。因此 Stage 189 没有强行冻结预声明的 ranker-focused Stage 190
+分支，也没有授权训练、dev/test、runtime E2E、replacement policy 或默认启用。
+
+正式 PID `25024` 由一条 PowerShell 命令中的一次 `Wait-Process` 等待自然结束；无轮询、实验
+timeout、重启、partial continuation、fallback 或 OOM。总 wall `871.946186` 秒，CPU time
+`1889.656250` 秒，working set 峰值 5.004 GiB，private 峰值 3.475 GiB，系统最小可用内存
+3.456 GiB，CUDA allocated/reserved 均为 0；24/24 process guard 通过。
+
+正式运行后发现一个术语歧义：原 `strict_selection_precision` 实际是相对原始 baseline 的变更
+精度，不是 Stage 188 相对 Stage 182 reference 的冻结门槛。它和分母被明确改名为
+`baseline_change_strict_precision` 与 `baseline_changed_context_count`。这是对已持久化聚合 JSON
+的结构迁移，没有重算指标、重跑模型、重载 prediction 或改变决策。初始报告哈希为：
+
+```text
+2ef733d9e36fca2ee3f2d79a1521a405c343d6039b33ce0dbc08d73dd9a1a0d5
+```
+
+修正后的正式报告 SHA-256：
+
+```text
+48af548168e4e40972c4082fc24bec822ce264427f12c56b98a8d0966df2e5a0
+```
+
+12 张 SVG 经固定 resvg/Poppins/无字体 fallback 链路转成 PNG，并按原始分辨率逐张打开检查，
+无裁切、重叠或空图。resvg manifest SHA-256：
+
+```text
+886237bd108645cac015d43d5a8418f0e06fc322b364bbca425370cf4bebfcd7
+```
+
+首轮定向测试曾有 1 个真实失败：旧的纯算法单元测试没有提供 baseline，而新 decision 暂时把它
+设为必填。实现随后明确区分算法层可选 baseline 与 Stage 189 诊断层必需 baseline；修正后为
+`17 passed`，Stage 184-189 相关回归为 `38 passed`。
+
+## 2026-07-27 - Stage 190 安全风险排序候选池协议冻结
+
+Stage 190 根据 Stage 189 的主瓶颈另行冻结协议，没有篡改 Stage 189 的预声明分支。它只读取
+修正后的公开聚合报告和固定 SHA-256，不加载 train rows，不拟合模型，不生成 prediction，也不
+打开 dev/test。新方案先按 `max(p(citation loss), p(F1 loss))` 升序、风险和升序、canonical
+action order 构建安全风险排序池，再测试 `4/8/16/all` 四个 cap；每个池始终并入唯一原始
+baseline，因此非空，但没有 fallback 分支。池内继续使用 Stage 188 的 gain ranker 精排。
+
+Stage 191 网格固定为 2 个 representation x 2 个 safety estimator x 2 个 gain ranker x 4 个
+pool cap，共 32 个配置。5 outer x 4 inner、每 partition 12 次拟合，最大仍为 300 次；pair 与
+list 全量保留，不抽样。除复用 Stage 188 全部 inner eligibility 外，新增 aggregate strict-
+opportunity pool recall `>= 0.80`，并要求至少 3/4 inner fold 各自 `>= 0.70`；最终 advancement
+gate 为原 14 项加 held-out pool recall `>= 0.80`，共 15 项。无 eligible config 时只记录失败，
+禁止换弱候选、重试或兜底。
+
+正式冻结耗时 `0.002538` 秒，34/34 guard 通过，状态为
+`stage190_rank_capped_safety_pool_protocol_frozen`。只授权 Stage 191 train-only experiment；
+dev/test、runtime E2E、full-train/replacement policy、Stage 178B 与默认启用仍关闭。正式报告
+SHA-256：
+
+```text
+6558798d6cee0cedb7b01fb864cda749e3f8e63793535ce764acbfaabbb6e07b
+```
+
+8 张协议 SVG 经同一固定链路栅格化并逐张打开检查，candidate grid、fit budget、recall gate、
+decision flag 和 34 个 guard 名称均完整清晰。resvg manifest SHA-256：
+
+```text
+dc945b86dd9e437c43d05562a488e74cca8be4dff306067897b1e00edb0d6d07
+```
+
+Stage 190 实现完成后的 Stage 189/190 定向测试为 `20 passed in 3.13s`。最终扩大到 Stage
+184-190 的相关回归为 `41 passed in 4.68s`；full repository Ruff lint passed，本次 11 个
+Python 文件 Ruff format check passed。完整 pytest 启动 PID `26576`，在同一条 PowerShell
+命令中只调用一次 `Wait-Process` 等待自然结束，没有轮询或 pytest timeout，结果为
+`1131 passed, 1 warning in 23.21s`。warning 仍是既有 FastAPI/Starlette `TestClient`
+deprecation；进程结束后 PowerShell 的 child `ExitCode` 字段为空，因此如实记录为空而没有伪造
+为 0，pytest 输出本身完整到达 100% 并给出上述通过摘要。
+
+完整验证前第一次命令因包含旧日志 `Remove-Item` 被工具策略在启动进程前拒绝，没有创建 PID；
+第二次把执行器 `timeout_ms` 误设为 0，被解释为 26 毫秒立即超时。随后一次状态核验确认没有
+pytest 进程、也没有新日志，因此没有发生孤立进程或重复实验。最终有效运行才创建 PID `26576`；
+本地 PowerShell 的 `Wait-Process` 没有设置时长参数，外层执行通道只使用传输上限防止再次提前
+切断本地等待。

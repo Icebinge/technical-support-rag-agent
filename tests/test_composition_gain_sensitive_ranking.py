@@ -182,10 +182,12 @@ def test_nested_cv_uses_all_partitions_and_frozen_fit_budget() -> None:
         )
     )
 
+    snapshots = []
     report = ranking.run_gain_sensitive_nested_cv(
         action_rows=rows,
         stage182_selected_actions=(),
         representation_fitter=_fake_representation_fitter,
+        inner_diagnostic_sink=snapshots.append,
     )
 
     assert report["execution"]["model_fit_count"] == 300
@@ -195,6 +197,10 @@ def test_nested_cv_uses_all_partitions_and_frozen_fit_budget() -> None:
     assert report["aggregate"]["strict_success_precision"] == 1.0
     assert report["aggregate"]["gold_citation_delta"] == 10
     assert report["aggregate"]["mean_f1_delta"] == 0.1
+    assert len(snapshots) == 5
+    assert all(snapshot.question_count == 8 for snapshot in snapshots)
+    assert all(len(snapshot.predictions_by_bundle) == 8 for snapshot in snapshots)
+    assert all(snapshot.eligible_config_count == 32 for snapshot in snapshots)
 
 
 def _spec(*, margin: float) -> GainSensitivePolicySpec:

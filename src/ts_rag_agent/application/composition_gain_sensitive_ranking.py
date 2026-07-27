@@ -71,6 +71,33 @@ class GainSensitivePrediction:
 
 
 @dataclass(frozen=True)
+class GainSensitiveQuestionDecision:
+    """One question's learned frontier and selected actions."""
+
+    question_key: str
+    baseline: GainSensitivePrediction | None
+    frontier: tuple[GainSensitivePrediction, ...]
+    winner: GainSensitivePrediction
+    unfiltered_winner: GainSensitivePrediction
+
+
+@dataclass(frozen=True)
+class GainSensitiveInnerOOFSnapshot:
+    """Ephemeral private inner-OOF state exposed to an in-process diagnostic."""
+
+    outer_fold_id: str
+    inner_fold_ids: tuple[str, ...]
+    question_count: int
+    predictions_by_bundle: Mapping[str, tuple[GainSensitivePrediction, ...]]
+    top_candidate_spec_name: str
+    eligible_config_count: int
+
+
+class GainSensitiveInnerDiagnosticSink(Protocol):
+    def __call__(self, snapshot: GainSensitiveInnerOOFSnapshot) -> None: ...
+
+
+@dataclass(frozen=True)
 class PairwiseTrainingData:
     """Sparse comparable-pair training data and public-safe counts."""
 
@@ -226,6 +253,7 @@ def run_gain_sensitive_nested_cv(
     stage182_selected_actions: Sequence[SelectedAction],
     progress_sink: ProgressSink | None = None,
     representation_fitter: RepresentationFitter | None = None,
+    inner_diagnostic_sink: GainSensitiveInnerDiagnosticSink | None = None,
 ) -> dict[str, Any]:
     """Run the frozen Stage 188 five-by-four nested ranking experiment."""
 
@@ -339,10 +367,22 @@ def run_gain_sensitive_nested_cv(
             )
 
         eligible_reports = [row for row in candidate_reports if row["eligible"]]
-        public_top_candidates = [
-            _public_candidate(row)
-            for row in sorted(candidate_reports, key=_inner_selection_key)[:5]
-        ]
+        ranked_candidate_reports = sorted(candidate_reports, key=_inner_selection_key)
+        public_top_candidates = [_public_candidate(row) for row in ranked_candidate_reports[:5]]
+        if inner_diagnostic_sink is not None:
+            inner_diagnostic_sink(
+                GainSensitiveInnerOOFSnapshot(
+                    outer_fold_id=outer_fold_id,
+                    inner_fold_ids=inner_fold_ids,
+                    question_count=inner_question_count,
+                    predictions_by_bundle={
+                        name: tuple(bundle_predictions)
+                        for name, bundle_predictions in inner_predictions.items()
+                    },
+                    top_candidate_spec_name=ranked_candidate_reports[0]["spec"]["name"],
+                    eligible_config_count=len(eligible_reports),
+                )
+            )
         if not eligible_reports:
             outer_reports[outer_fold_id] = {
                 "inner_question_count": inner_question_count,
@@ -537,11 +577,26 @@ def select_gain_sensitive_actions(
 ) -> tuple[ActionAuditRow, ...]:
     """Select one action per question from the guaranteed-nonempty safety frontier."""
 
+    decisions = build_gain_sensitive_question_decisions(predictions, spec)
+    return tuple(decision.winner.row for decision in decisions)
+
+
+def build_gain_sensitive_question_decisions(
+    predictions: Sequence[GainSensitivePrediction],
+    spec: GainSensitivePolicySpec,
+) -> tuple[GainSensitiveQuestionDecision, ...]:
+    """Expose Stage 188 question decisions without changing selection semantics."""
+
     grouped: dict[str, list[GainSensitivePrediction]] = defaultdict(list)
     for prediction in predictions:
         grouped[prediction.row.question_key].append(prediction)
-    selected = []
-    for question_predictions in grouped.values():
+    decisions = []
+    for question_key, question_predictions in sorted(grouped.items()):
+        baselines = [row for row in question_predictions if row.row.action.family == "baseline"]
+        if len(baselines) > 1:
+            raise ValueError(
+                "Stage188 decisions allow at most one baseline prediction per question"
+            )
         citation_minimum = min(row.citation_loss_probability for row in question_predictions)
         f1_minimum = min(row.f1_loss_probability for row in question_predictions)
         ranked_with_excess = [
@@ -570,8 +625,20 @@ def select_gain_sensitive_actions(
                 item[0].row.action.action_id,
             ),
         )
-        selected.append(winner.row)
-    return tuple(sorted(selected, key=lambda row: row.question_key))
+        unfiltered_winner = min(
+            question_predictions,
+            key=lambda row: (-row.gain_score, row.row.action.action_id),
+        )
+        decisions.append(
+            GainSensitiveQuestionDecision(
+                question_key=question_key,
+                baseline=baselines[0] if baselines else None,
+                frontier=tuple(row for row, _ in frontier),
+                winner=winner,
+                unfiltered_winner=unfiltered_winner,
+            )
+        )
+    return tuple(decisions)
 
 
 def build_pairwise_training_data(

@@ -20,6 +20,7 @@ from ts_rag_agent.application.composition_dual_target_policy import (
     SelectedAction,
 )
 from ts_rag_agent.application.composition_gain_sensitive_ranking import (
+    GainSensitiveInnerDiagnosticSink,
     run_gain_sensitive_nested_cv,
 )
 from ts_rag_agent.application.svg_charts import BarDatum, render_horizontal_bar_chart_svg
@@ -66,6 +67,7 @@ def run_stage188_gain_sensitive_ranking_cv(
     documents_path: Path,
     encoder_batch_size: int = 64,
     progress_sink: stage182.ProgressSink | None = None,
+    inner_diagnostic_sink: GainSensitiveInnerDiagnosticSink | None = None,
 ) -> dict[str, Any]:
     """Reproduce Stage 182 and run the authorized Stage 188 train nested CV."""
 
@@ -127,6 +129,7 @@ def run_stage188_gain_sensitive_ranking_cv(
         action_rows=private["action_rows"],
         stage182_selected_actions=private["selected_actions"],
         progress_sink=progress_sink,
+        inner_diagnostic_sink=inner_diagnostic_sink,
     )
     tracker.capture("gain_sensitive_nested_cv_complete")
     analyzed_at = time.perf_counter()
