@@ -571,6 +571,37 @@ def fit_gain_sensitive_representations(
     }
 
 
+def build_stage182_reference_rows(
+    rows: Sequence[ActionAuditRow],
+    stage182_selected_actions: Sequence[SelectedAction],
+) -> dict[str, ActionAuditRow]:
+    """Build the frozen per-question reference used by Stage 188 and successors."""
+
+    return _reference_rows(rows, stage182_selected_actions)
+
+
+def gain_sensitive_prediction_metrics(
+    predictions: Sequence[GainSensitivePrediction],
+) -> dict[str, Any]:
+    """Calculate the frozen public-safe held-out prediction diagnostics."""
+
+    return _prediction_metrics(predictions)
+
+
+def paired_selected_action_bootstrap(
+    rows: Sequence[ActionAuditRow],
+) -> dict[str, Any]:
+    """Run the frozen Stage 188 paired selected-action bootstrap."""
+
+    return _paired_bootstrap(rows)
+
+
+def unavailable_selected_action_bootstrap() -> dict[str, Any]:
+    """Return the frozen unavailable-bootstrap result."""
+
+    return _unavailable_bootstrap()
+
+
 def select_gain_sensitive_actions(
     predictions: Sequence[GainSensitivePrediction],
     spec: GainSensitivePolicySpec,

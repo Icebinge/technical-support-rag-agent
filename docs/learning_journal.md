@@ -36274,3 +36274,79 @@ deprecation；进程结束后 PowerShell 的 child `ExitCode` 字段为空，因
 pytest 进程、也没有新日志，因此没有发生孤立进程或重复实验。最终有效运行才创建 PID `26576`；
 本地 PowerShell 的 `Wait-Process` 没有设置时长参数，外层执行通道只使用传输上限防止再次提前
 切断本地等待。
+
+## 2026-07-27 - Stage 191 高召回安全候选池嵌套交叉验证
+
+Stage 191 严格执行 Stage 190 冻结的 train-only 两阶段方案：先按
+`max(p(citation loss), p(F1 loss))`、风险和及 canonical action order 对每题全部 runtime action
+排序，截取 `4/8/16/all` 候选并并入唯一 baseline；再在池内按 Stage 188 gain score、联合风险和
+canonical order 精排。两个 representation、两个 safety estimator、两个 gain ranker 与四个 cap
+组成 32 个配置。Stage 188 的特征、模型、标签、超参数、全量 pair 和完整 list 均原样复用；没有
+fallback、抽样、重试、弱候选替换、dev/test、runtime E2E 或默认变更。
+
+实现新增独立的 `RankCappedSafetyPoolPolicySpec`、问题级 pool decision、候选池召回统计器和嵌套
+CV runner。strict-opportunity pool recall 沿用 Stage 189 的问题级口径：有 strict action 的题中，
+池内至少保留一个 strict action。inner gate 要求总体 `>=0.80`，并至少 3/4 折各自 `>=0.70`。
+第一版统计实现曾逐题扫描整折 prediction；代码审查后在正式运行前改为一次 question index，避免
+不必要的二次复杂度，指标语义不变。
+
+首轮定向测试为 `14 passed, 1 failed`。失败来自合成测试错误要求 15 个最终 gate 全通过，但该
+合成数据没有 Stage 182 的 55 个历史 regression，repair rate 按定义为 0；实现行为正确。测试改为
+精确断言 pool recall gate 通过而 repair gate 失败，随后为 `15 passed in 3.17s`。Stage 184-191
+相关回归随后为 `49 passed in 5.41s`，全仓 Ruff、CLI 与 `pip check` 均通过。
+
+正式预检时 Stage 190 SHA-256 精确匹配，系统可用内存 6.168 GiB、GPU 可用 6038 MiB，且没有
+遗留 Python 进程。正式 PID `15940` 在同一条 PowerShell 命令中只调用一次 `Wait-Process` 并
+等待自然结束，无轮询、实验 timeout、重启、partial continuation、fallback 或 OOM。PowerShell
+结束后 child `ExitCode` 字段仍为空，没有伪造为 0；正式报告完整生成且 31/31 process guard
+通过。
+
+Stage 182 复现 `202.943518` 秒，Stage 191 nested CV `814.401546` 秒，总 wall
+`1017.348335` 秒，CPU time `2138.906250` 秒。20/20 inner partition 完成；fold 2 没有任何
+inner-eligible config，因此按协议禁止 outer refit，最终为 288/300 次拟合，即 240 inner fit 加
+4 x 12 outer fit。累计 private prediction 403,333，公开 pair/list/prediction 行均为 0。
+
+第一阶段在四个实际评估 outer fold 上获得 pool recall `1.000000/0.929577/0.935897/0.970588`，
+合计召回 278/290 个 strict-opportunity question，即 `0.958621`；strict-action retention
+`0.383251`，mean pool size `11.932203`，baseline inclusion `1.0`。这个聚合只覆盖 295 个已
+评估问题，不是完整 370 题 OOF，不能包装成完整策略结果。
+
+fold 2 的 top-5 inner candidate 的 pool recall 已达 `0.934483-1.0`，四个 inner fold 也全部高于
+`0.70`。真正阻断来自下游联合质量：两个 pool-8 ListNet 的 citation 为 `-2/-1` 且 citation
+nonregressing fold 仅 2 个；pool-all 与 pool-16 虽 citation 非负，但 strict precision 只有
+`0.580986-0.593640`，低于 `0.60`。因此第一阶段高召回目标已经实现，主瓶颈转移到池内安全与
+gain 排序，不应继续扩大候选池。
+
+四个已评估 outer fold 共 295 题，partial aggregate 为 changed 276、strict 154、strict precision
+`0.557971`、citation 0、mean F1 `0.010573`、citation loss 12、F1 regression 112、Stage 182
+repair rate `0.363636`、new F1 regression rate `0.325000`。由于 fold 2 未评估，paired bootstrap
+按协议不可用；15 个 advancement gate 只通过 5 个，candidate family 未接受。selected-bundle
+AUC 为 citation loss `0.808116`、F1 loss `0.597291`、strict gain `0.490554`，pairwise accuracy
+`0.565943`，进一步说明高召回池内的 gain ranking 很弱。
+
+资源实测 working set 峰值 5.724 GiB、private 峰值 3.457 GiB、系统最小可用内存 4.247 GiB，
+CUDA allocated/reserved 均为 0。15 张 SVG 经固定 resvg/Poppins/无 fallback 链路栅格化并逐张
+按原始分辨率检查；长 gate/guard、负 F1、`not run`、零 citation、pool metric 与资源标签均完整，
+无裁切、重叠或空图。正式报告 SHA-256：
+
+```text
+1747bd9a47a7f233b97e62e38550fc61d8eee8c3ea54cd063c32a66ee14f29d9
+```
+
+resvg manifest SHA-256：
+
+```text
+662a45ff86d8ee41eef9eed931d6d0892fd150c400c0bace9f696ebcd9a64c5f
+```
+
+正式状态为 `stage191_rank_capped_safety_pool_insufficient`：实验有效但候选族不足；不授权
+full-train policy、replacement、runtime E2E、dev/test 或默认启用。下一阶段应只用 train-side
+inner OOF 聚合归因池内排序错误及 strict precision/safety 冲突，不能把 295 题 partial outer
+aggregate 当作完整结果。
+
+最终 current-source 验证：Stage 184-191 相关回归为 `49 passed in 5.16s`，full repository
+Ruff lint passed，6 个变更 Python 文件 Ruff format check passed，`pip check` 无损坏依赖，CLI
+help 正常。完整 pytest 启动唯一 PID `27508`，同一条 PowerShell 命令只调用一次
+`Wait-Process` 等待自然结束，无轮询或 pytest timeout，结果为
+`1139 passed, 1 warning in 21.94s`。warning 仍为既有 FastAPI/Starlette `TestClient`
+deprecation；child `ExitCode` 字段为空并如实保留。
