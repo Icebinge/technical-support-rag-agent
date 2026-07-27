@@ -36666,3 +36666,24 @@ manifest: e6c3e97ba4c16efb7bee768a820ba5831af088c22e83813c6b86116354f5c593
 上述 `125 fits / 22,500 trees` 只是 Stage 199 的冻结上限，不是已发生的训练或效果；Stage 198 尚未证明 28 个 cell 中存在能够降低 unsafe rate 的候选。
 
 current-source 最终验证中，全库 Ruff lint、3 个变更 Python 文件 format check、`pip check`、CLI help 与 `git diff --check` 全部通过；Stage 195/197/198 相关回归为 `18 passed in 1.14s`。完整 pytest 使用唯一 Python PID `8144`，同一条 PowerShell 命令只调用一次 `Wait-Process` 并等待自然结束，无轮询或 pytest timeout，结果为 `1186 passed, 1 warning in 39.15s`，stderr 为空；warning 仍是既有 FastAPI/Starlette `TestClient` deprecation。PowerShell post-wait child `ExitCode` 字段为空，按事实保留为未知，没有伪造为 0。
+
+## 2026-07-27 - Stage 199 risk signal x winner rule 训练集嵌套交叉验证
+
+Stage 199 按 Stage 198 冻结协议执行 train-only 联合因子实验。五个 outer context 固定沿用 Stage 196 的 source pool、gain model、risk profile/weight 与 prefix；20 个 inner partition 每个共享拟合 2 个 citation/F1 safety head、1 个 gain LambdaMART、1 个 source unsafe classifier 和 1 个 pairwise safety LambdaMART，然后统一评估 `4 risk signals x 7 winner rules = 28 cells`。实际执行 100 次拟合、18,000 棵 LightGBM tree、245,960 条 private prediction；因为五个 outer context 都没有 inner-eligible cell，outer refit 为 0，没有拿弱候选替代。
+
+精确 control `source_weighted_classifier x gain_only` 在 5/5 outer context 全部复现 Stage 196。四个完整池 unsafe ROC AUC 分别为 source classifier `0.590635`、decomposed loss `0.597567`、pairwise safety `0.598221`、decomposed+pairwise rank fusion `0.603601`；fusion 的全局风险排序最好，但仍不足以形成可接受策略。top-inner conditional capture 为 `0.647059-0.685512`，unsafe rate 为 `0.272414-0.327759`，相对冻结门槛 `capture >= 0.68` 与 `unsafe <= 0.25` 仍是联合冲突。winner marginal 也显示同一规律：gain-only capture `0.615705`、unsafe `0.338514`；top-4 gain shortlist 后选最低风险把 unsafe 降至 `0.182601`，但 capture 同时降至 `0.328700`。因此这不是“风险模型完全无效”，而是当前信号和 winner rule 没有找到同时保住 strict capture 与 safety 的 operating point。
+
+第一次正式 PID `14676` 真实完成 100 次 inner fit 并在 stdout 输出 `stage199_joint_risk_winner_insufficient`，随后可视化错误地读取不存在的 `advancement_gates[*].metric`，触发 `KeyError: 'metric'`；正式 JSON 未落盘。该失败没有被隐藏。修复内容包括：按真实契约读取 `name`；核心报告在可视化前原子写出；即使可视化异常也保留核心证据；测试 fixture 改为真实 gate schema，并新增后处理失败持久化回归测试。修复后的定向检查为 `11 passed in 1.80s`，ruff 通过。
+
+正式重跑 PID `25716` 在同一条 PowerShell 命令中只调用一次 `Wait-Process` 等待自然结束，没有轮询、experiment timeout、retry、fallback、OOM 或 CUDA allocation。正式报告 wall `486.661838` 秒，其中 Stage 182 reproduction `203.679400` 秒、Stage 199 nested CV `282.150785` 秒；working set 峰值 `3.759 GiB`、private 峰值 `4.088 GiB`、系统最小可用内存 `2.912 GiB`。34/34 process guard 全部通过；PowerShell child `ExitCode` 字段仍为空，按事实保留为未知。
+
+15/15 SVG 均通过 XML parse，并经固定 `resvg_py==0.3.3`、项目 Poppins 字体、白底、无 fallback 链路转为 PNG；全部按原始分辨率逐张检查，标题、标签、数值、17 个 gate、34 行 guard、负 delta 与零值无裁切或重叠。`selected outer factor counts` 空图准确表示没有 outer eligible cell，不是渲染失败。正式哈希：
+
+```text
+report:   5b933f524fff1bceb4d4d842e4f3a1aec3160aa3ed337131444ec1b7c2699fee
+manifest: af31be88acd15b9c57bb983fef0a2b7bcd8b7abd3851c5ddf56416b015fb0e28
+```
+
+正式状态为 `stage199_joint_risk_winner_insufficient`：实验有效但候选族不接受；不授权 full-train policy selection、replacement、runtime E2E、dev/test 或默认启用。下一阶段应冻结 train-only inner eligibility failure attribution，按 constraint、fold、loss type 和 question context 找出不能同时满足 capture/safety 的结构性原因；不得放宽现有 gate，也不得把 top-ineligible cell 当成可部署策略。
+
+current-source 最终验证中，全库 Ruff lint、5 个变更 Python 文件 format check、`pip check`、CLI help 与 `git diff --check` 全部通过；Stage 194-199 相关回归为 `42 passed in 13.05s`。完整 pytest 使用唯一 Python PID `26548`，同一条 PowerShell 命令只调用一次 `Wait-Process` 并等待自然结束，无轮询或 pytest timeout，结果为 `1197 passed, 1 warning in 40.75s`，真实退出码为 `0`；warning 仍是既有 FastAPI/Starlette `TestClient` deprecation。
