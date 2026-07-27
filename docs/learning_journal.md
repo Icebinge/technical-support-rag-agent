@@ -36831,3 +36831,87 @@ CLI help 和 `git diff --check` 全部通过；Stage 194-203 相关回归为
 只调用一次 `Wait-Process` 等待自然结束，无轮询或 pytest timeout，结果为
 `1236 passed, 1 warning in 44.28s`；warning 仍是既有 FastAPI/Starlette `TestClient`
 deprecation。
+## 2026-07-27 - Stage 204 Top-1 联合目标失败归因
+
+用户在 Stage 203 完成后明确选择路线 A。Stage 204 因此只做 train-only 的逐题
+control-to-custom ranking-flip 归因，不搜索新模型、不重新扩大同一权重网格、不放宽 gate，
+也不打开 dev/test。由于 Stage 203 没有持久化私有 prediction/action 行，本阶段复用
+Stage 201 的 streaming immutable snapshot 模式：Stage 203 核心新增可选 diagnostic sink，
+默认未传入时公开行为不变；传入时每个 outer context 把 17 个 cell 的冻结指标和 decision
+临时交给聚合器，聚合后立即丢弃。
+
+快照强制校验 outer context 唯一、17 个 cell 完整、每个问题 decision 唯一，以及 control
+和 custom 的候选池逐题完全一致。公开报告只保留 outcome transition、strict gain/loss、
+unsafe repair/regression、baseline addition/removal、safe-zero 转移和 target-mass 分布，不保留
+question key、action ID、候选池或 prediction 行。新增不可变 mapping、候选池漂移拒绝、人口
+守恒、transition 分区、Stage 203 稳定复现、39 项守卫、原子报告持久化和 12 张 SVG 测试。
+
+开发过程中第一轮聚合器测试为 `11 passed, 1 failed`，原因是合成测试把四个 safety 档都
+当成 strict 左侧 winner，但测试数据本身在 `safety=0, precision=0` 定义的是 unsafe；真实
+strict loss 为 6 而不是 8。修正测试期望后实现不变。编排层首轮为
+`23 passed, 2 failed`：测试误写守卫数 38，而真实新增了 39 项；图表构造器误用了不存在的
+`display_value` keyword。随后按项目现有 `BarDatum` API 修正，并保留全部 39 项守卫，定向
+测试达到 `25 passed`。
+
+正式运行前，Stage 203 SHA-256 精确匹配
+`b675d61a2c79d9fcd74639f6a9e4caf1de3da29205018e4b34343fae79340317`，38/38 源
+process guard 通过，系统可用内存 `4.779 GiB` 高于冻结的 4 GiB。正式 PID `9332` 在
+同一条 PowerShell 命令中只调用一次 `Wait-Process` 并等待自然结束；没有轮询、实验
+timeout、retry、fallback、OOM 或 CUDA allocation。Stage 203 的 400 fits、108,000 trees、
+983,840 条 private prediction 和全部稳定结果精确复现，额外 diagnostic fit 为 0。
+
+正式归因人口为 5 个 outer context、85 个 outer-cell、80 个 custom cell、1,480 个
+question context、23,680 个 control-custom comparison、17,760 个 precision-adjacent 和
+17,760 个 safety-adjacent comparison。所有左右 outcome 与 transition 分区精确守恒，39/39
+Stage 204 process guard 全部通过，公开私有行数为 0。
+
+16 个 custom objective 相对 control 共改变 20,186/23,680 个 winner，flip rate
+`0.852449`。strict gain/loss 为 `1,257/9,312`，净 strict `-8,055`；unsafe
+repair/regression 为 `5,246/1,515`，净 unsafe `-3,731`；baseline addition/removal 为
+`12,164/39`，净 baseline `+12,125`。候选池并不缺 strict opportunity：1,480 个 question
+context 中 1,439 个至少有一个 strict action，池内 strict action 平均为 `8.043919`。
+
+precision 相邻增权的逐题翻转为 4,784/17,760。strict gain/loss 为 `280/2,214`，unsafe
+repair/regression 为 `1,349/244`，baseline addition/removal 为 `3,251/97`，对应净 strict
+`-1,934`、净 unsafe `-1,105`、净 baseline `+3,154`。60 个 outer-cell 相邻比较中只有
+1 个 strict precision 不下降，unsafe rate 60/60 下降，conditional capture 0/60 不下降；
+平均 delta 分别为 precision `-0.089587`、unsafe `-0.062215`、capture `-0.111922`。
+最频繁的 outcome change 是 `strict_success -> baseline` 1,988 次，其次是
+`unsafe_f1_only -> baseline` 1,034 次。precision 权重确实去掉 unsafe，但去掉了更多 strict，
+主要通过 abstain 改变 winner，而不是提升 changed-answer precision。
+
+safety 相邻增权也呈现相同结构：净 strict `-1,382`、净 unsafe `-843`、净 baseline
+`+2,313`；60/60 降低 unsafe，但只有 1 个保持 strict precision，0 个保持 capture。
+precision component 的 target mass 每题精确归一化，平均 baseline `0.161709`、strict total
+`0.838291`；safety component 平均 baseline mass `0.135160`。这些分量本身数学有效，问题是
+一个 grouped softmax 同时承担“是否 abstain”和“选哪个 answer-bearing action”，让始终存在且
+安全的 baseline 与所有答案动作直接竞争。该解释是本实验网格内的观测归因，不伪装成一般
+因果结论。
+
+正式完成后复核发现原派生字段 `dominant_precision_transition` 会被未变化的
+`baseline -> baseline` 占据。代码随后保留 most-frequent overall transition，并新增
+dominant changing transition；使用已持久化 transition counts 确定性更新正式 JSON，得到
+`strict_success -> baseline`。没有重跑模型，也没有修改人口、指标、guard 或图表。这一真实
+后处理修正已明确记录。
+
+正式状态为 `stage204_top1_joint_objective_failure_attribution_complete`。下一推荐方向是冻结
+独立 change/abstain head 和 conditional strict-action ranker 协议；baseline 不应继续进入
+条件 action-ranking softmax。Stage 204 没有授权 new-model search、same-grid search、gate
+relaxation、full-train、replacement、runtime E2E、dev/test 或默认启用。
+
+正式 wall `639.810270` 秒，working set 峰值 `3.761 GiB`、private usage 峰值
+`4.092 GiB`、系统最小可用内存 `2.222 GiB`，GPU allocated/reserved 均为 0。12/12 SVG
+使用固定 `resvg_py==0.3.3`、项目 Poppins 字体、白底和无 fallback 路径栅格化，manifest
+确认全部非空；四张关键图按原始分辨率目视检查无裁切或重叠。最终产物哈希：
+
+```text
+report:   3757cc7a84a7a70beddd151228fbe39157fa546db2ce11da4996e66eefd19fe8
+manifest: 5d8c1c5a06b2610dacbde666c514c079319faa853ecfb217019b4385d05b6a33
+```
+
+current-source 验证中，全库 Ruff lint、8 个变更 Python 文件 format check、`pip check`、CLI
+help 和 `git diff --check` 全部通过；Stage 194-204 相关回归为
+`94 passed in 14.51s`。完整 pytest 使用唯一 Python PID `27276`，同一条 PowerShell 命令
+只调用一次 `Wait-Process` 等待自然结束，无轮询或 pytest timeout，结果为
+`1245 passed, 1 warning in 44.82s`；warning 仍是既有 FastAPI/Starlette `TestClient`
+deprecation。

@@ -5,6 +5,7 @@ import time
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Protocol
 
 import numpy as np
@@ -76,6 +77,32 @@ class Top1PartitionResult:
     custom_objective_tree_count: int
     group_contract_validation_count: int
     objective_callback_call_count: int
+
+
+@dataclass(frozen=True)
+class Top1ObjectiveCandidateSnapshot:
+    """Read-only private evidence for one Stage203 cell and outer context."""
+
+    spec: Mapping[str, Any]
+    eligible: bool
+    evaluation: Mapping[str, Any]
+    diagnostics: Mapping[str, Any]
+    paired_vs_control: Mapping[str, Any]
+    paired_vs_strict_only: Mapping[str, Any]
+    decisions: tuple[SafetyFirstFrontierDecision, ...]
+
+
+@dataclass(frozen=True)
+class Top1ObjectiveDiagnosticSnapshot:
+    """Private Stage204 stream item; consumers must aggregate and discard it."""
+
+    outer_fold_id: str
+    inner_fold_ids: tuple[str, ...]
+    inner_question_count: int
+    candidates: tuple[Top1ObjectiveCandidateSnapshot, ...]
+
+
+DiagnosticSink = Callable[[Top1ObjectiveDiagnosticSnapshot], None]
 
 
 class Top1PartitionFitPredictor(Protocol):
@@ -449,6 +476,7 @@ def run_top1_joint_objective_nested_cv(
     stage199_report: Mapping[str, Any],
     progress_sink: ProgressSink | None = None,
     partition_fit_predictor: Top1PartitionFitPredictor | None = None,
+    diagnostic_sink: DiagnosticSink | None = None,
 ) -> dict[str, Any]:
     """Run the frozen Stage 203 five-by-four train-only nested CV."""
 
@@ -534,6 +562,9 @@ def run_top1_joint_objective_nested_cv(
             risk_predictions,
             source_spec,
         )
+        decisions_by_spec: dict[str, tuple[SafetyFirstFrontierDecision, ...]] = {
+            _CONTROL_NAME: control_decisions
+        }
         control = _candidate_report(
             spec=_control_spec_dict(),
             decisions=control_decisions,
@@ -553,6 +584,7 @@ def run_top1_joint_objective_nested_cv(
                 safety_predictions,
                 objective_predictions[spec.name],
             )
+            decisions_by_spec[spec.name] = decisions
             candidates.append(
                 _candidate_report(
                     spec=_objective_spec_dict(spec),
@@ -567,6 +599,17 @@ def run_top1_joint_objective_nested_cv(
             candidate["paired_vs_control"] = stage199._paired_delta(candidate, control)
             candidate["paired_vs_strict_only"] = stage199._paired_delta(candidate, strict_only)
             cell_reports[candidate["spec"]["name"]].append(candidate)
+
+        if diagnostic_sink is not None:
+            diagnostic_sink(
+                _diagnostic_snapshot(
+                    outer_fold_id=outer_fold_id,
+                    inner_fold_ids=inner_fold_ids,
+                    inner_question_count=question_count,
+                    candidates=candidates,
+                    decisions_by_spec=decisions_by_spec,
+                )
+            )
 
         eligible = [row for row in candidates if row["eligible"]]
         ranked = sorted(candidates, key=stage196._inner_selection_key)
@@ -934,6 +977,41 @@ def _public_candidate(row: Mapping[str, Any]) -> dict[str, Any]:
         "paired_vs_control": row["paired_vs_control"],
         "paired_vs_strict_only": row["paired_vs_strict_only"],
     }
+
+
+def _diagnostic_snapshot(
+    *,
+    outer_fold_id: str,
+    inner_fold_ids: Sequence[str],
+    inner_question_count: int,
+    candidates: Sequence[Mapping[str, Any]],
+    decisions_by_spec: Mapping[str, tuple[SafetyFirstFrontierDecision, ...]],
+) -> Top1ObjectiveDiagnosticSnapshot:
+    return Top1ObjectiveDiagnosticSnapshot(
+        outer_fold_id=outer_fold_id,
+        inner_fold_ids=tuple(inner_fold_ids),
+        inner_question_count=inner_question_count,
+        candidates=tuple(
+            Top1ObjectiveCandidateSnapshot(
+                spec=_deep_freeze(candidate["spec"]),
+                eligible=bool(candidate["eligible"]),
+                evaluation=_deep_freeze(candidate["evaluation"]),
+                diagnostics=_deep_freeze(candidate["diagnostics"]),
+                paired_vs_control=_deep_freeze(candidate["paired_vs_control"]),
+                paired_vs_strict_only=_deep_freeze(candidate["paired_vs_strict_only"]),
+                decisions=tuple(decisions_by_spec[str(candidate["spec"]["name"])]),
+            )
+            for candidate in candidates
+        ),
+    )
+
+
+def _deep_freeze(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({str(key): _deep_freeze(child) for key, child in value.items()})
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return tuple(_deep_freeze(child) for child in value)
+    return value
 
 
 def _outcome_label(row: ActionAuditRow) -> int:

@@ -74,6 +74,7 @@ def run_stage203_top1_joint_objective_cv(
     encoder_batch_size: int = 64,
     progress_sink: stage182.ProgressSink | None = None,
     preflight_failure_sink: Callable[[Mapping[str, Any]], None] | None = None,
+    diagnostic_sink: core.DiagnosticSink | None = None,
 ) -> dict[str, Any]:
     """Reproduce Stage182 and run the authorized Stage203 train-only experiment."""
 
@@ -164,6 +165,7 @@ def run_stage203_top1_joint_objective_cv(
         stage202_protocol=formal_stage202,
         stage199_report=formal_stage199,
         progress_sink=cv_progress,
+        diagnostic_sink=diagnostic_sink,
     )
     tracker.capture("top1_joint_objective_nested_cv_complete")
     analyzed_at = time.perf_counter()

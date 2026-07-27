@@ -277,12 +277,14 @@ def test_nested_cv_reproduces_controls_and_uses_full_425_fit_budget() -> None:
         }
     stage199 = {"joint_risk_winner_nested_cv": {"outer_contexts": source_outer}}
 
+    snapshots = []
     report = policy.run_top1_joint_objective_nested_cv(
         action_rows=rows,
         stage182_selected_actions=(),
         stage202_protocol=stage202,
         stage199_report=stage199,
         partition_fit_predictor=_fake_fit_predictor,
+        diagnostic_sink=snapshots.append,
     )
 
     assert report["execution"]["model_fit_count"] == 425
@@ -300,6 +302,10 @@ def test_nested_cv_reproduces_controls_and_uses_full_425_fit_budget() -> None:
     assert report["candidate_family_accepted"] == all(
         row["passed"] for row in report["advancement_gates"]
     )
+    assert len(snapshots) == 5
+    assert len(snapshots[0].candidates) == 17
+    with pytest.raises(TypeError):
+        snapshots[0].candidates[0].spec["name"] = "mutated"
 
 
 def test_stage199_control_evidence_rejects_missing_control_candidate() -> None:
