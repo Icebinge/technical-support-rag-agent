@@ -36915,3 +36915,74 @@ help 和 `git diff --check` 全部通过；Stage 194-204 相关回归为
 只调用一次 `Wait-Process` 等待自然结束，无轮询或 pytest timeout，结果为
 `1245 passed, 1 warning in 44.82s`；warning 仍是既有 FastAPI/Starlette `TestClient`
 deprecation。
+
+## 2026-07-27 - Stage 205 两阶段 change/abstain gate 与 conditional ranker 协议冻结
+
+用户在 Stage 204 完成后明确选择路线 A。Stage 205 据此只读取 SHA-256 精确匹配的
+Stage 204 失败归因公开报告与 Stage 202 source protocol，冻结 Stage 206 train-only
+两阶段实验；没有加载 train/dev/test 行或 documents，没有导入 LightGBM/scikit-learn、
+拟合模型、生成 prediction、运行 policy evaluation、修改 runtime、放宽 gate、retry 或
+加入 fallback。Stage 204 的观察依据保持原样：precision 相邻增权的净 strict/unsafe/
+baseline 分别为 `-1,934/-1,105/+3,154`，最主要的 changing transition 是
+`strict_success -> baseline`；同时 1,480 个 question context 中有 1,439 个 strict
+opportunity，池内 strict action 平均为 `8.043919`。这些是 Stage 203 网格内的训练侧
+关联，不被写成一般因果结论。
+
+冻结架构把两个决策彻底分开。conditional ranker 的拟合行、组内归一化和 winner 均排除
+baseline，只在固定 cap-16 pool 的非 baseline action 中选一个候选。ranker 做两种受控
+消融：`strict_binary` 使用 unsafe/safe-zero/strict=`0/0/1` 与 `label_gain=[0,1]`；
+`strict_safety_graded` 使用 `0/1/2` 与 `label_gain=[0,1,4]`。随后独立 binary gate
+判断这个 conditional winner 是否值得替换 baseline。gate 只使用 runtime 可得的 winner、
+baseline、两者差分、top1-top2 margin 与 source safety 特征；gold/outcome 不进入 runtime。
+阈值由训练 OOF gate score 的 order statistic 学习，对应 target change coverage
+`{0.25,0.40,0.55,0.70,0.85}`，不声称 classifier probability 已校准。
+
+为防止 gate 学到同一数据上的乐观 ranker winner，每个 inner training partition 还要做
+4 折 question-grouped cross-fitting：ranker 只预测其未参与拟合的 question，每题形成唯一
+一条 OOF gate row；全部 OOF row 完成后才允许 full-inner ranker 预测 inner heldout。outer
+refit 必须完整重复同一流程，禁止把 same-fit winner 用作 gate 训练数据。完整候选为
+`2 ranker x 5 coverage = 10` 个两阶段 policy 加 1 个 Stage 196 exact control。原 13 项
+inner eligibility constraint 与 17 项 advancement gate 数值不变；无 eligible config
+时记录失败，不替换为弱候选。
+
+首次草案 guard 真实地以 1 项失败停止：最初把 Stage 206 LightGBM tree 上限写成
+`94,500`，复算发现 outer refit 还包含每折 2 个 source LightGBM model，因此正确上限是
+`96,000`。该 invalid draft 已删除且没有冒充正式产物。预算修正后的首次正式冻结随后在
+提交前设计复核中发现 raw absolute LambdaMART score 仍被列为 gate 特征；不同 cross-fit
+ranker 的绝对 margin 尺度不可保证可比。协议因此在提交前进一步排除 raw score，只保留题内
+min-max normalized top1-top2 margin，并明确 ranker/gate 分别复用 source gain/risk tree
+profile，同时用 SHA-256(outer context, inner heldout context, stable question identifier,
+seed 205) modulo 4 固定 cross-fit assignment。新增 raw-score exclusion 与 deterministic
+assignment 两项 guard。中间 report hash
+`2f9db604bb4733270e9b522686d7f8ef24a0d0ad36bdea5ddb9dda2e1e6a7b69` 和 manifest hash
+`57ad74ac245773d9f9427d79f5fefde3ee707af57c086290d8e2c7c758c8ae8d` 已被最终版本替代。
+
+最终正式 Stage 205 在 `0.002381` 秒内完成，`80/80` guard 全部通过，状态为
+`stage205_two_stage_change_ranker_protocol_frozen`。Stage 206 上限为 370 fits、96,000
+LightGBM trees；这只是预算，Stage 205 实际 fit、private row 和 prediction 均为 0。
+
+10/10 SVG 通过固定 `resvg_py==0.3.3`、项目 Poppins 字体、白底和无 fallback 路径转成
+PNG，manifest 确认所有图非空；架构、cross-fit、预算和 80 行 guard 图按原始分辨率目视
+检查，无裁切、重叠或空图。正式产物哈希：
+
+```text
+report:   a967893d26d1ca58164893f8cd804ea1883d870863d6c599da42d447fa59df81
+manifest: 817fba82e86299dff4b0299cd5d4b1842b4c5eafa55e1d0c1b19f4cedc441678
+```
+
+Stage 205 只授权 Stage 206 train-only experiment；development/test、full-train selection、
+replacement、runtime E2E、Stage 178B 与默认启用继续关闭。正式 Stage 206 长进程必须在
+同一条 PowerShell 命令中只调用一次 `Wait-Process`，等待同一个 PID 自然结束，不轮询、
+不设置 experiment timeout。
+
+全库 Ruff lint、3 个变更 Python 文件 format check、`pip check`、CLI help 与
+`git diff --check` 全部通过。最终 raw-score contract 收紧前的完整 pytest 由一条
+PowerShell 命令启动唯一 Python 子进程并调用一次 `Wait-Process`；Codex
+外层命令通道约 14 秒后截断了 wrapper，导致启动时输出的 PID 与 post-wait exit code 没有回传。
+pytest 子进程没有因此被标记为成功或失败，也没有重跑；它继续自然完成并写出完整 stdout，
+结果为 `1253 passed, 1 warning in 45.74s`，stderr 为空。warning 仍是既有
+FastAPI/Starlette `TestClient` deprecation。恢复性读取只找到当前 PowerShell 命令自身的
+文本匹配，没有发现仍在运行的目标 Python pytest 进程，并读取了已完成的 100% 输出；缺失
+PID 与 wrapper exit code 按事实记录为 unknown，没有为了补字段重跑或伪造。最终仅涉及协议
+元数据、两个 guard 与对应测试的 raw-score 收紧完成后，Stage 202-205 current-source 定向
+回归重新通过 40 项；完整 pytest 没有仅为制造缺失 wrapper 字段而重复执行。
