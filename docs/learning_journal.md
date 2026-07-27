@@ -36737,3 +36737,26 @@ manifest: 3ece1c586222fa99c70a2ea205ad0a7510ead1adafba7a193ce46d7b07013c0b
 ```
 
 current-source 最终验证中，全库 Ruff lint、10 个变更 Python 文件 format check、`pip check`、CLI help、`git diff --check` 与 Stage 183/199/200/201 定向回归全部通过；定向结果为 `37 passed in 2.14s`。完整 pytest 使用唯一后台 PID `3424`，同一条 PowerShell 命令只调用一次 `Wait-Process` 并等待自然结束，没有 pytest timeout 或轮询；结果为 `1213 passed, 1 warning in 40.92s`，stderr 为空。warning 仍是既有 FastAPI/Starlette `TestClient` deprecation。PowerShell child `ExitCode` 字段为空，按事实保留为未知；pytest stdout 已到达 100%，没有为了补写退出码再次运行测试。
+
+## 2026-07-27 - Stage 202 分组 Top-1 联合约束目标协议冻结
+
+Stage 202 按用户确认的路线 A 冻结 Stage 203 train-only grouped Top-1 joint-objective experiment。本阶段只读取 SHA-256 精确匹配的 Stage 201 失败归因报告与 Stage 199 联合实验报告，不加载 train/dev/test rows 或 documents，不导入 LightGBM，不拟合模型，不生成 prediction，也不运行 policy evaluation。Stage 201 的 36/36 guards、41,440 question-cell 精确分区、15,294 次 winner-selection miss、135/125/116 次 capture/precision/unsafe constraint failure，以及 Stage 199 五条 exact-control source trajectory 均被正式验证。
+
+实验固定沿用 Stage 196 的 cap-16 safety pool、baseline union、pool representation/estimator、source gain representation 与 tree profile。custom objective 在完整固定 pool 上直接输出每 action 一个标量分数，不再应用旧 risk frontier；这属于路线 A 的正式候选域，不是失败后扩大候选的 fallback。旧 risk-signal 与 winner-rule 网格、候选池和特征研究均不重开，gold label 不进入 runtime。
+
+每个问题组构造 capture、safety、precision 三个 target distribution。capture 在 strict action 上均匀分布，无 strict 时 one-hot baseline；safety 在 non-unsafe action 上均匀分布；precision 在 strict+baseline 上均匀分布。组合目标为 `(capture + lambda_s*safety + lambda_p*precision)/(1+lambda_s+lambda_p)`，损失是相对组内 score softmax 的交叉熵，梯度为 `p-q`，Hessian 使用 `max(p*(1-p), 1e-6)` 正对角近似。Stage 203 必须验证 target 归一化、group/row 守恒、唯一 baseline、有限 gradient/Hessian、正 Hessian、预测行对齐和确定性重复。
+
+冻结网格为 `lambda_s, lambda_p ∈ {0, 0.5, 1, 2}`，共 16 个 custom objective：1 strict-only、3 safety-only、3 precision-only、9 full-joint；另加 1 个 Stage 196 精确控制，共 17 个 candidate config。Stage 203 仍执行 5×4 train-only nested CV，原 13 项 inner eligibility 与 17 项 advancement gate 完全不变。每 inner partition 上限 20 fits；只有 eligible config 才 outer refit，没有 eligible config 时不选较弱候选。总上限 425 fits、112,500 LightGBM trees，仅是预算，不是 Stage 202 已发生消耗。
+
+最终更正版本冻结耗时 `0.003170` 秒，真实 guard 数为 `81/81`，model fit、private row、prediction、policy evaluation、retry 与 fallback 均为 0。过程更新在读取最终 guard 数组前曾口头写成 82/82，重新读取落盘 JSON 后立即更正。首次冻结后的最终设计复核又发现 `outer_refit_only_selected_eligible_objective` 把可能入选的 exact control 也误称为 objective；字段随后更正为 `outer_refit_only_selected_eligible_config` 并重新生成正式报告。首次报告哈希 `907a8b812afcdf4dd71e28e7f3a845590c19c1591810469006a8b1b0640a2f54` 被更正版本取代，预算、目标和授权行为未改变。
+
+10/10 SVG 经固定 `resvg_py==0.3.3`、项目 Poppins 字体、白底、无 fallback 链路转为 PNG；manifest 确认全部非空。source blockers、objective grid、17 个 gate 与 81 行 guard 已按原始分辨率检查，无标签裁切、数值覆盖或空白误渲染。正式哈希：
+
+```text
+report:   0818f0ae7186eea19d4137023b87963010e76e9cbf20e8f1ef61576a60569bdb
+manifest: 812187c175f474ee562f86d8cef7df6762710b88387692069f621b469353ece2
+```
+
+正式状态为 `stage202_top1_joint_objective_protocol_frozen`，只授权 Stage 203 train-only experiment；development/test、full-train policy selection、replacement、runtime E2E、Stage 178B 与默认启用均保持关闭。下一阶段按冻结协议实现自定义 group objective、17-cell nested CV、消融统计与资源追踪，正式长进程必须用同一 PID 的单次 PowerShell `Wait-Process` 等待自然结束。
+
+最终验证中，全库 Ruff lint、3 个新增 Python 文件 format check、`pip check`、CLI help 与 `git diff --check` 全部通过；Stage 198-202 定向回归为 `31 passed in 1.52s`。首次准备完整测试时，执行工具拒绝了不受支持的 `timeout_ms=0`，命令在创建 PID 前终止，没有遗留进程。随后 Python PID `10328` 用单次 `Wait-Process` 自然结束，pytest 为 `1220 passed, 1 warning in 42.50s`；PowerShell post-wait `ExitCode` 为空，命令尾部把空值按数值比较误判为 wrapper failure，但 pytest stdout 已到达 100%、stderr 为空。之后由于 outer-refit 契约字段发生真实更名，最终源码另用唯一 Python PID `30628` 完整验证；同一条 PowerShell 命令仍只调用一次 `Wait-Process`，不轮询、不设置 pytest timeout，结果为 `1220 passed, 1 warning in 40.93s`，stderr 为空。最终 post-wait `ExitCode` 仍为空，按事实保留为未知，没有为补写退出码再次运行；warning 仍是既有 FastAPI/Starlette `TestClient` deprecation。
