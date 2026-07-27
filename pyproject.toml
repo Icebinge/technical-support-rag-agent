@@ -27,6 +27,10 @@ rag = [
   "scikit-learn>=1.4",
   "sentence-transformers>=3.0",
 ]
+ranking = [
+  "lightgbm==4.7.0",
+  "narwhals==2.24.0",
+]
 agent = [
   "langgraph==1.2.9",
 ]

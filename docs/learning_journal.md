@@ -36495,3 +36495,75 @@ PowerShell 命令只调用一次 `Wait-Process` 等待自然结束，无轮询�
 只恢复同一个 command cell 的输出，没有第二条进程查询或第二次 `Wait-Process`。结果为
 `1149 passed, 1 warning in 22.03s`，stderr 为空，warning 仍是既有 FastAPI/Starlette
 `TestClient` deprecation；PowerShell child `ExitCode` 字段为空并按事实保留。
+
+## 2026-07-27 - Stage 194 安全约束 LambdaMART 训练集嵌套交叉验证
+
+Stage 194 按 Stage 193 冻结方案实现了 cap-16 safety pool、LightGBM LambdaMART 和独立
+unsafe-risk head。正式实验只读取训练集，问题组不跨 fold；没有打开 dev/test，没有 fallback、retry、
+弱候选替换、runtime E2E、full-train selection 或默认策略变更。64 个 policy config 共享模型，没有为
+每个 penalty 或 pool builder 重复拟合。
+
+依赖供应链中真实发生两次失败。第一次 wheel 命令使用无效的 PowerShell `Select-Object -Single`，在
+安装前停止。修正后 LightGBM 4.7.0 从已验证 wheel 安装成功，但 import 暴露 Stage 193 未冻结的传递
+依赖 `narwhals>=1.15`。用户选择 A 后固定 `narwhals==2.24.0`。两个 wheel SHA-256 分别为：
+
+```text
+lightgbm: f42d1e5b32b6f170e606d7c689c6165671da98d7bf37f1addec2623efc8740c9
+narwhals: 42fdedf44e5b2ca7505630d45b4ac3058f38d8485cba9fe1652ca23152df7489
+```
+
+随后两个包均可导入，正式进程内部 `pip check` 返回 `No broken requirements found.`；项目新增精确
+锁定的 `ranking` optional extra。真实 sparse smoke fit 在 `-W error` 下完成：单个 representation
+恰好 8 次拟合、1,200 棵树、60 个 question group、180 行且 group-size sum 为 180；检查同时确认
+`eval_at=[1]` 应传给 `LGBMRanker.fit()`，放在构造器会触发参数别名 warning。
+
+正式前置文件检查第一次把 raw-data 根目录手写成错误路径，在 PID 创建前停止；从
+`ProjectSettings.primeqa_raw_dir` 解析真实路径后，全部输入、Stage 193 SHA、wheel SHA、版本与
+`pip check` 均通过。内存预检实测 5.599 GiB，低于 Stage 193 冻结的 6 GiB，按原协议没有启动 PID。
+用户明确表示无需 6 GiB 并授权继续。实现没有隐瞒原门槛，而是加入显式
+`--allow-below-frozen-memory-threshold`，报告同时保存冻结值、实际值和用户授权说明，并确认模型网格
+没有缩减、没有加入 fallback。正式进程启动时可用内存为 5.595 GiB。
+
+正式 PID `27624` 在同一条 PowerShell 命令中只调用一次 `Wait-Process` 等待自然结束；没有轮询、实验
+timeout、retry、partial continuation、fallback、OOM 或 CUDA allocation。Stage 182 重现耗时
+`216.683980` 秒，Stage 194 nested CV 耗时 `353.060593` 秒，总 wall `570.604419` 秒。20 个 inner
+partition 全部完成；五个 outer context 都没有 inner-eligible config，因此禁止 outer refit。实际为
+160 个 pool-safety fit、80 个 LambdaMART fit、80 个 unsafe-head fit，共 320/400 次拟合，48,000 棵
+LightGBM 树，393,536 条 private prediction；公开训练行和 prediction 行均为 0。
+
+资源实测 working set 峰值 `3.762 GiB`、private 峰值 `4.179 GiB`、系统最小可用内存 `3.756 GiB`，
+29 次事件驱动快照，CUDA allocated/reserved 均为 0。完整网格自然完成且无 OOM。33/33 process guard
+全部通过。PowerShell 在 `Wait-Process` 返回后读取到的 child `ExitCode` 为空，外层命令因此在正式报告
+和 12 张图已经写出后误判失败；该空值没有伪造成 0，也没有重跑正式模型。
+
+正式状态为 `stage194_safety_constrained_lambdamart_insufficient`：实验有效，但候选族未接受。每个 outer
+context 都是 0/64 eligible，故外层评估为 0/5，paired bootstrap 不可用。aggregate 零值表示
+`not evaluated`，不是模型效果为零，也没有拿 top-ineligible candidate 冒充外层结果。
+
+inner top candidate 的 pool recall 在五个 context 中为 `0.986-0.990`，候选池不再是主瓶颈。对应
+conditional capture 为 `0.630-0.682`、strict precision 为 `0.610-0.659`、unsafe rate 为
+`0.300-0.342`。fold 4 最接近通过：pool recall `0.989510`、conditional capture `0.681979`、strict
+precision `0.659420`，citation/F1 与 per-fold capture 约束也通过，但 unsafe rate 为 `0.300000`，高于
+`0.25`。其余 context 还同时受 capture 或 precision 限制。因此下一瓶颈是 unsafe winner 抑制和 strict
+capture 的联合约束，不是继续扩大候选池。
+
+12/12 SVG 经固定 `resvg_py==0.3.3`、项目 Poppins 字体、白底、无字体 fallback 的链路转为 PNG，并
+按原分辨率逐张打开。第一次栅格化命令漏传 `--input-dir`，在渲染前退出；修正后 12 张均非空。多图
+预览时 pool-recall 图曾显示不完整，但 SVG、单图 PNG 与确定性 SHA 检查均完整，属于预览异常而非文件
+损坏。正式报告和 resvg manifest SHA-256：
+
+```text
+report:   c1208348e79fd404e7b360a49a3f4d4e9663a3e9bd61c3ef99cf3f9ac60ece57
+manifest: 6e24d26c7aaf61844e3f662d1457986bf228eb7b54340d3fa7a65691de0baccb
+```
+
+Stage 194 不授权 dev/test、full-train、runtime E2E、replacement 或默认启用。下一阶段应继续只用训练集，
+冻结并比较 cost-sensitive unsafe head 与 deterministic safest-prefix frontier，直接测试 unsafe rate 是否
+能降到 `<=0.25`，同时保留接近 `0.68` 的 conditional capture；不能放宽门槛后宣称当前方案通过。
+
+最终验证前，第一次并行静态检查的 JavaScript 编排字符串因长引号组合解析失败，任何 nested command
+都没有启动；拆分并修正引用后，全库 Ruff lint、5 个变更 Python 文件 format check、`pip check`、CLI
+help、正式 artifact hash 与 `git diff --check` 均通过。完整 pytest 启动唯一 Python PID `12924`，在同一
+条 PowerShell 命令中只调用一次 `Wait-Process` 等待自然结束，无轮询或 pytest timeout；结果为
+`1157 passed, 1 warning in 27.65s`，stderr 为空，warning 仍为既有 FastAPI/Starlette `TestClient`
+deprecation。PowerShell child `ExitCode` 字段为空并按事实保留，没有伪造为 0。
