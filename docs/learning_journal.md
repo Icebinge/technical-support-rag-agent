@@ -36589,3 +36589,40 @@ manifest: 602a02f2a5b565183de1a5166e759852b98313b550fc484dcc8cef04e5ad0caf
 10/10 SVG 均通过 XML parse，并由固定 `resvg_py==0.3.3`、项目 Poppins 字体、白底、无字体 fallback 的链路栅格化。全部 PNG 已按原始分辨率逐张打开；标题、数值、17 个 advancement gate 和 58 行 guard 均无裁切或重叠。定向测试首次为 `5 passed in 0.15s`；随后增加“Stage 194 unsafe 已过门槛时不得启动本实验”的前提测试，current-source 定向结果为 `6 passed in 0.11s`。包含 rank-capped pool、失败归因、Stage 194 LambdaMART 和 Stage 195 协议的 current-source 回归为 `24 passed in 1.60s`。全库 Ruff lint、3 个 Python 文件 format check、`pip check`、CLI help 与 `git diff --check` 均通过。
 
 第一次完整 pytest 创建了唯一 Python 子进程，命令中只调用一次 `Wait-Process` 且未设置 pytest timeout 或轮询。执行工具默认时限在约 14 秒时终止外层 PowerShell，但子进程继续自然完成；一次恢复性检查确认没有残留 pytest 进程，完整 stdout 为 `1162 passed, 1 warning in 26.63s`。增加第 6 个定向测试后，尝试把执行器 `timeout_ms` 设为 0 以表达“无时限”，但该接口把 0 解释为立即超时；恢复检查确认此次没有创建 PID。最终 current-source 完整测试使用执行传输层的超大上限避免工具提前杀死外层，该值不是 pytest timeout 或轮询期限；唯一 PID `24988` 在同一命令的一次 `Wait-Process` 下自然结束，stdout 到达 100%，stderr 为空，结果为 `1163 passed, 1 warning in 26.96s`。PowerShell child `ExitCode` 字段仍为空，因此外层按空值报错；该字段按事实保留为未知，没有为了补写退出码再次运行完整测试。warning 仍是既有 FastAPI/Starlette `TestClient` deprecation。
+## 2026-07-27 - Stage 196 安全优先前沿训练集嵌套交叉验证
+
+Stage 196 按 Stage 195 冻结协议实现并运行 train-only `5 outer x 4 inner` nested CV。第一阶段继续使用 4 个 cap-16 safety-pool builder；第二阶段把 4 个 LambdaMART gain model 与 12 个 cost-sensitive unsafe model 解耦，并测试 safest prefix `2/4/8/12/16`，完整 grid 为 960 个 policy。每个 representation-partition 拟合 4 个 pool safety head、2 个 gain ranker 和 6 个 unsafe head；unsafe head 按 `scale_pos_weight=1/2/4` 逐个拟合、预测、释放，任一时刻只驻留一个 weighted unsafe model。winner 只在 safest prefix union baseline 后按 gain 降序、unsafe 升序和 canonical action order 选择；无 absolute threshold、utility blend、gold filter、retry、fallback 或弱候选替代。
+
+核心首轮测试为 `3 passed, 1 failed`：测试把 baseline 放在 safety cap 内，却错误断言 union 后池大小为 17；把 baseline 风险设高以真实构造 cap 外 union 后，核心测试通过。真实 LightGBM smoke fit 第一次因合成数据没有 citation-loss 正类被目标完整性 guard 拒绝，尚未进入拟合；补充 citation loss 后，第二次发现 histogram wrapper 需要 sparse heldout matrix 并由内部 `.toarray()`，实现提前传 ndarray 导致失败。修复接口后，`-W error` smoke fit 完成 12 fits、2,400 trees 和全部 6 组 weighted unsafe prediction，无 warning。核心、编排、Stage 194/195 相关定向回归随后为 `24 passed in 12.75s`，Ruff 与 `pip check` 通过。
+
+正式预检第一次手写错误 technotes 路径，在任何 PID 创建前停止；随后直接读取 `ProjectSettings.primeqa_raw_dir` 得到真实配置路径。第二次预检确认所有输入存在，Stage 195 report、LightGBM wheel、Narwhals wheel 三个 SHA-256 精确匹配，安装版本为 `lightgbm==4.7.0`、`narwhals==2.24.0`，CLI help 与 `pip check` 通过。正式进程内可用系统内存为 `5.100 GiB`，高于冻结的 4.0 GiB，没有使用 memory override 或缩减 grid。
+
+正式 Python PID `15472` 在同一条 PowerShell 命令中只调用一次 `Wait-Process` 并等待自然结束；执行工具只恢复同一个 command cell 的输出，没有发出第二个进程查询或第二次 `Wait-Process`。命令无轮询和 experiment timeout。stderr 只有模型权重加载 progress bar，无异常。Stage 182 reproduction 耗时 `214.262892` 秒，Stage 196 nested CV 耗时 `673.629911` 秒，总 wall `888.733349` 秒。
+
+20/20 inner partition 全部完成，但五个 outer context 均为 `0/960` eligible，因此协议按冻结规则跳过全部 outer refit 和 outer evaluation。实际拟合为 160 个 pool safety、80 个 LambdaMART、240 个 unsafe head，共 `480/600` fits、96,000 棵 LightGBM tree、983,840 条 private prediction；停止在 480 是 no-eligible 的自然结果，不是 grid reduction、retry 或 partial continuation。35/35 process guard 全部通过，公开报告没有私有 action、feature 或 prediction 行。aggregate 和 bootstrap 未评估；报告中的 aggregate 零值表示 `not evaluated`，不是模型效果为零。
+
+五个 top-inner 候选如下：
+
+```text
+fold  prefix weight  pool      frontier  capture   precision unsafe
+1     8      2.0     0.993127  0.958763  0.671280  0.667845  0.311864
+2     8      4.0     0.986207  0.948276  0.643357  0.637011  0.338983
+3     4      4.0     0.986348  0.849829  0.647059  0.632509  0.327759
+4     12     1.0     0.989510  0.972028  0.689046  0.663043  0.296552
+5     4      2.0     0.986486  0.864865  0.681507  0.674825  0.295681
+```
+
+fold 4/5 的 capture 与 precision 已通过，但 unsafe 仍约为 `0.296`，高于 `0.25`。fold 3/5 的 prefix 4 只保留 `0.164577/0.163233` 的 unsafe pool action，winner unsafe rate 却仍为 `0.327759/0.295681`。这说明 cost-sensitive prefix 确实大量过滤 unsafe action，但剩余少量 unsafe action 被纯 gain winner rule 过度提升；下一瓶颈不是继续缩小池或盲目增大 class weight，而是 surviving unsafe winner 的 gain/risk rank 交互。
+
+资源实测为 working-set 峰值 `3.761 GiB`、private 峰值 `4.116 GiB`、系统最小可用内存 `2.960 GiB`，CUDA allocated/reserved 均为 0，无 OOM。正式状态为 `stage196_safety_first_frontier_insufficient`：实验有效，候选族未接受；dev/test、full-train selection、runtime E2E、replacement 与默认启用仍未授权。
+
+第一版 15 张图如实显示 outer `not evaluated`，但无法呈现已有 top-inner 证据。没有重跑模型或修改指标，而是从正式报告现有聚合字段重做 top-inner pool/frontier/capture/unsafe/retention/prefix/weight 图；旧初版目录保留且不冒充最终图。最终 15/15 SVG 经固定 `resvg_py==0.3.3`、项目 Poppins 字体、无字体 fallback 的链路栅格化，并按原分辨率逐张打开，标题、数值、17 个 gate 和 35 行 guard 均无裁切或重叠。最终哈希：
+
+```text
+report:   e5a44fbc76acaa053ca809174b1f3f767afe31a4d55e0e05d0b6708aee41fa01
+manifest: dfe7f383de182536a497e32923a6dcc847e5614ed1a50162e0ed0ba28f51c79e
+```
+
+下一阶段应先做 train-only surviving-unsafe-winner attribution，按 unsafe rank、gain rank、outcome、prefix 和 risk head 定位失败结构，再决定修改 risk model、final constrained winner rule 或两者；不能直接放宽 unsafe 门槛或进入 dev/test。
+
+current-source 最终验证中，Stage 193-196 相关回归为 `24 passed in 10.81s`，全库 Ruff lint、5 个变更 Python 文件 format check、`pip check`、CLI help 和 `git diff --check` 均通过。完整 pytest 使用唯一 Python PID `3756`，同一条 PowerShell 命令只调用一次 `Wait-Process` 等待自然结束，无轮询或 pytest timeout；结果为 `1173 passed, 1 warning in 35.17s`，warning 仍是既有 FastAPI/Starlette `TestClient` deprecation。
