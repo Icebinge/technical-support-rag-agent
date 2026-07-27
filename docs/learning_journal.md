@@ -36687,3 +36687,26 @@ manifest: af31be88acd15b9c57bb983fef0a2b7bcd8b7abd3851c5ddf56416b015fb0e28
 正式状态为 `stage199_joint_risk_winner_insufficient`：实验有效但候选族不接受；不授权 full-train policy selection、replacement、runtime E2E、dev/test 或默认启用。下一阶段应冻结 train-only inner eligibility failure attribution，按 constraint、fold、loss type 和 question context 找出不能同时满足 capture/safety 的结构性原因；不得放宽现有 gate，也不得把 top-ineligible cell 当成可部署策略。
 
 current-source 最终验证中，全库 Ruff lint、5 个变更 Python 文件 format check、`pip check`、CLI help 与 `git diff --check` 全部通过；Stage 194-199 相关回归为 `42 passed in 13.05s`。完整 pytest 使用唯一 Python PID `26548`，同一条 PowerShell 命令只调用一次 `Wait-Process` 并等待自然结束，无轮询或 pytest timeout，结果为 `1197 passed, 1 warning in 40.75s`，真实退出码为 `0`；warning 仍是既有 FastAPI/Starlette `TestClient` deprecation。
+
+## 2026-07-27 - Stage 200 joint risk/winner 失败归因协议冻结
+
+Stage 200 按用户确认的推荐路线冻结 Stage 201 train-only inner eligibility failure attribution。该阶段只读取 SHA-256 精确匹配的 Stage 199 公开聚合报告，不加载 train/dev/test rows 或 documents，不导入 LightGBM，不拟合模型，不生成 prediction，不运行 oracle、constraint relaxation 或新 policy search，也不修改 runtime。Stage 199 的 34/34 source guards、5/5 exact controls、28 个 cell、4 个 risk signal、7 个 winner rule、1,480 个 inner-OOF question context 和 `0/0/0/0/0` eligible counts 均被正式验证。
+
+Stage 201 的归因人口冻结为三层：140 个 `outer context x cell` 单元用于 13 项 eligibility constraint 的通过/失败、signed margin、共失败矩阵、精确 failed-set、单约束移除与 Pareto 统计；560 个 `inner fold x outer-cell` 单元用于 worst-fold、跨 fold 波动和“aggregate 通过但 fold-count 失败”归因；41,440 个 `question context x cell` 单元用于 baseline/strict/safe-zero/citation-only/F1-only/both-loss 结果分区，以及 no opportunity、pool exclusion、frontier exclusion、winner miss、strict selected 机制分区。所有逐题行只在内存中流式聚合，公开报告禁止问题文本、问题/文档/action ID、feature row 和 prediction row。
+
+13 项约束完整沿用 Stage 199 数值，不放宽 gate。每项统一定义 signed margin：下界为 `observed-threshold`，上界为 `threshold-observed`，非负才通过。单约束移除只用于判断 blocker 的必要性，明确不授权阈值放宽、top-ineligible candidate 晋级或 runtime rule。gold oracle 只允许参与离线机制分区，禁止成为选择特征、filter 或 fallback。
+
+由于 Stage 199 没有持久化私有 action/prediction 行，Stage 201 必须精确重建原 20 个 inner partition：每 partition 5 fits，共 100 fits、18,000 棵 LightGBM tree、245,960 条 private prediction；28 个 cell 共享模型，outer refit 和 additional diagnostic fit 均为 0。内存预检保持 4 GiB；正式进程必须同一 PID、单次 PowerShell `Wait-Process` 等待自然结束，不轮询、不设置 experiment timeout、不 retry、不 fallback，也不缩减 41,440 个 question-cell population。
+
+首轮静态检查真实发现 1 个 unused import、3 个 E501 长行和 3 个待格式化文件；Ruff 自动修复/格式化后 lint 通过，定向测试为 `6 passed in 0.14s`。正式 freeze 耗时 `0.002464` 秒，真实 guard 数为 `66/66`；过程中模型 fit、私有行、prediction、oracle、policy search、retry、fallback 均为 0。此前过程更新曾在未读取最终数组长度前误写成 68/68，随后已立即更正；正式产物和本记录只使用可核验的 66/66。
+
+10/10 SVG 经固定 `resvg_py==0.3.3`、项目 Poppins 字体、白底、无 fallback 链路转为 PNG，并全部按原始分辨率逐张检查；66 行 guard、13 项约束、授权边界、零执行边界、source range 与 budget 均无裁切、重叠或空白误渲染。constraint 图中的 `1-13` 表示冻结顺序，不表示阈值大小；真实 threshold 和 signed-margin 公式保存在 JSON。正式哈希：
+
+```text
+report:   9edf5f3ba725bba501ebe0325ae1a072288a219e5ef655a932ae7722fcf2cf32
+manifest: bd6bd8170e705eb296f7585cc2a93335348e2e474480f31fcb193a971c387097
+```
+
+正式状态为 `stage200_joint_risk_winner_failure_attribution_protocol_frozen`。只授权 Stage 201 train-only attribution；dev/test、new policy search、constraint relaxation、full-train/replacement、runtime E2E、Stage 178B 与默认启用均保持关闭。
+
+current-source 最终验证中，全库 Ruff lint、3 个变更 Python 文件 format check、`pip check`、CLI help 与 `git diff --check` 全部通过；Stage 197-200 相关回归为 `29 passed in 2.11s`。完整 pytest 使用唯一 Python PID `13636`，同一条 PowerShell 命令只调用一次 `Wait-Process` 并等待自然结束，无轮询或 pytest timeout，结果为 `1203 passed, 1 warning in 39.73s`，真实退出码为 `0`；warning 仍是既有 FastAPI/Starlette `TestClient` deprecation。
