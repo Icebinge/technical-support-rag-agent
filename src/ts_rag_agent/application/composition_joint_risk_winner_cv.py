@@ -5,6 +5,7 @@ import time
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Literal, Protocol
 
 import numpy as np
@@ -86,6 +87,31 @@ class JointRiskWinnerPolicySpec:
     name: str
     risk_signal: RiskSignal
     winner_rule: WinnerRuleSpec
+
+
+@dataclass(frozen=True)
+class JointRiskWinnerCandidateSnapshot:
+    """Read-only private evidence for one policy cell in one outer context."""
+
+    spec: Mapping[str, Any]
+    eligible: bool
+    evaluation: Mapping[str, Any]
+    diagnostics: Mapping[str, Any]
+    paired_vs_control: Mapping[str, Any]
+    decisions: tuple[SafetyFirstFrontierDecision, ...]
+
+
+@dataclass(frozen=True)
+class JointRiskWinnerDiagnosticSnapshot:
+    """Read-only Stage201 stream item; callers must aggregate and discard it."""
+
+    outer_fold_id: str
+    inner_fold_ids: tuple[str, ...]
+    inner_question_count: int
+    candidates: tuple[JointRiskWinnerCandidateSnapshot, ...]
+
+
+DiagnosticSink = Callable[[JointRiskWinnerDiagnosticSnapshot], None]
 
 
 class JointPartitionFitPredictor(Protocol):
@@ -336,6 +362,7 @@ def run_joint_risk_winner_nested_cv(
     stage197_report: Mapping[str, Any],
     progress_sink: ProgressSink | None = None,
     partition_fit_predictor: JointPartitionFitPredictor | None = None,
+    diagnostic_sink: DiagnosticSink | None = None,
 ) -> dict[str, Any]:
     """Run the frozen Stage 199 five-by-four train-only nested CV."""
 
@@ -449,6 +476,17 @@ def run_joint_risk_winner_nested_cv(
         control_reproduction_count += 1
         for candidate in candidates:
             candidate["paired_vs_control"] = _paired_delta(candidate, control)
+
+        if diagnostic_sink is not None:
+            diagnostic_sink(
+                _diagnostic_snapshot(
+                    outer_fold_id=outer_fold_id,
+                    inner_fold_ids=inner_fold_ids,
+                    inner_question_count=question_count,
+                    candidates=candidates,
+                    decisions_by_spec=decisions_by_spec,
+                )
+            )
 
         for risk_signal in _RISK_SIGNALS:
             policy_name = f"risk_{risk_signal}__winner_gain_only"
@@ -750,6 +788,40 @@ def _public_candidate(row: Mapping[str, Any]) -> dict[str, Any]:
         "diagnostics": row["diagnostics"],
         "paired_vs_control": row["paired_vs_control"],
     }
+
+
+def _diagnostic_snapshot(
+    *,
+    outer_fold_id: str,
+    inner_fold_ids: Sequence[str],
+    inner_question_count: int,
+    candidates: Sequence[Mapping[str, Any]],
+    decisions_by_spec: Mapping[str, tuple[SafetyFirstFrontierDecision, ...]],
+) -> JointRiskWinnerDiagnosticSnapshot:
+    return JointRiskWinnerDiagnosticSnapshot(
+        outer_fold_id=outer_fold_id,
+        inner_fold_ids=tuple(inner_fold_ids),
+        inner_question_count=inner_question_count,
+        candidates=tuple(
+            JointRiskWinnerCandidateSnapshot(
+                spec=_deep_freeze(candidate["spec"]),
+                eligible=bool(candidate["eligible"]),
+                evaluation=_deep_freeze(candidate["evaluation"]),
+                diagnostics=_deep_freeze(candidate["diagnostics"]),
+                paired_vs_control=_deep_freeze(candidate["paired_vs_control"]),
+                decisions=tuple(decisions_by_spec[str(candidate["spec"]["name"])]),
+            )
+            for candidate in candidates
+        ),
+    )
+
+
+def _deep_freeze(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({str(key): _deep_freeze(child) for key, child in value.items()})
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return tuple(_deep_freeze(child) for child in value)
+    return value
 
 
 def _paired_delta(candidate: Mapping[str, Any], control: Mapping[str, Any]) -> dict[str, Any]:

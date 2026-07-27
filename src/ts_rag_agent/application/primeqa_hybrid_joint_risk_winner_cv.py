@@ -21,6 +21,7 @@ from ts_rag_agent.application.composition_dual_target_policy import (
     SelectedAction,
 )
 from ts_rag_agent.application.composition_joint_risk_winner_cv import (
+    DiagnosticSink,
     run_joint_risk_winner_nested_cv,
 )
 from ts_rag_agent.application.svg_charts import BarDatum, render_horizontal_bar_chart_svg
@@ -49,6 +50,15 @@ class Stage199Visualization:
     path: str
 
 
+class Stage199SourceReproductionError(ValueError):
+    """Expose structured preflight evidence without weakening the exact guard."""
+
+    def __init__(self, evidence: Mapping[str, Any]) -> None:
+        self.evidence = dict(evidence)
+        failed = ", ".join(self.evidence.get("failed_checks", ())) or "unknown"
+        super().__init__(f"Stage199 did not reproduce formal Stage182 checks: {failed}")
+
+
 def run_stage199_joint_risk_winner_cv(
     *,
     stage198_protocol_path: Path,
@@ -69,6 +79,7 @@ def run_stage199_joint_risk_winner_cv(
     documents_path: Path,
     encoder_batch_size: int = 64,
     progress_sink: stage182.ProgressSink | None = None,
+    diagnostic_sink: DiagnosticSink | None = None,
 ) -> dict[str, Any]:
     """Reproduce Stage182 and run the authorized Stage199 train-only nested CV."""
 
@@ -133,7 +144,7 @@ def run_stage199_joint_risk_winner_cv(
         selected_actions=private["selected_actions"],
     )
     if not reproduction["passed"]:
-        raise ValueError("Stage199 did not reproduce the formal Stage182 result")
+        raise Stage199SourceReproductionError(reproduction)
     gc.collect()
     tracker.capture("stage182_temporary_resources_released")
 
@@ -152,6 +163,7 @@ def run_stage199_joint_risk_winner_cv(
         stage198_protocol=formal_stage198,
         stage197_report=formal_stage197,
         progress_sink=cv_progress,
+        diagnostic_sink=diagnostic_sink,
     )
     tracker.capture("joint_risk_winner_nested_cv_complete")
     analyzed_at = time.perf_counter()

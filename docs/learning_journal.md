@@ -36710,3 +36710,30 @@ manifest: bd6bd8170e705eb296f7585cc2a93335348e2e474480f31fcb193a971c387097
 正式状态为 `stage200_joint_risk_winner_failure_attribution_protocol_frozen`。只授权 Stage 201 train-only attribution；dev/test、new policy search、constraint relaxation、full-train/replacement、runtime E2E、Stage 178B 与默认启用均保持关闭。
 
 current-source 最终验证中，全库 Ruff lint、3 个变更 Python 文件 format check、`pip check`、CLI help 与 `git diff --check` 全部通过；Stage 197-200 相关回归为 `29 passed in 2.11s`。完整 pytest 使用唯一 Python PID `13636`，同一条 PowerShell 命令只调用一次 `Wait-Process` 并等待自然结束，无轮询或 pytest timeout，结果为 `1203 passed, 1 warning in 39.73s`，真实退出码为 `0`；warning 仍是既有 FastAPI/Starlette `TestClient` deprecation。
+
+## 2026-07-27 - Stage 201 joint risk/winner 训练集失败归因
+
+Stage 201 按 Stage 200 冻结协议实现不可变 diagnostic snapshot，并在 Stage 199 每个 outer context 的 28 个 cell 全部评估且 control 精确复现后，把私有 decision 流式送入归因器。未传 sink 时 Stage 199 公开行为不变；正式归因只保留聚合计数和数值分布，不持久化 question/action/prediction 行。用户在 Stage 200 冻结后明确选择 near-boundary 路线 A：计数约束失败 margin 在 1 以内、比例约束在 0.01 以内、mean F1 delta 在 0.001 以内记为 near-boundary；该补充口径记录在 Stage 201，没有改写 Stage 200 哈希。
+
+正式人口精确为 140 个 outer-cell、560 个 fold-cell 和 41,440 个 question-cell。Stage 199 确定性证据 `15/15` 精确复现；实际执行 100 fits、18,000 棵 LightGBM tree、245,960 条 private prediction，outer refit 与 additional diagnostic fit 均为 0。两个逐题互斥分区都精确守恒：selected outcome 为 baseline `6,270`、strict success `22,044`、safe zero `1,176`、unsafe citation-only `354`、unsafe F1-only `11,134`、unsafe both `462`；opportunity mechanism 为 no opportunity `672`、pool exclusion `476`、frontier exclusion `2,954`、winner miss `15,294`、strict selected `22,044`。
+
+140 个 cell 全部失败，且每个失败 1-6 项约束；失败项数众数为 4（49 个 cell）。主 blocker 是 conditional strict capture `135/140`、strict precision `125/140`、unsafe rate `116/140`、minimum capture-fold count `89/140` 和 minimum unsafe-fold count `51/140`。capture 与 precision 共失败 125 次，Jaccard `0.925926`；capture 与 unsafe 共失败 111 次，Jaccard `0.792857`。单独移除一个约束只能修复 5 个 cell，并且全部来自移除 unsafe-rate gate，说明简单放宽一个 gate 不能解决当前候选族。pool recall、minimum pool-recall fold count、citation delta、mean F1 delta 与 changed count 均为 `0/140` 失败，第一阶段候选池不是主瓶颈。
+
+fold 层面 capture violation 共 292 次、unsafe 171 次、citation 70 次、mean F1 36 次。fold 5 的 unsafe/citation violation 最多（74/39），fold 1 的 capture violation 最多（84）。12 个 cell aggregate citation 通过但 nonregressing-fold count 失败，F1 对应 1 个；capture、unsafe 与 pool recall 没有只被 fold-count 单独否决的 aggregate-pass cell。五个 outer context 的 capture/unsafe Pareto cell 数为 `5/4/6/3/9`，存在多个 tradeoff 点，但没有完整合格点。
+
+问题级证据显示真正的失败主机制是 `winner_selection_miss`，而不是 strict opportunity 缺失。37,338 个 context 中有 strict alternative 留在 frontier；其中 10,477（`0.280599`）存在更低风险 strict alternative，11,700（`0.313354`）存在更高 gain strict alternative。四个 risk signal 的 unsafe winner rate 仅在 `0.282915-0.296815` 之间，差异很小；winner rule 变化更大：gain-only strict rate `0.624662` / unsafe `0.338514`，rank-utility 2.0 strict `0.393750` / unsafe `0.201520`，top-4 shortlist strict `0.335304` / unsafe `0.182601`，呈现明显的 capture-safety 目标冲突。
+
+首个正式尝试由 shell 记录 PID `11668`，在 `2026-07-27T15:48:58+08:00` 的 Stage 182 exact-reproduction preflight 失败；Stage 199 fits 为 0，没有生成 Stage 201 报告，stdout/stderr 均保留。原 guard 只返回整体 ValueError，无法从第一次日志恢复具体 failed sub-check。用户随后选择 A，代码增加十项 formal/actual 结构化比较、专用异常、原子 preflight-failure sink 和显式 recovery-context 文件。修正后正式尝试的 shell-tracked PID 为 `10216`、Python runtime PID 为 `27800`；第二次 preflight 全部通过，failure sink 没有触发，因此第一次漂移的具体子项仍未知，不能伪造根因。最终报告完整保留两次尝试，没有伪装成首次成功。
+
+第二次正式运行 wall `501.422619` 秒，working set 峰值 `3.755 GiB`、private usage 峰值 `4.140 GiB`、系统最小可用内存 `2.723 GiB`，CUDA allocation/reservation 均为 0。36/36 process guard 全部通过；dev/test、new policy search、constraint relaxation、full-train selection、replacement、runtime E2E、Stage 178B、retry、fallback 与默认启用均保持关闭。
+
+可视化后处理生成 17/17 张可解析 SVG，并使用固定 `resvg_py==0.3.3`、项目 Poppins 字体、白底、无 fallback 链路栅格化；全部 PNG 非空并按原始分辨率检查。首次视觉检查发现 selected-outcome 最长标签左侧空间不足，随后只扩大 margin 并重渲染，没有重跑模型或改变聚合指标。写结论时还发现 `strict_selected` 是成功分区，不能参与“主失败机制”竞争；报告据此把 overall dominant partition 与 dominant failure mechanism 拆开，后者正确为 `winner_selection_miss`。这两项真实 postprocessing correction 已写入正式 JSON。
+
+正式状态为 `stage201_joint_risk_winner_failure_attribution_complete`。冻结打分规则得到 objective research `292`、model research `224`、representation research `13`，因此下一方向是先冻结 question-conditional constrained selection objective 实验，同时联合约束 capture、precision 与 unsafe loss；该建议是诊断结论，不是因果声明，也没有选出新 policy。正式产物哈希：
+
+```text
+report:   b5ca57e6b7f6c0798adff91ba8615579b24435b846922088a86828801ceaa015
+manifest: 3ece1c586222fa99c70a2ea205ad0a7510ead1adafba7a193ce46d7b07013c0b
+```
+
+current-source 最终验证中，全库 Ruff lint、10 个变更 Python 文件 format check、`pip check`、CLI help、`git diff --check` 与 Stage 183/199/200/201 定向回归全部通过；定向结果为 `37 passed in 2.14s`。完整 pytest 使用唯一后台 PID `3424`，同一条 PowerShell 命令只调用一次 `Wait-Process` 并等待自然结束，没有 pytest timeout 或轮询；结果为 `1213 passed, 1 warning in 40.92s`，stderr 为空。warning 仍是既有 FastAPI/Starlette `TestClient` deprecation。PowerShell child `ExitCode` 字段为空，按事实保留为未知；pytest stdout 已到达 100%，没有为了补写退出码再次运行测试。

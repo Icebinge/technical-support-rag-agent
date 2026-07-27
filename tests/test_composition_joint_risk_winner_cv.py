@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from ts_rag_agent.application import composition_joint_risk_winner_cv as policy
 from ts_rag_agent.application import composition_safety_constrained_lambdamart as stage194
 from ts_rag_agent.application import composition_safety_first_frontier as stage196
@@ -209,12 +211,14 @@ def test_nested_cv_reproduces_controls_and_uses_full_125_fit_budget() -> None:
         }
     stage197 = {"surviving_unsafe_winner_attribution": {"outer_contexts": source_outer}}
 
+    snapshots = []
     report = policy.run_joint_risk_winner_nested_cv(
         action_rows=rows,
         stage182_selected_actions=(),
         stage198_protocol=stage198,
         stage197_report=stage197,
         partition_fit_predictor=_fake_fit_predictor,
+        diagnostic_sink=snapshots.append,
     )
 
     assert report["execution"]["model_fit_count"] == 125
@@ -223,6 +227,11 @@ def test_nested_cv_reproduces_controls_and_uses_full_125_fit_budget() -> None:
     assert report["execution"]["all_controls_reproduced_exactly"] is True
     assert len(report["cell_aggregates"]) == 28
     assert all(row["outer_evaluated"] for row in report["outer_contexts"].values())
+    assert len(snapshots) == 5
+    assert all(len(snapshot.candidates) == 28 for snapshot in snapshots)
+    assert all(len(candidate.decisions) == 40 for candidate in snapshots[0].candidates)
+    with pytest.raises(TypeError):
+        snapshots[0].candidates[0].evaluation["question_count"] = 0
 
 
 def _predictions():

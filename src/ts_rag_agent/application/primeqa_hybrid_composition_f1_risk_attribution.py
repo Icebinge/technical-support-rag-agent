@@ -211,37 +211,53 @@ def _stage182_reproduction(
     actual_nested = reproduced["dual_target_nested_cv"]
     formal_aggregate = formal_nested["aggregate"]
     actual_aggregate = actual_nested["aggregate"]
-    checks = {
-        "status": reproduced["decision"]["status"] == formal["decision"]["status"],
-        "stage181_reproduction": reproduced["stage181_reproduction"]["passed"],
-        "selected_question_count": (
-            actual_aggregate["selected_question_count"]
-            == formal_aggregate["selected_question_count"]
-        ),
-        "strict_expected_count": (
-            actual_aggregate["strict_expected_count"] == formal_aggregate["strict_expected_count"]
-        ),
-        "f1_regression_action_count": (
-            actual_aggregate["f1_regression_action_count"]
-            == formal_aggregate["f1_regression_action_count"]
-        ),
-        "gold_citation_delta": (
-            actual_aggregate["gold_citation_delta"] == formal_aggregate["gold_citation_delta"]
-        ),
-        "mean_f1_delta": (
-            actual_aggregate["mean_f1_delta_all_questions"]
-            == formal_aggregate["mean_f1_delta_all_questions"]
-        ),
-        "selected_specs": (
-            actual_nested["selected_spec_counts"] == formal_nested["selected_spec_counts"]
-        ),
-        "bootstrap": (actual_nested["paired_bootstrap"] == formal_nested["paired_bootstrap"]),
-        "private_selected_count": (
-            len(selected_actions) == formal_aggregate["selected_question_count"]
-        ),
+    comparison_values = {
+        "status": {
+            "formal": formal["decision"]["status"],
+            "actual": reproduced["decision"]["status"],
+        },
+        "stage181_reproduction": {
+            "formal": True,
+            "actual": reproduced["stage181_reproduction"]["passed"],
+        },
+        "selected_question_count": {
+            "formal": formal_aggregate["selected_question_count"],
+            "actual": actual_aggregate["selected_question_count"],
+        },
+        "strict_expected_count": {
+            "formal": formal_aggregate["strict_expected_count"],
+            "actual": actual_aggregate["strict_expected_count"],
+        },
+        "f1_regression_action_count": {
+            "formal": formal_aggregate["f1_regression_action_count"],
+            "actual": actual_aggregate["f1_regression_action_count"],
+        },
+        "gold_citation_delta": {
+            "formal": formal_aggregate["gold_citation_delta"],
+            "actual": actual_aggregate["gold_citation_delta"],
+        },
+        "mean_f1_delta": {
+            "formal": formal_aggregate["mean_f1_delta_all_questions"],
+            "actual": actual_aggregate["mean_f1_delta_all_questions"],
+        },
+        "selected_specs": {
+            "formal": formal_nested["selected_spec_counts"],
+            "actual": actual_nested["selected_spec_counts"],
+        },
+        "bootstrap": {
+            "formal": formal_nested["paired_bootstrap"],
+            "actual": actual_nested["paired_bootstrap"],
+        },
+        "private_selected_count": {
+            "formal": formal_aggregate["selected_question_count"],
+            "actual": len(selected_actions),
+        },
     }
+    checks = {name: row["actual"] == row["formal"] for name, row in comparison_values.items()}
     return {
         "checks": checks,
+        "comparison_values": comparison_values,
+        "failed_checks": [name for name, passed in checks.items() if not passed],
         "passed": all(checks.values()),
         "actual_selected_question_count": actual_aggregate["selected_question_count"],
         "actual_f1_regression_action_count": actual_aggregate["f1_regression_action_count"],

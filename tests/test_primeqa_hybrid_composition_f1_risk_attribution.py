@@ -64,6 +64,24 @@ def test_stage182_reproduction_requires_exact_private_and_public_metrics() -> No
 
     assert result["passed"] is True
     assert all(result["checks"].values())
+    assert result["failed_checks"] == []
+    assert result["comparison_values"]["selected_question_count"] == {
+        "formal": 129,
+        "actual": 129,
+    }
+
+    reproduced["dual_target_nested_cv"]["aggregate"]["gold_citation_delta"] = 4
+    mismatch = stage183._stage182_reproduction(
+        formal=formal,
+        reproduced=reproduced,
+        selected_actions=[object()] * 129,
+    )
+    assert mismatch["passed"] is False
+    assert mismatch["failed_checks"] == ["gold_citation_delta"]
+    assert mismatch["comparison_values"]["gold_citation_delta"] == {
+        "formal": 5,
+        "actual": 4,
+    }
 
 
 def test_stage183_public_safety_rejects_private_rows() -> None:
