@@ -48,6 +48,12 @@ partition. The four-way assignment is the deterministic SHA-256 of outer context
 context, stable question identifier, and seed 205 modulo four. Outer refit repeats the same
 cross-fitting pipeline.
 
+The two source safety heads follow the same four cross-fit boundaries and predict only cross-fit
+held-out questions when their scores construct gate-training pools and features. Their OOF
+predictions are shared by both ranker families. Same-fit source safety predictions are forbidden
+for gate-training winners; this stricter amendment was explicitly selected by the user after the
+initial Stage 205 freeze.
+
 This extra layer is required because a same-fit ranker would make the gate learn from optimistically
 selected winners and would leak ranking fit behavior into gate supervision.
 
@@ -65,9 +71,11 @@ candidate.
 
 ## Budget and authorization
 
-Each inner partition has at most 4 source fits, 10 conditional-ranker fits, and 2 gate fits. Across
-20 inner partitions and at most 5 selected outer refits, the maximum is 370 model fits and 96,000
-LightGBM trees. These are Stage 206 upper bounds, not Stage 205 observed usage.
+Each inner partition has at most 4 full source fits, 8 cross-fit source-safety fits, 10
+conditional-ranker fits, and 2 gate fits. Across 20 inner partitions and at most 5 selected outer
+refits, the maximum is 570 model fits and 96,000 LightGBM trees. The extra safety estimators are
+not LightGBM models, so the LightGBM tree bound is unchanged. These are Stage 206 upper bounds,
+not Stage 205 observed usage.
 
 The formal Stage 206 process must use one PowerShell `Wait-Process` call for one PID until natural
 exit, without polling or an experiment timeout. Stage 205 authorizes only the Stage 206 train-only
@@ -84,18 +92,24 @@ listed as gate features even though separately fitted cross-fit rankers need not
 scale. The contract was tightened to use only a within-question normalized margin and gained two
 guards for raw-score exclusion and deterministic cross-fit assignment. The intermediate report
 hash `2f9db604bb4733270e9b522686d7f8ef24a0d0ad36bdea5ddb9dda2e1e6a7b69` and manifest hash
-`57ad74ac245773d9f9427d79f5fefde3ee707af57c086290d8e2c7c758c8ae8d` were superseded. The
-final corrected freeze produced:
+`57ad74ac245773d9f9427d79f5fefde3ee707af57c086290d8e2c7c758c8ae8d` were superseded.
+
+The user subsequently selected the stricter source-safety OOF amendment before Stage 206 began.
+This supersedes the earlier `370-fit` report: the two source safety heads now cross-fit in
+every gate fold, shared across ranker families. The prior report hash
+`a967893d26d1ca58164893f8cd804ea1883d870863d6c599da42d447fa59df81` and manifest hash
+`817fba82e86299dff4b0299cd5d4b1842b4c5eafa55e1d0c1b19f4cedc441678` are retained only as
+history. The amended formal freeze is:
 
 ```text
 status:        stage205_two_stage_change_ranker_protocol_frozen
-guards:        80 / 80 passed
+guards:        84 / 84 passed
 model fits:    0
 private rows:  0
 dev/test:      closed / closed
 visuals:       10 SVG + 10 PNG
-report hash:   a967893d26d1ca58164893f8cd804ea1883d870863d6c599da42d447fa59df81
-manifest hash: 817fba82e86299dff4b0299cd5d4b1842b4c5eafa55e1d0c1b19f4cedc441678
+report hash:   0988f97e7e30e6772cc7a7c9738a9e1d285f698629b5b0ccf48c1701e36de02a
+manifest hash: 531d66f4a7730cea099576ee5cf1d63b6bb455cf408b7881cba4c9ba8c2ad372
 ```
 
 Repository-wide Ruff, format checks for the three changed Python files, `pip check`, CLI help, and
@@ -106,5 +120,6 @@ launched once and the PowerShell wrapper issued one `Wait-Process`, but the Code
 terminated that wrapper after about 14 seconds. Pytest continued to natural completion and wrote
 the complete result above; the wrapper's post-wait exit-code and PID text were not returned and are
 therefore recorded as unknown rather than reconstructed. After the final metadata-only protocol
-tightening and two new guards, the focused Stage 202-205 current-source regression set passed `40`
-tests. The full suite was not rerun merely to manufacture the missing wrapper fields.
+tightening and the strict source-safety amendment, the focused Stage 202-205 current-source
+regression set passed `40` tests. The full suite was not rerun merely to manufacture the missing
+wrapper fields.

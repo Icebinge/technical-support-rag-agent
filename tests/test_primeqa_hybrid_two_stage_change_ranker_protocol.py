@@ -34,8 +34,9 @@ def test_freeze_authorizes_only_stage206_train_experiment(tmp_path: Path, monkey
     frozen = report["frozen_protocol"]
     assert frozen["factorial_ablation"]["two_stage_policy_count"] == 10
     assert frozen["factorial_ablation"]["candidate_config_count_per_outer_context"] == 11
-    assert frozen["cross_validation"]["model_fits_per_inner_partition"] == 16
-    assert frozen["cross_validation"]["maximum_model_fit_count"] == 370
+    assert frozen["cross_validation"]["model_fits_per_inner_partition"] == 24
+    assert frozen["cross_validation"]["source_safety_crossfit_fits_per_inner_partition"] == 8
+    assert frozen["cross_validation"]["maximum_model_fit_count"] == 570
     assert frozen["cross_validation"]["maximum_lightgbm_tree_count"] == 96_000
     assert len(frozen["inner_selection"]["eligibility_constraints"]) == 13
     assert len(frozen["advancement_gates"]) == 17
@@ -67,6 +68,9 @@ def test_gate_training_contract_forbids_same_fit_ranker_winners() -> None:
     assert gate["raw_absolute_ranker_scores_used"] is False
     assert crossfit["question_overlap_between_gate_fit_and_ranker_prediction_fold"] is False
     assert crossfit["gate_crossfit_assignment_is_deterministic"] is True
+    assert crossfit["source_safety_predictions_for_gate_winners_are_oof_only"] is True
+    assert crossfit["same_fit_source_safety_predictions_for_gate_training"] is False
+    assert crossfit["source_safety_crossfit_predictions_shared_across_ranker_families"] is True
     assert crossfit["gate_training_has_exactly_one_oof_winner_per_question"] is True
     assert frozen["candidate_pool_contract"]["baseline_excluded_from_conditional_ranker_fit"]
     assert frozen["candidate_pool_contract"]["fallback_used"] is False

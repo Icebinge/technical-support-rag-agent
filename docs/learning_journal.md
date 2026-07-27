@@ -36986,3 +36986,29 @@ FastAPI/Starlette `TestClient` deprecation。恢复性读取只找到当前 Powe
 PID 与 wrapper exit code 按事实记录为 unknown，没有为了补字段重跑或伪造。最终仅涉及协议
 元数据、两个 guard 与对应测试的 raw-score 收紧完成后，Stage 202-205 current-source 定向
 回归重新通过 40 项；完整 pytest 没有仅为制造缺失 wrapper 字段而重复执行。
+
+### Stage 205 严格 source-safety OOF 修订
+
+Stage 206 实现前审计发现：原 Stage 205 虽然要求 conditional ranker winner 对 gate training
+question 为 OOF，但构建这些 winner 的 cap-16 pool 和 gate safety 特征仍可能来自在整个 inner
+training 上拟合的 same-fit source safety heads。这不直接泄漏 gate label，却会让 pool membership
+和 safety score 带有训练内乐观偏差。该处理没有在冻结协议中落到具体边界，因此按要求列出并
+询问；用户明确选择严格修订，而不是接受原 `370 fits` 协议。
+
+修订后，每个 inner partition 的 4 个 gate cross-fit fold 都额外拟合 citation-loss 与 F1-loss
+两个 source safety head，只预测该 fold heldout questions；两种 ranker family 共享这组 OOF
+预测。gate-training winner 的 pool 和 source safety 特征禁止使用 same-fit prediction。每个
+inner partition 因此从 16 fits 变为 `4 full source + 8 source-safety crossfit + 10 ranker + 2
+gate = 24 fits`；最多 20 个 inner partition 与 5 个 outer refit 的总上限从 370 调整为
+`570 fits`。新增 160 个 safety estimator fit 不属于 LightGBM，因此 LightGBM tree 上限仍为
+`96,000`。
+
+严格修订后的正式冻结耗时 `0.013901` 秒，`84/84` guard 全部通过；model fit、private row
+与 prediction 仍为 0。8 项协议测试通过，SVG/PNG 重新生成。原 report/manifest hash
+`a967893d26d1ca58164893f8cd804ea1883d870863d6c599da42d447fa59df81` /
+`817fba82e86299dff4b0299cd5d4b1842b4c5eafa55e1d0c1b19f4cedc441678` 被以下严格修订版本替代：
+
+```text
+report:   0988f97e7e30e6772cc7a7c9738a9e1d285f698629b5b0ccf48c1701e36de02a
+manifest: 531d66f4a7730cea099576ee5cf1d63b6bb455cf408b7881cba4c9ba8c2ad372
+```

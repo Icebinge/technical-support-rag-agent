@@ -23,6 +23,7 @@ OUTER_FOLDS = 5
 INNER_FOLDS = 4
 GATE_CROSSFIT_FOLDS = 4
 SOURCE_MODELS_PER_PARTITION = 4
+SOURCE_SAFETY_HEADS_PER_CROSSFIT_FOLD = 2
 SOURCE_LIGHTGBM_MODELS_PER_PARTITION = 2
 TREES_PER_LIGHTGBM_MODEL = 300
 POOL_CAP = 16
@@ -143,9 +144,14 @@ def _frozen_protocol(source_trajectories: Sequence[Mapping[str, Any]]) -> dict[s
     ranker_fits_per_family = GATE_CROSSFIT_FOLDS + 1
     ranker_fits = len(rankers) * ranker_fits_per_family
     gate_fits = len(rankers)
-    fits_per_inner = SOURCE_MODELS_PER_PARTITION + ranker_fits + gate_fits
+    source_safety_crossfit_fits = GATE_CROSSFIT_FOLDS * SOURCE_SAFETY_HEADS_PER_CROSSFIT_FOLD
+    fits_per_inner = (
+        SOURCE_MODELS_PER_PARTITION + source_safety_crossfit_fits + ranker_fits + gate_fits
+    )
     lightgbm_per_inner = SOURCE_LIGHTGBM_MODELS_PER_PARTITION + ranker_fits + gate_fits
-    outer_fits = SOURCE_MODELS_PER_PARTITION + ranker_fits_per_family + 1
+    outer_fits = (
+        SOURCE_MODELS_PER_PARTITION + source_safety_crossfit_fits + ranker_fits_per_family + 1
+    )
     outer_lightgbm = SOURCE_LIGHTGBM_MODELS_PER_PARTITION + ranker_fits_per_family + 1
     return {
         "experiment_name": "train_only_two_stage_change_ranker_nested_cv",
@@ -261,6 +267,11 @@ def _frozen_protocol(source_trajectories: Sequence[Mapping[str, Any]]) -> dict[s
             "gate_crossfit_assignment_is_deterministic": True,
             "ranker_fit_on_crossfit_complement": True,
             "ranker_predicts_crossfit_heldout_questions_once": True,
+            "source_safety_heads_fit_on_crossfit_complement": True,
+            "source_safety_heads_predict_crossfit_heldout_questions_once": True,
+            "source_safety_predictions_for_gate_winners_are_oof_only": True,
+            "same_fit_source_safety_predictions_for_gate_training": False,
+            "source_safety_crossfit_predictions_shared_across_ranker_families": True,
             "gate_training_has_exactly_one_oof_winner_per_question": True,
             "gate_label_derived_after_oof_winner_selection": True,
             "full_inner_ranker_fit_only_after_gate_rows_are_complete": True,
@@ -290,6 +301,7 @@ def _frozen_protocol(source_trajectories: Sequence[Mapping[str, Any]]) -> dict[s
             "conditional_ranker_fits_per_inner_partition": ranker_fits,
             "gate_fits_per_inner_partition": gate_fits,
             "source_model_fits_per_inner_partition": SOURCE_MODELS_PER_PARTITION,
+            "source_safety_crossfit_fits_per_inner_partition": source_safety_crossfit_fits,
             "model_fits_per_inner_partition": fits_per_inner,
             "maximum_outer_refit_count": OUTER_FOLDS,
             "maximum_model_fit_count": inner_partition_count * fits_per_inner
@@ -313,6 +325,7 @@ def _frozen_protocol(source_trajectories: Sequence[Mapping[str, Any]]) -> dict[s
             "baseline_absent_from_ranker_rows": True,
             "ranker_labels_fit_partition_only": True,
             "gate_winners_are_oof": True,
+            "gate_winner_source_safety_scores_are_oof": True,
             "one_gate_row_per_training_question": True,
             "gate_labels_have_both_classes": True,
             "gate_features_are_runtime_available": True,
@@ -596,6 +609,18 @@ def _guard_checks(
             crossfit["gate_training_has_exactly_one_oof_winner_per_question"] is True,
         ),
         (
+            "gate_source_safety_is_oof",
+            crossfit["source_safety_predictions_for_gate_winners_are_oof_only"] is True,
+        ),
+        (
+            "same_fit_source_safety_forbidden",
+            crossfit["same_fit_source_safety_predictions_for_gate_training"] is False,
+        ),
+        (
+            "source_safety_crossfit_shared",
+            crossfit["source_safety_crossfit_predictions_shared_across_ranker_families"] is True,
+        ),
+        (
             "gate_question_leakage_forbidden",
             crossfit["question_overlap_between_gate_fit_and_ranker_prediction_fold"] is False,
         ),
@@ -614,8 +639,12 @@ def _guard_checks(
             factorial["paired_deltas_against_exact_control_required"] is True,
         ),
         ("twenty_inner_partitions", cv["inner_partition_count"] == 20),
-        ("sixteen_fits_per_inner", cv["model_fits_per_inner_partition"] == 16),
-        ("maximum_fit_count_is_370", cv["maximum_model_fit_count"] == 370),
+        ("twenty_four_fits_per_inner", cv["model_fits_per_inner_partition"] == 24),
+        (
+            "eight_source_safety_crossfit_fits_per_inner",
+            cv["source_safety_crossfit_fits_per_inner_partition"] == 8,
+        ),
+        ("maximum_fit_count_is_570", cv["maximum_model_fit_count"] == 570),
         ("maximum_tree_count_is_96000", cv["maximum_lightgbm_tree_count"] == 96_000),
         ("all_validity_guards_enabled", all(validity.values())),
         (
