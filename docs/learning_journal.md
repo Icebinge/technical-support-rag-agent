@@ -36111,3 +36111,69 @@ format check passed。完整 pytest 只启动 PID `16340`，原 PowerShell 命�
 等待该 cell，没有发出第二条进程查询或第二次 `Wait-Process`。结果为
 `1111 passed, 1 warning in 26.94s`，stderr 为空，`HasExited=True`，child `ExitCode`
 字段为空且没有伪造为 0；warning 仍是既有 FastAPI/Starlette `TestClient` deprecation。
+
+## 2026-07-27 - Stage 188 题内增益敏感排序嵌套交叉验证
+
+Stage 188 严格执行 Stage 187 冻结的 train-only 协议，在 562 条 train、370 条可回答训练问题和
+12,298 个候选动作上运行 5 outer x 4 inner 的 question-grouped nested CV。dev/test、Stage
+178B、runtime E2E、replacement policy、默认启用和 fallback 均保持关闭。Stage 182 参考策略在
+训练前完成复现，10/10 项检查通过，包括 129 个 selected question 与 55 个 F1 regression。
+
+用户确认的实现选择 A 已落实：ListNet 使用 `StandardScaler(with_mean=False)`，patience 只有在
+objective 至少改善 `1e-12` 时才重置。Pairwise 与 ListNet 都保留协议要求的全部训练样本，不做
+pair/list 抽样。正式运行前把 pairwise 标准化改为原地转换，避免同一稀疏 pair matrix 短时保留
+两份；该优化不改变样本、特征、标签、权重、模型、32 项网格或选择规则。
+
+正式结果为 5/5 outer fold 的 inner-eligible config 数量均为 0，因此没有 outer refit，也没有
+held-out outer prediction。各折最优但不合格候选的 changed/strict/precision/citation/mean F1
+依次为：fold 1 `151/34/0.225166/0/+0.005080`；fold 2
+`159/29/0.182390/-1/+0.003320`；fold 3 `130/27/0.207692/-1/+0.003903`；fold 4
+`110/26/0.236364/+1/+0.004305`；fold 5 `117/29/0.247863/+2/+0.003200`。共同核心失败是
+strict-success precision 只有 `0.182390-0.247863`，远低于冻结 inner 门槛 `0.60`；部分候选还
+相对 Stage 182 损失 citation/F1，或未达到 fold nonregression 与新 regression 限制。
+
+报告中的 aggregate 全零是“未选择、未执行 outer evaluation”的结构值，不是某个 held-out
+策略实测得到零增益。paired bootstrap 与 prediction metrics 因没有完整 outer prediction 而明确
+不可用。14 个 advancement gate 只通过 3 个空选择下机械成立的损失上限，不能解释为策略质量。
+正式状态为 `stage188_gain_sensitive_ranking_insufficient`：实验有效，但 candidate family 不接受，
+不授权 full-train selection、runtime E2E、dev/test 或默认启用。没有事后降低 0.60 门槛、重试、
+替换弱候选、兜底或越权执行 outer evaluation。
+
+20 个 inner partition 全部完成，共 240/300 次 model fit；剩余 60 次预算对应因 no-eligible 而
+被协议禁止的 5 个 outer refit。累计保留 3,349,920 个 Pareto 可比较 pair，忽略 1,409,208 个
+不可比较 trade-off pair；完成 8,880 个 listwise question fit、8,420 次 ListNet iteration 和
+393,536 个私有 prediction，公开写出 pair/list/prediction 私有行均为 0。raw/question-relative
+特征数为 140/798。
+
+资源清理前实测系统可用内存 2.764 GiB；用户清理并重启 Codex 后正式预检为 6.203 GiB，GPU
+空闲 6,339 MiB，且没有遗留 Python 或 Stage 188 进程。正式 PID `5484` 在同一条 PowerShell
+命令中只调用一次 `Wait-Process` 并等待自然结束；执行工具随后继续等待同一个 command cell，
+没有第二次进程查询或第二次 `Wait-Process`。无轮询、实验 timeout、重启、partial continuation、
+fallback 或 OOM。Stage 182 复现 `231.795372` 秒，gain-sensitive nested CV `658.365921`
+秒，总 wall `890.177135` 秒；model fit `581.044936` 秒，CPU time `1911.531250` 秒。working
+set 峰值 4.744 GiB，private 峰值 3.460 GiB，系统最小可用内存 2.953 GiB，CUDA
+allocated/reserved 均为 0。child `ExitCode` 字段为空，没有伪造为 0。
+
+12/12 张 SVG 由固定 `resvg_py==0.3.3`、项目内 Poppins 字体且无字体 fallback 的链路完成
+栅格化，所有 PNG 非空并按原始分辨率逐张打开检查。标题、标签、零值、不可用状态、长 gate/
+guard 名称、数值、条形和坐标轴均完整，无不连贯重叠或裁切。正式报告 SHA-256：
+
+```text
+c68946d08750d0e07dadee7f70780048615919d79fe617520f17df078f1c6bcc
+```
+
+resvg manifest SHA-256：
+
+```text
+6081c8761462eeabbfa3f495395463c7a943520f07cbd33e4068996033984cc3
+```
+
+最终 current-source 验证：Stage 188 focused tests 为 `11 passed in 7.70s`；Stage 184-188
+相关回归为 `32 passed in 4.35s`；full repository Ruff lint passed；5 个 Stage 188 Python
+文件 Ruff format check passed。完整 pytest 使用 PID `16500` 和一次 `Wait-Process` 等待自然
+结束，结果为 `1122 passed, 1 warning in 26.02s`；warning 仍是既有 FastAPI/Starlette
+`TestClient` deprecation。额外尝试的全仓库 Ruff format check 如实失败，原因是 310 个既有
+文件会被当前 formatter 重排；这些与 Stage 188 无关的文件没有被机械改写。
+
+文档写入时，第一次长补丁因一行缺少补丁前缀被工具原子拒绝，没有产生部分写入；随后拆分为
+专项报告创建与日志追加两次原子操作并成功完成。
