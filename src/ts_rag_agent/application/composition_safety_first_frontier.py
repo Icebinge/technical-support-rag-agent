@@ -123,6 +123,19 @@ class RepresentationPartitionResult:
     group_contract_validation_count: int
 
 
+@dataclass(frozen=True)
+class SpecPartitionResult:
+    """Predictions from only the four models required by one frozen policy spec."""
+
+    safety_predictions: tuple[stage194.SafetyPrediction, ...]
+    gain_predictions: tuple[GainPrediction, ...]
+    risk_predictions: tuple[UnsafePrediction, ...]
+    feature_count_by_representation: Mapping[str, int]
+    model_fit_count: int
+    tree_count: int
+    group_contract_validation_count: int
+
+
 class RepresentationFitPredictor(Protocol):
     def __call__(
         self,
@@ -407,6 +420,129 @@ def fit_predict_safety_first_representation(
         ),
         feature_count=len(vectorizer.feature_names_),
         model_fit_count=12,
+        tree_count=tree_count,
+        group_contract_validation_count=1,
+    )
+
+
+def fit_predict_safety_first_spec(
+    training_rows: Sequence[ActionAuditRow],
+    heldout_rows: Sequence[ActionAuditRow],
+    feature_indices: Mapping[
+        FeatureRepresentation,
+        Mapping[tuple[str, str], Mapping[str, Any]],
+    ],
+    spec: SafetyFirstFrontierPolicySpec,
+) -> SpecPartitionResult:
+    """Fit only the two safety heads, gain ranker, and unsafe head used by ``spec``."""
+
+    import lightgbm as lgb
+
+    training = tuple(sorted(training_rows, key=stage194._row_key))
+    heldout = tuple(sorted(heldout_rows, key=stage194._row_key))
+    matrices: dict[str, tuple[Any, Any]] = {}
+    feature_counts: dict[str, int] = {}
+    for representation in {
+        spec.pool_feature_representation,
+        spec.gain_feature_representation,
+        spec.risk_feature_representation,
+    }:
+        vectorizer = DictVectorizer(sparse=True)
+        train_matrix = vectorizer.fit_transform(
+            [dict(feature_indices[representation][stage194._row_key(row)]) for row in training]
+        ).tocsr()
+        heldout_matrix = vectorizer.transform(
+            [dict(feature_indices[representation][stage194._row_key(row)]) for row in heldout]
+        ).tocsr()
+        matrices[representation] = (train_matrix, heldout_matrix)
+        feature_counts[representation] = len(vectorizer.feature_names_)
+
+    weights = stage194._question_balanced_weights(training)
+    labels = {
+        "citation_loss": np.asarray([row.citation_delta < 0 for row in training], dtype=np.int8),
+        "f1_loss": np.asarray([row.f1_delta < -_F1_TOLERANCE for row in training], dtype=np.int8),
+        "unsafe": np.asarray([stage194._is_unsafe(row) for row in training], dtype=np.int8),
+    }
+    for name, values in labels.items():
+        if len(set(values.tolist())) != 2:
+            raise ValueError(f"Stage197 {name} target requires both classes")
+
+    safety_train, safety_heldout = matrices[spec.pool_feature_representation]
+    safety_values: dict[str, np.ndarray] = {}
+    if spec.pool_safety_estimator == "class_balanced_logistic":
+        scaler = StandardScaler(with_mean=False)
+        fitted_train = scaler.fit_transform(safety_train).tocsr()
+        fitted_heldout = scaler.transform(safety_heldout).tocsr()
+        for target in ("citation_loss", "f1_loss"):
+            head = _SafetyHead(
+                _fit_logistic_classifier(fitted_train, labels[target], weights),
+                False,
+            )
+            safety_values[target] = head.predict(fitted_heldout)
+        del scaler, fitted_train, fitted_heldout
+    elif spec.pool_safety_estimator == "histogram_gradient_boosting":
+        fitted_train = safety_train.toarray()
+        for target in ("citation_loss", "f1_loss"):
+            head = _SafetyHead(
+                _fit_histogram_classifier(fitted_train, labels[target], weights),
+                True,
+            )
+            safety_values[target] = head.predict(safety_heldout)
+        del fitted_train
+    else:
+        raise ValueError(f"Unsupported Stage197 safety estimator: {spec.pool_safety_estimator}")
+    safety_predictions = _safety_predictions(
+        heldout,
+        safety_values["citation_loss"],
+        safety_values["f1_loss"],
+    )
+
+    common = _lightgbm_common_parameters()
+    gain_train, gain_heldout = matrices[spec.gain_feature_representation]
+    gain_ranker = lgb.LGBMRanker(
+        objective="lambdarank",
+        metric="ndcg",
+        lambdarank_truncation_level=4,
+        lambdarank_norm=True,
+        label_gain=[0, 1, 4],
+        **{**common, **_TREE_PROFILES[spec.gain_tree_profile]},
+    )
+    gain_ranker.fit(
+        gain_train,
+        np.asarray([stage194._outcome_tier(row) for row in training], dtype=np.int8),
+        group=stage194._question_group_sizes(training),
+        sample_weight=weights,
+        eval_at=[1],
+    )
+    gain_values = np.asarray(gain_ranker.predict(gain_heldout), dtype=np.float64)
+    gain_predictions = tuple(
+        GainPrediction(row, float(score)) for row, score in zip(heldout, gain_values, strict=True)
+    )
+    tree_count = int(gain_ranker.booster_.num_trees())
+
+    risk_train, risk_heldout = matrices[spec.risk_feature_representation]
+    unsafe_head = lgb.LGBMClassifier(
+        objective="binary",
+        metric="binary_logloss",
+        class_weight=None,
+        is_unbalance=False,
+        scale_pos_weight=spec.scale_pos_weight,
+        **{**common, **_TREE_PROFILES[spec.risk_tree_profile]},
+    )
+    unsafe_head.fit(risk_train, labels["unsafe"], sample_weight=weights)
+    risk_values = np.asarray(unsafe_head.predict_proba(risk_heldout)[:, 1], dtype=np.float64)
+    risk_predictions = tuple(
+        UnsafePrediction(row, float(score)) for row, score in zip(heldout, risk_values, strict=True)
+    )
+    tree_count += int(unsafe_head.booster_.num_trees())
+    del matrices, gain_ranker, unsafe_head, gain_values, risk_values, safety_values
+    gc.collect()
+    return SpecPartitionResult(
+        safety_predictions=safety_predictions,
+        gain_predictions=gain_predictions,
+        risk_predictions=risk_predictions,
+        feature_count_by_representation=dict(sorted(feature_counts.items())),
+        model_fit_count=4,
         tree_count=tree_count,
         group_contract_validation_count=1,
     )

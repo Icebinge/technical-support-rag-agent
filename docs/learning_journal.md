@@ -36626,3 +36626,22 @@ manifest: dfe7f383de182536a497e32923a6dcc847e5614ed1a50162e0ed0ba28f51c79e
 下一阶段应先做 train-only surviving-unsafe-winner attribution，按 unsafe rank、gain rank、outcome、prefix 和 risk head 定位失败结构，再决定修改 risk model、final constrained winner rule 或两者；不能直接放宽 unsafe 门槛或进入 dev/test。
 
 current-source 最终验证中，Stage 193-196 相关回归为 `24 passed in 10.81s`，全库 Ruff lint、5 个变更 Python 文件 format check、`pip check`、CLI help 和 `git diff --check` 均通过。完整 pytest 使用唯一 Python PID `3756`，同一条 PowerShell 命令只调用一次 `Wait-Process` 等待自然结束，无轮询或 pytest timeout；结果为 `1173 passed, 1 warning in 35.17s`，warning 仍是既有 FastAPI/Starlette `TestClient` deprecation。
+
+## 2026-07-27 - Stage 197 surviving unsafe winner 训练侧归因
+
+Stage 197 严格留在训练侧，复现 Stage 182 后，只重建 Stage 196 五个 outer context 已公开的第一名 top-inner 配置。每个 inner partition 仅拟合该配置实际需要的两个 safety head、一个 LambdaMART gain ranker 和一个 unsafe head；20 个 partition 共 `80` 次拟合、`12,000` 棵 LightGBM tree、`196,768` 条 private prediction。五个 top-inner evaluation 与 diagnostics 均在 `1e-6` 冻结容差内精确复现。没有搜索新配置、outer refit、full-train selection、runtime E2E、retry、fallback 或 dev/test 访问。
+
+归因使用互斥且完备的机制分区，不依赖人为分类阈值。1,480 个 inner-OOF question context 中有 465 个 unsafe winner，unsafe rate 为 `0.314189`；这 465 个 context 全部存在 strict opportunity。分区结果为：`final_gain_dominance=181`、`risk_ordering_failure=172`、`risk_frontier_exclusion=97`、`safety_pool_exclusion=15`，合计精确等于 465。所有 unsafe winner 都是 frontier 内 gain rank 1；complete pool risk rank 分布为 rank 2 有 145 个、rank 3-4 有 195 个、rank 5-8 有 105 个、rank 9+ 有 20 个。
+
+损失类型中 `f1_only=431`、`citation_only=17`、`citation_and_f1=17`。仅用于离线归因的 gold oracle 显示 353/465（`0.759140`）存在 strict frontier alternative，181/465（`0.389247`）存在 lower-risk strict alternative；oracle 没有被实现成 runtime rule 或候选策略。unsafe head 在 49,192 个 action context 上 ROC AUC 为 `0.589114`、average precision 为 `0.562431`、unsafe prevalence 为 `0.478289`。主导计数是 final gain dominance，但只比 risk ordering failure 多 9 个，因此结论不是“只改 winner rule”：下一冻结协议应以 risk-aware final winner 为第一因素，同时交叉比较 unsafe-head discrimination 改进，分别验证 181 个 gain-dominance 与 172+97 个 risk 侧失败。
+
+正式运行前系统可用内存为 `5.579 GiB`，高于冻结的 `4 GiB` 门槛，没有使用 memory override。正式 Python PID `16432` 在一条 PowerShell 命令中只调用一次 `Wait-Process` 并等待自然结束，无轮询和 experiment timeout。PowerShell child `ExitCode` 字段在 wait 后为空，按事实保留为未知；外层命令完成、报告成功写出、stderr 只有模型权重加载进度。Stage 182 reproduction 耗时 `202.664476` 秒，Stage 197 attribution 耗时 `203.914902` 秒，总 wall `407.441980` 秒。资源峰值为 working set `3.748 GiB`、private `4.083 GiB`、系统最小可用 `3.078 GiB`，CUDA allocated/reserved 均为 0，无 OOM。29/29 guard 全部通过，正式状态为 `stage197_surviving_unsafe_winner_attribution_complete`。
+
+10/10 SVG 经固定 `resvg_py==0.3.3`、项目 Poppins 字体、白底、无 fallback 链路转成 PNG，并按原始分辨率逐张打开检查；标题、标签、零值、数值和 29 行 guard 无裁切、重叠或空图。正式哈希：
+
+```text
+report:   c56f4af1b408a07e295a10f7decd2c8a0313f814f16955fd149a170355646d9d
+manifest: 308541fb7615165c5aef02bce23ecffe522207137ee38597fa05436d5fc31c7f
+```
+
+current-source 最终验证中，全库 Ruff lint、7 个变更 Python 文件 format check、`pip check`、CLI help 与 `git diff --check` 全部通过；Stage 195-197 相关定向回归为 `23 passed in 9.67s`。完整 pytest 使用唯一 Python PID `27212`，同一条 PowerShell 命令只调用一次 `Wait-Process` 并等待自然结束，无轮询或 pytest timeout，结果为 `1180 passed, 1 warning in 39.38s`，stderr 为空；warning 仍是既有 FastAPI/Starlette `TestClient` deprecation。PowerShell post-wait child `ExitCode` 字段为空，按事实保留为未知，没有伪造为 0。

@@ -197,6 +197,59 @@ def test_real_lightgbm_partition_fit_covers_all_weighted_heads() -> None:
     )
 
 
+def test_real_focused_spec_fit_trains_only_four_required_models() -> None:
+    training = tuple(
+        row
+        for question_index in range(60)
+        for row in (
+            _row(f"train_{question_index}", "baseline", family="baseline"),
+            _row(
+                f"train_{question_index}",
+                "strict",
+                strict=True,
+                citation_delta=1,
+                f1_delta=0.1,
+            ),
+            _row(
+                f"train_{question_index}",
+                "unsafe",
+                citation_delta=-1,
+                f1_delta=-0.1,
+            ),
+        )
+    )
+    heldout = tuple(
+        row
+        for question_index in range(10)
+        for row in (
+            _row(f"heldout_{question_index}", "baseline", family="baseline"),
+            _row(f"heldout_{question_index}", "strict", strict=True, citation_delta=1),
+            _row(f"heldout_{question_index}", "unsafe", f1_delta=-0.1),
+        )
+    )
+    feature_index = {
+        (row.question_key, row.action.action_id): {
+            "score": row.runtime_features["score"],
+            "unsafe_hint": float(row.action.action_id == "unsafe"),
+        }
+        for row in (*training, *heldout)
+    }
+
+    result = policy.fit_predict_safety_first_spec(
+        training,
+        heldout,
+        {"raw_runtime": feature_index, "question_relative_runtime": feature_index},
+        _spec(prefix=4),
+    )
+
+    assert result.model_fit_count == 4
+    assert result.tree_count == 600
+    assert result.group_contract_validation_count == 1
+    assert len(result.safety_predictions) == len(heldout)
+    assert len(result.gain_predictions) == len(heldout)
+    assert len(result.risk_predictions) == len(heldout)
+
+
 def _spec(*, prefix: int) -> policy.SafetyFirstFrontierPolicySpec:
     return policy.SafetyFirstFrontierPolicySpec(
         name="test",
