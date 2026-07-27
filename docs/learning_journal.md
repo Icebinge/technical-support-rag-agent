@@ -36424,3 +36424,74 @@ timeout；执行工具随后只恢复同一个 command cell 的输出，没有�
 `Wait-Process`。最终结果为 `1145 passed, 1 warning in 21.73s`，stderr 为空，warning 仍是
 既有 FastAPI/Starlette `TestClient` deprecation。两次进程结束后的 PowerShell child
 `ExitCode` 字段都为空，均按事实保留为空。
+
+## 2026-07-27 - Stage 193 安全约束 LambdaMART 协议冻结
+
+用户明确选择路线 A：使用 LightGBM LambdaMART question-grouped 排序和独立 unsafe-risk head。
+Stage 193 据此读取 Stage 192 公开聚合报告并冻结 Stage 194 协议；没有安装或导入 LightGBM，
+没有加载 train/dev/test 行，没有拟合模型、生成 prediction、评估 policy 或改变 runtime。
+
+官方资料核验确认：当前 PyPI 稳定版为 `lightgbm==4.7.0`，Windows x86-64 wheel 存在且
+SHA-256 为 `f42d1e5b32b6f170e606d7c689c6165671da98d7bf37f1addec2623efc8740c9`；
+`LGBMRanker` 支持 group sizes，LambdaRank 支持整数 relevance 与显式 `label_gain`；CPU
+`deterministic=true` 应配合 `force_col_wise` 或 `force_row_wise`。协议选择 8 个物理 CPU core、
+`force_col_wise=true`，没有因本机存在 GPU 就虚构 GPU 更快或同样可复现。
+
+第一阶段固定复用 Stage 191 的 2 feature representation x 2 safety estimator，共 4 个 pool
+builder，并固定 cap 16；Stage 192 在该 cap 的 factor aggregate recall 为 `0.986607`，因此不再
+搜索更大的池。第二阶段 relevance 固定为 unsafe/safe-zero/strict-gain `0/1/2`，`label_gain`
+固定为 `[0,1,4]`。每题 rows 作为一个 query group，每题总 sample weight 为 1。
+
+LambdaMART 与 unsafe binary head 共同测试 conservative（7 leaves、depth 3、min child 40、
+L2 2.0）和 moderate（15 leaves、depth 4、min child 25、L2 1.0）两档浅树。共同参数为
+learning rate `0.03`、300 trees、max bin 63、无 row/feature sampling、seed 193。held-out labels
+禁止参与 fit 或 early stopping，因此不使用 early stopping。
+
+池内不直接相加不可比的 LambdaMART raw margin 和 unsafe probability；两者先转换为题内
+`[0,1]` 确定性 rank fraction，再计算
+`1 - gain_rank_fraction - lambda * unsafe_rank_fraction`。lambda 固定为
+`0.25/0.50/1.00/2.00`，无 absolute probability threshold、gold filter、retry 或 fallback。
+
+候选网格为 4 pool builder x 2 reranker representation x 2 tree profile x 4 penalty，共 64 个
+policy config。每个 partition 拟合 8 个 Stage 191 pool safety head 和 8 个新 rank/risk model，
+即 16 fits；20 inner partition 加最多 5 outer refit，最大 400 fits。模型在 pool builder 和
+penalty 间共享，不为 64 个 policy 重复拟合。
+
+inner eligibility 收紧为 pool recall `>=0.95`、conditional capture `>=0.68`、strict precision
+`>=0.65`、unsafe rate `<=0.25`，并分别保留 per-fold 约束；同时继续要求 citation/F1 非回归、
+changed count 和 strict count。outer advancement 为原 14 个质量 gate 加上述 pool recall、capture、
+unsafe 三项，共 17 项。无 eligible config 时只记录失败，不替换弱配置。
+
+实现新增协议模块、CLI、4 个定向测试与 9 张 SVG。首轮测试为 `4 passed in 0.40s`；Ruff 如实
+发现 16 个 E501 长行且 3 文件需要格式化，协议行为本身没有测试失败。使用项目 Ruff 完成机械
+格式化后，lint 与 format check 全部通过，测试为 `4 passed in 0.10s`。
+
+正式运行前第一条 PowerShell 预检因在哈希表内嵌命令时括号语法错误而被 PowerShell 直接拒绝；
+Python 没有启动，正式 artifact 没有生成或修改。修正为直接检查 site-packages 路径后正式冻结
+成功：Stage 192 SHA 精确匹配，59/59 guard 全部通过，总耗时 `0.002742` 秒；LightGBM 仍未
+安装或导入，train/dev/test rows 与 model fits 均为 0。正式状态为
+`stage193_safety_constrained_lambdamart_protocol_frozen`，只授权 Stage 194 dependency provisioning
+与 train-only nested experiment，不授权 dev/test、runtime E2E、full-train/replacement、Stage 178B
+或默认启用。
+
+9/9 SVG 经固定 `resvg_py==0.3.3`、项目内 Poppins 字体、无字体 fallback 链路栅格化；所有
+PNG 均非空并按原始分辨率逐张打开，标题、标签、数值、false/zero 状态、条形和 59 行 guard
+均无裁切或重叠。正式报告 SHA-256：
+
+```text
+3124f186166fb8d04886c75801d271f82fb9b317a54026f97f055c10cefa9930
+```
+
+resvg manifest SHA-256：
+
+```text
+c4240aea630b2666a07d226c4bce247080718175b7493a580b5051a7d4d5cb36
+```
+
+最终 current-source 验证中，Stage 189-193 协议与归因链为 `27 passed in 2.09s`；full
+repository Ruff lint passed，3 个新增 Python 文件 Ruff format check passed，`pip check` 无损坏
+依赖，CLI help 与 `git diff --check` 均通过。完整 pytest 启动唯一 PID `23868`，同一条
+PowerShell 命令只调用一次 `Wait-Process` 等待自然结束，无轮询或 pytest timeout；执行工具随后
+只恢复同一个 command cell 的输出，没有第二条进程查询或第二次 `Wait-Process`。结果为
+`1149 passed, 1 warning in 22.03s`，stderr 为空，warning 仍是既有 FastAPI/Starlette
+`TestClient` deprecation；PowerShell child `ExitCode` 字段为空并按事实保留。
