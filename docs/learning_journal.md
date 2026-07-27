@@ -36567,3 +36567,25 @@ help、正式 artifact hash 与 `git diff --check` 均通过。完整 pytest 启
 条 PowerShell 命令中只调用一次 `Wait-Process` 等待自然结束，无轮询或 pytest timeout；结果为
 `1157 passed, 1 warning in 27.65s`，stderr 为空，warning 仍为既有 FastAPI/Starlette `TestClient`
 deprecation。PowerShell child `ExitCode` 字段为空并按事实保留，没有伪造为 0。
+## 2026-07-27 - Stage 195 安全优先前沿协议冻结
+
+Stage 194 的五个 outer context 均为 `0/64` eligible，但 top-inner 候选的 cap-16 pool recall 已处于 `0.986207-0.989691`，说明继续扩大候选池不是当前主要方向。对应的 conditional capture 为 `0.629758-0.681979`、strict precision 为 `0.609756-0.659420`、unsafe rate 为 `0.300000-0.342373`。fold 4 最接近边界：pool recall `0.989510`、capture `0.681979`、precision `0.659420`，但 unsafe rate `0.300000` 仍高于 `0.25` 门槛。Stage 195 因此只读取 Stage 194 公开聚合报告，冻结 Stage 196 的安全优先实验协议；没有加载 train/dev/test 行，没有导入 LightGBM、拟合模型、生成私有 prediction、运行 policy evaluation 或改变 runtime。
+
+根据 LightGBM 官方参数和 `LGBMClassifier` API，`scale_pos_weight` 是 binary positive class weight，不能与 `is_unbalance` 同时使用；加权分类也可能使单条概率估计不可靠。因此协议冻结 `scale_pos_weight = 1/2/4`、`is_unbalance=false`、`class_weight=None`，且只把 unsafe score 用于题内确定性风险排序，不使用绝对概率阈值，也不声称概率已校准。
+
+Stage 196 保留 Stage 194 的 4 个 cap-16 safety-pool builder 与 4 个 LambdaMART gain model，将 gain 与 unsafe head 的 representation/tree profile 解耦。每个完整 pool 先按 unsafe score 升序排列，测试 `2/4/8/12/16` 五个 safest prefix，再 union 原始 baseline；prefix 内按 LambdaMART score 降序选 winner，并以低 unsafe score 和 canonical action order 决胜。Stage 194 的 gain-risk utility blend 被移除；没有 gold filter、retry、fallback、弱候选替代或门槛放宽。
+
+完整 policy grid 为 `4 pool builder x 4 gain model x 12 risk model x 5 prefix = 960`。模型按兼容配置共享，每 partition 只需 8 个 pool-safety fit、4 个 gain-ranker fit 和 12 个 unsafe-head fit，共 24 fits；20 个 inner partition 加最多 5 个 outer refit 的上限为 600 fits、120,000 棵 LightGBM tree。nested CV 仍为 5 outer x 4 inner 且按 question 分组，13 个 inner eligibility constraint 与 17 个 advancement gate 均保持 Stage 194 数值不变。
+
+内存 preflight 门槛记录为 `4.0 GiB`。该修订基于用户明确拒绝旧的 6 GiB 要求，以及 Stage 194 在 5.595 GiB preflight、3.756 GiB 最小系统可用内存下完成完整 grid 且无 OOM 的真实观测；若不足 4.0 GiB，只能停止启动并请求清理资源，不能自动缩减 grid。正式 Stage 196 长进程仍要求唯一 PID、同一条 PowerShell 命令中一次 `Wait-Process` 等待自然结束、无轮询和实验 timeout。
+
+正式 Stage 195 freeze 使用精确 Stage 194 SHA-256 guard，耗时 `0.001464` 秒，`58/58` guard 全部通过，公开报告未发现任何禁止的私有字段。正式状态为 `stage195_safety_first_frontier_protocol_frozen`，仅授权 Stage 196 train-only experiment；dev/test、full-train selection、runtime E2E、replacement、Stage 178B 与默认启用均未授权。正式报告和 resvg manifest SHA-256 为：
+
+```text
+report:   dc02e8423d633481802e42c6d52e85b9e1bda58861d1fc61492819b027b2c637
+manifest: 602a02f2a5b565183de1a5166e759852b98313b550fc484dcc8cef04e5ad0caf
+```
+
+10/10 SVG 均通过 XML parse，并由固定 `resvg_py==0.3.3`、项目 Poppins 字体、白底、无字体 fallback 的链路栅格化。全部 PNG 已按原始分辨率逐张打开；标题、数值、17 个 advancement gate 和 58 行 guard 均无裁切或重叠。定向测试首次为 `5 passed in 0.15s`；随后增加“Stage 194 unsafe 已过门槛时不得启动本实验”的前提测试，current-source 定向结果为 `6 passed in 0.11s`。包含 rank-capped pool、失败归因、Stage 194 LambdaMART 和 Stage 195 协议的 current-source 回归为 `24 passed in 1.60s`。全库 Ruff lint、3 个 Python 文件 format check、`pip check`、CLI help 与 `git diff --check` 均通过。
+
+第一次完整 pytest 创建了唯一 Python 子进程，命令中只调用一次 `Wait-Process` 且未设置 pytest timeout 或轮询。执行工具默认时限在约 14 秒时终止外层 PowerShell，但子进程继续自然完成；一次恢复性检查确认没有残留 pytest 进程，完整 stdout 为 `1162 passed, 1 warning in 26.63s`。增加第 6 个定向测试后，尝试把执行器 `timeout_ms` 设为 0 以表达“无时限”，但该接口把 0 解释为立即超时；恢复检查确认此次没有创建 PID。最终 current-source 完整测试使用执行传输层的超大上限避免工具提前杀死外层，该值不是 pytest timeout 或轮询期限；唯一 PID `24988` 在同一命令的一次 `Wait-Process` 下自然结束，stdout 到达 100%，stderr 为空，结果为 `1163 passed, 1 warning in 26.96s`。PowerShell child `ExitCode` 字段仍为空，因此外层按空值报错；该字段按事实保留为未知，没有为了补写退出码再次运行完整测试。warning 仍是既有 FastAPI/Starlette `TestClient` deprecation。
