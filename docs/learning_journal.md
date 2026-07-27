@@ -36645,3 +36645,24 @@ manifest: 308541fb7615165c5aef02bce23ecffe522207137ee38597fa05436d5fc31c7f
 ```
 
 current-source 最终验证中，全库 Ruff lint、7 个变更 Python 文件 format check、`pip check`、CLI help 与 `git diff --check` 全部通过；Stage 195-197 相关定向回归为 `23 passed in 9.67s`。完整 pytest 使用唯一 Python PID `27212`，同一条 PowerShell 命令只调用一次 `Wait-Process` 并等待自然结束，无轮询或 pytest timeout，结果为 `1180 passed, 1 warning in 39.38s`，stderr 为空；warning 仍是既有 FastAPI/Starlette `TestClient` deprecation。PowerShell post-wait child `ExitCode` 字段为空，按事实保留为未知，没有伪造为 0。
+
+## 2026-07-27 - Stage 198 risk signal × winner rule 联合因子协议冻结
+
+用户在 Stage 197 完成后明确选择路线 A。Stage 198 据此冻结 Stage 199 的 train-only 联合因子实验，不加载 train/dev/test rows 或 documents，不导入 LightGBM、不拟合模型、不生成 prediction、不运行 policy evaluation，也不修改 runtime。source 是 SHA-256 精确匹配的 Stage 197 正式公开报告；五个 outer context 各自沿用 Stage 196 已公布且在 Stage 197 精确重建的 pool builder、gain ranker、risk representation/profile/weight 与 safest-prefix size，不重新搜索旧因素。
+
+风险信号冻结为四种：Stage 196 weighted binary classifier 精确 control；复用 safety heads 的 `max(P(citation loss), P(F1 loss))` decomposed risk；按 question group 训练、`unsafe=0/non-unsafe=1`、`label_gain=[0,1]`、truncation 16 的 pairwise safety LambdaMART；以及 decomposed 与 pairwise 的题内 normalized risk-rank mean fusion。所有 risk signal 只用于题内确定性排序，不使用 absolute probability threshold，也不声称概率已校准。
+
+winner rule 冻结为七种：gain-only 精确 control；题内 normalized gain/risk rank utility 的 `lambda=0.25/0.50/1.00/2.00`；以及 gain top-2/top-4 shortlist 后按最低 risk 选择。rank utility 禁止直接相加不可比的 raw LambdaMART margin 与 classifier probability。完整设计为 `4 risk signals × 7 winner rules = 28 cells per outer context`，能够分别报告 risk-only、winner-only 和 joint cells 相对 control 的 paired delta；28 个 cell 共享模型，不会为每个 cell 重复拟合。
+
+每 partition 预算为两个 source safety head、一个 source gain ranker、一个 source unsafe classifier 和一个 pairwise safety ranker，共 5 fits、其中 3 个 LightGBM model。20 个 inner partition 加最多 5 次 outer refit 的上限是 `125 fits / 22,500 trees`。13 个 inner eligibility constraint 与 17 个 advancement gate 数值均保持 Stage 196 不变；没有 inner-eligible config 时记录失败，不得拿弱候选替代。内存门槛保持 4 GiB；不足时停止并请求清理，不得缩 grid。正式 Stage 199 仍要求一条 PowerShell 命令、同一 PID、一次无超时 `Wait-Process` 等待自然结束。
+
+正式 Stage 198 freeze 耗时 `0.000706` 秒，`62/62` guard 全部通过，状态为 `stage198_joint_risk_winner_protocol_frozen`。它只授权 Stage 199 train-only experiment；dev/test、full-train selection、runtime E2E、replacement、Stage 178B 与默认启用均未授权。10/10 SVG 经固定 `resvg_py==0.3.3`、项目 Poppins 字体、白底、无 fallback 链路转成 PNG，并按原始分辨率逐张检查；标题、数值、17 个 gate、62 行 guard 及 false/zero 状态无裁切、重叠或空图。正式哈希：
+
+```text
+report:   62658919388603cdd2c85432399d45dfd0f50148ea4e521119f35a0d2e2e3330
+manifest: e6c3e97ba4c16efb7bee768a820ba5831af088c22e83813c6b86116354f5c593
+```
+
+上述 `125 fits / 22,500 trees` 只是 Stage 199 的冻结上限，不是已发生的训练或效果；Stage 198 尚未证明 28 个 cell 中存在能够降低 unsafe rate 的候选。
+
+current-source 最终验证中，全库 Ruff lint、3 个变更 Python 文件 format check、`pip check`、CLI help 与 `git diff --check` 全部通过；Stage 195/197/198 相关回归为 `18 passed in 1.14s`。完整 pytest 使用唯一 Python PID `8144`，同一条 PowerShell 命令只调用一次 `Wait-Process` 并等待自然结束，无轮询或 pytest timeout，结果为 `1186 passed, 1 warning in 39.15s`，stderr 为空；warning 仍是既有 FastAPI/Starlette `TestClient` deprecation。PowerShell post-wait child `ExitCode` 字段为空，按事实保留为未知，没有伪造为 0。
