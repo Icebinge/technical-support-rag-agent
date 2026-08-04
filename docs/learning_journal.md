@@ -37012,3 +37012,45 @@ gate = 24 fits`；最多 20 个 inner partition 与 5 个 outer refit 的总上�
 report:   0988f97e7e30e6772cc7a7c9738a9e1d285f698629b5b0ccf48c1701e36de02a
 manifest: 531d66f4a7730cea099576ee5cf1d63b6bb455cf408b7881cba4c9ba8c2ad372
 ```
+
+## 2026-07-27 - Stage 206 严格 OOF 两阶段实验实现与正式运行前检查
+
+用户确认采用严格修订后，Stage 206 按修订后的 Stage 205 协议实现，不接受原 370-fit
+方案。核心结构把 baseline 排除在 conditional ranker 的训练、组归一化和 winner 选择之外；
+两类 LambdaMART ranker 分别使用 strict binary 和 strict/safe-zero/unsafe graded target，
+再由独立 binary gate 决定是否用 conditional winner 替换 baseline。五个 target change
+coverage 为 `0.25/0.40/0.55/0.70/0.85`。gate 不使用 raw absolute ranker score，只使用
+题内 min-max normalized top1-top2 margin、winner/baseline runtime 特征及差分、OOF source
+safety 概率与题内 rank。
+
+每个 partition 的 gate training population 严格执行四折 question-grouped cross-fitting：
+两个 source safety head 和两个 ranker family 都只在 cross-fit complement 上拟合并只预测
+heldout questions；每个 training question、每个 ranker family 恰好形成一条 OOF gate row。
+完整 inner partition 的拟合分解为 `4 full source + 8 source-safety crossfit + 10 ranker +
+2 gate = 24 fits`。outer refit 完整重复同一流程，但只拟合被 inner selection 选中的一个
+ranker family；没有复用 inner model、same-fit source safety、retry、fallback 或弱候选替代。
+
+实现新增核心 nested-CV、PrimeQA 编排器、CLI、两组测试与方法文档。公开报告新增按 ranker
+family 和 target coverage 聚合的 realized change coverage、gate heldout ROC/AP、pre-gate
+strict/unsafe rate；逐题 gate score、feature、action、question id 和 prediction 均不持久化。
+可视化设计为 20 张 SVG，覆盖 control reproduction、inner eligibility、top-inner quality、
+ranker family、coverage curve、gate discrimination、outer selection、17 项 advancement gate、
+执行计数、资源和 process guard。
+
+开发中出现两次真实失败。第一次在定向测试启动命令中使用了当前 Windows PowerShell 不支持的
+`Wait-Process -PassThru`，等待命令立即失败，pytest 随父控制台关闭而产生 stdout `OSError`；
+该轮没有被记为代码测试结果。修正为重定向 stdout/stderr 并对同一 PID 只调用一次兼容的
+`Wait-Process -Id` 后，12 项定向测试通过。第二次 full-budget fake nested-CV 测试为
+`12 passed, 1 failed`：outer refit 只运行一个已选 ranker family，但最初的 process-guard
+公式误按 inner 全网格的两个 family 计算 outer ranker/gate prediction。真实 synthetic
+execution 为 `13,350`，错误预期为 `14,100`。严格修正 outer 倍数后，13 项测试全部通过；
+最大 synthetic orchestration 精确闭合为 `570 fits / 96,000 trees / 13,350 private
+predictions`。随后 Stage 202-206 相关回归为 `53 passed in 3.18s`，Ruff、format、
+`git diff --check`、CLI help、strict Stage 205 artifact authorization 和 `pip check` 均通过。
+
+正式 train-only Stage 206 尚未启动。Windows 原生内存预检实测可用物理内存为
+`3,177,881,600 bytes = 2.960 GiB`，低于冻结的 4 GiB 门槛，因此当前按协议停止在运行前；
+没有放宽门槛、缩小 grid、结束用户进程或产生正式 Stage 206 metric/artifact。主要可清理
+占用来自飞书、Edge、微信/QQ；当前 Codex 进程不能结束，否则会中断任务。待用户清理或明确
+授权关闭指定应用且重新预检达到 4 GiB 后，才允许用一个 Python PID 和一次无轮询
+`Wait-Process` 启动正式运行。
